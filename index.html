@@ -8,6 +8,12 @@
   <!-- EasyMDE -->
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/easymde/dist/easymde.min.css">
   <script src="https://cdn.jsdelivr.net/npm/easymde/dist/easymde.min.js"></script>
+  <!-- Іконки для тулбару EasyMDE -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <!-- Markdown → HTML (повний контроль над рендером, потрібен для резолву зображень) -->
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <!-- Експорт активної сторінки в PDF -->
+  <script src="https://cdn.jsdelivr.net/npm/html2pdf.js@0.10.1/dist/html2pdf.bundle.min.js"></script>
 
   <style>
     :root {
@@ -90,7 +96,7 @@
 
     /* ===== Sidebar ===== */
     .sidebar {
-      width: 280px;
+      width: 300px;
       background: var(--panel);
       border-right: 1px solid var(--border);
       display: flex;
@@ -116,7 +122,7 @@
     }
 
     .file-item {
-      padding: 5px 12px 5px 16px;
+      padding: 5px 12px;
       cursor: pointer;
       white-space: nowrap;
       overflow: hidden;
@@ -124,11 +130,29 @@
       display: flex;
       align-items: center;
       gap: 6px;
+      border: 1px solid transparent;
+      border-radius: 4px;
+      margin: 0 4px;
     }
     .file-item:hover { background: #21262d; }
     .file-item.active { background: #1f6feb33; color: #58a6ff; }
-    .file-item.folder { color: var(--muted); font-weight: 500; }
-    .file-item .icon { width: 16px; text-align: center; opacity: 0.7; }
+    .file-item.folder { color: var(--text); font-weight: 500; }
+    .file-item.other { color: var(--muted); cursor: default; }
+    .file-item .icon { width: 16px; text-align: center; opacity: 0.8; flex-shrink: 0; }
+    .file-item .name { overflow: hidden; text-overflow: ellipsis; }
+    .file-item.dragging { opacity: 0.4; }
+    .file-item.drop-target { outline: 2px dashed #58a6ff; background: #1f6feb22; }
+    .folder-toggle { display: inline-block; width: 12px; text-align: center; opacity: 0.7; }
+    .tree-root-drop {
+      margin: 4px 8px 8px;
+      padding: 6px 10px;
+      border: 1px dashed var(--border);
+      border-radius: 6px;
+      font-size: 12px;
+      color: var(--muted);
+      text-align: center;
+    }
+    .tree-root-drop.drop-target { outline: 2px dashed #58a6ff; background: #1f6feb22; color: #58a6ff; }
 
     /* ===== Editor area ===== */
     .editor-area {
@@ -136,6 +160,7 @@
       display: flex;
       flex-direction: column;
       overflow: hidden;
+      position: relative;
     }
 
     .editor-toolbar {
@@ -146,6 +171,7 @@
       align-items: center;
       background: var(--panel);
       font-size: 13px;
+      flex-wrap: wrap;
     }
 
     .current-file {
@@ -161,6 +187,7 @@
       overflow: hidden;
       display: flex;
       flex-direction: column;
+      position: relative;
     }
 
     .EasyMDEContainer {
@@ -189,6 +216,70 @@
       color: var(--text) !important;
     }
 
+    /* ===== Прев'ю зображень: обгортка + ручка масштабування ===== */
+    .md-img-wrap {
+      position: relative;
+      display: inline-block;
+      max-width: 100%;
+      vertical-align: top;
+      line-height: 0;
+    }
+    .md-img-wrap img {
+      max-width: 100%;
+      display: block;
+      border-radius: 4px;
+      background: #21262d;
+      transition: opacity .15s;
+    }
+    .md-img-wrap.loading img { opacity: .35; }
+    .md-img-wrap.broken img { outline: 1px solid var(--danger); }
+    .md-img-resize-handle {
+      position: absolute;
+      right: 2px;
+      bottom: 2px;
+      width: 14px;
+      height: 14px;
+      background: var(--accent);
+      border: 2px solid #fff;
+      border-radius: 3px;
+      cursor: nwse-resize;
+      opacity: 0;
+      transition: opacity .15s;
+      touch-action: none;
+    }
+    .md-img-wrap:hover .md-img-resize-handle,
+    .md-img-wrap.resizing .md-img-resize-handle { opacity: 1; }
+    .md-img-size-badge {
+      position: absolute;
+      left: 2px;
+      bottom: 2px;
+      background: rgba(0,0,0,.7);
+      color: #fff;
+      font-size: 11px;
+      padding: 1px 5px;
+      border-radius: 3px;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity .15s;
+    }
+    .md-img-wrap.resizing .md-img-size-badge { opacity: 1; }
+
+    /* ===== Drop-зона для перетягування файлів із ОС ===== */
+    #editor-dropzone-overlay {
+      position: absolute;
+      inset: 0;
+      background: rgba(35,134,54,0.18);
+      border: 2px dashed var(--accent);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 15px;
+      font-weight: 500;
+      color: #fff;
+      pointer-events: none;
+      z-index: 20;
+    }
+
     /* Login overlay */
     #login-screen {
       position: fixed;
@@ -214,6 +305,51 @@
     .login-box button { width: 100%; padding: 10px; margin-top: 8px; }
 
     .hidden { display: none !important; }
+
+    /* ===== Стилі для контейнера, що йде в PDF (завжди світла "паперова" тема) ===== */
+    #pdf-export-container {
+      position: fixed;
+      left: -99999px;
+      top: 0;
+      width: 780px;
+      background: #ffffff;
+      color: #111111;
+      padding: 32px;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+      font-size: 14px;
+      line-height: 1.6;
+    }
+    #pdf-export-container h1, #pdf-export-container h2, #pdf-export-container h3,
+    #pdf-export-container h4, #pdf-export-container h5, #pdf-export-container h6 {
+      color: #0f172a;
+      margin: 1.2em 0 .5em;
+      line-height: 1.3;
+    }
+    #pdf-export-container h1 { font-size: 26px; border-bottom: 1px solid #e2e8f0; padding-bottom: 6px; }
+    #pdf-export-container h2 { font-size: 21px; border-bottom: 1px solid #e2e8f0; padding-bottom: 4px; }
+    #pdf-export-container h3 { font-size: 17px; }
+    #pdf-export-container p { margin: .6em 0; }
+    #pdf-export-container a { color: #1d4ed8; }
+    #pdf-export-container img { max-width: 100%; border-radius: 4px; }
+    #pdf-export-container code {
+      background: #f1f5f9; color: #b91c1c; padding: 1px 5px; border-radius: 4px;
+      font-family: "SFMono-Regular", Consolas, Menlo, monospace; font-size: 12.5px;
+    }
+    #pdf-export-container pre {
+      background: #0f172a; color: #e2e8f0; padding: 12px 14px; border-radius: 6px;
+      overflow-x: auto; margin: .8em 0;
+    }
+    #pdf-export-container pre code { background: none; color: inherit; padding: 0; }
+    #pdf-export-container blockquote {
+      border-left: 3px solid #cbd5e1; margin: .8em 0; padding: 2px 14px; color: #475569;
+    }
+    #pdf-export-container table { border-collapse: collapse; width: 100%; margin: .8em 0; }
+    #pdf-export-container th, #pdf-export-container td {
+      border: 1px solid #e2e8f0; padding: 6px 10px; text-align: left; font-size: 13px;
+    }
+    #pdf-export-container th { background: #f8fafc; }
+    #pdf-export-container ul, #pdf-export-container ol { padding-left: 1.4em; margin: .5em 0; }
+    #pdf-export-container hr { border: none; border-top: 1px solid #e2e8f0; margin: 1.2em 0; }
   </style>
 </head>
 <body>
@@ -264,23 +400,38 @@
       <div class="editor-toolbar">
         <span class="current-file" id="current-file">Файл не вибрано</span>
         <button id="btn-save" disabled>Зберегти</button>
+        <button class="secondary" id="btn-export-pdf" disabled title="Експорт активної сторінки у PDF">📄 PDF</button>
         <span id="save-status" class="status"></span>
       </div>
       <div id="editor-container">
         <textarea id="editor"></textarea>
+        <div id="editor-dropzone-overlay" class="hidden">Відпустіть, щоб додати зображення у файл</div>
       </div>
     </div>
   </div>
 
+  <input type="file" id="image-file-input" accept="image/*" multiple class="hidden" />
+
 <script>
   // ====================== STATE ======================
-  let token = sessionStorage.getItem('gh_token') || '';
-  let owner = sessionStorage.getItem('gh_owner') || '';
-  let repo  = sessionStorage.getItem('gh_repo')  || '';
+  let token  = sessionStorage.getItem('gh_token')  || '';
+  let owner  = sessionStorage.getItem('gh_owner')  || '';
+  let repo   = sessionStorage.getItem('gh_repo')   || '';
+  let branch = sessionStorage.getItem('gh_branch') || '';
   let currentPath = null;
   let currentSha  = null;
   let easyMDE = null;
-  let fileTreeCache = null;
+  let allFilesCache = [];       // весь список файлів репо (для дерева й переміщень)
+  let collapsedFolders = new Set();
+  let imageCache = new Map();   // repo-path (без "/") -> data: URL
+  let previewRenderToken = 0;   // захист від "гонки" асинхронних рендерів прев'ю
+
+  const IMAGE_EXT = { png:'image/png', jpg:'image/jpeg', jpeg:'image/jpeg', gif:'image/gif',
+                       svg:'image/svg+xml', webp:'image/webp', bmp:'image/bmp', ico:'image/x-icon' };
+  const TRANSPARENT_PIXEL = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==';
+
+  // Знаходить або markdown-зображення ![alt](src "title"), або сирий <img ...> тег
+  const IMG_TOKEN_RE = /!\[([^\]]*)\]\(\s*(\S+?)(?:\s+"([^"]*)")?\s*\)|<img\b[^>]*\/?>/gi;
 
   // ====================== INIT ======================
   if (token && owner && repo) {
@@ -302,11 +453,14 @@
     try {
       const res = await ghFetch(`/repos/${owner}/${repo}`);
       if (!res.ok) throw new Error(await res.text());
-      
+      const repoData = await res.json();
+      branch = repoData.default_branch || 'main';
+
       sessionStorage.setItem('gh_token', token);
       sessionStorage.setItem('gh_owner', owner);
       sessionStorage.setItem('gh_repo', repo);
-      
+      sessionStorage.setItem('gh_branch', branch);
+
       showApp();
       loadTree();
     } catch (e) {
@@ -321,7 +475,14 @@
 
   document.getElementById('btn-refresh').onclick = () => loadTree();
   document.getElementById('btn-save').onclick = saveFile;
+  document.getElementById('btn-export-pdf').onclick = exportCurrentPageToPdf;
   document.getElementById('btn-new-file').onclick = createNewFile;
+
+  document.getElementById('image-file-input').onchange = async (e) => {
+    const files = Array.from(e.target.files || []);
+    e.target.value = '';
+    for (const f of files) await uploadImage(f);
+  };
 
   // ====================== UI HELPERS ======================
   function showApp() {
@@ -329,8 +490,7 @@
     document.getElementById('app-header').classList.remove('hidden');
     document.getElementById('app-main').classList.remove('hidden');
     document.getElementById('repo-label').textContent = `${owner}/${repo}`;
-    
-    // Init EasyMDE
+
     if (!easyMDE) {
       easyMDE = new EasyMDE({
         element: document.getElementById('editor'),
@@ -340,7 +500,13 @@
         toolbar: [
           'bold', 'italic', 'heading', '|',
           'quote', 'unordered-list', 'ordered-list', '|',
-          'link', 'image', '|',
+          'link', 'image',
+          {
+            name: 'upload-image',
+            action: () => document.getElementById('image-file-input').click(),
+            className: 'fa fa-upload',
+            title: 'Завантажити зображення у репозиторій'
+          }, '|',
           'preview', 'side-by-side', 'fullscreen', '|',
           'guide'
         ],
@@ -348,17 +514,14 @@
         renderingConfig: {
           singleLineBreaks: false,
           codeSyntaxHighlighting: true
+        },
+        previewRender: function (plainText, previewEl) {
+          renderPreviewAsync(plainText, previewEl);
+          return previewEl.innerHTML || '<p style="color:var(--muted)">Завантаження прев’ю…</p>';
         }
       });
 
-      // Image upload via toolbar button + drag-drop
-      easyMDE.codemirror.on('drop', async (cm, e) => {
-        const files = e.dataTransfer.files;
-        if (files.length && files[0].type.startsWith('image/')) {
-          e.preventDefault();
-          await uploadImage(files[0]);
-        }
-      });
+      setupDropzone();
     }
   }
 
@@ -374,6 +537,51 @@
     el.className = 'status ' + (isError ? 'err' : 'ok');
   }
 
+  // ====================== ЗАГАЛЬНІ УТИЛІТИ ШЛЯХІВ ======================
+  function dirnameOf(path) {
+    if (!path || !path.includes('/')) return '';
+    return path.slice(0, path.lastIndexOf('/'));
+  }
+  function basenameOf(path) {
+    return path.includes('/') ? path.slice(path.lastIndexOf('/') + 1) : path;
+  }
+  function extOf(path) {
+    const b = basenameOf(path);
+    return b.includes('.') ? b.slice(b.lastIndexOf('.') + 1).toLowerCase() : '';
+  }
+  function isImagePath(path) {
+    return Object.prototype.hasOwnProperty.call(IMAGE_EXT, extOf(path));
+  }
+  function guessMime(path) {
+    return IMAGE_EXT[extOf(path)] || 'application/octet-stream';
+  }
+  function escapeRegExp(str) {
+    return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  }
+  function escapeAttr(str) {
+    return String(str == null ? '' : str)
+      .replace(/&/g, '&amp;').replace(/"/g, '&quot;')
+      .replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+  // Розв'язує відносний шлях (./x.png, ../a/b.png) відносно теки baseDir
+  function resolveRelativePath(baseDir, relPath) {
+    const stack = baseDir ? baseDir.split('/') : [];
+    relPath.split('/').forEach(part => {
+      if (part === '' || part === '.') return;
+      if (part === '..') stack.pop();
+      else stack.push(part);
+    });
+    return stack.join('/');
+  }
+  function extractImgAttrs(tagHtml) {
+    const div = document.createElement('div');
+    div.innerHTML = tagHtml;
+    const img = div.querySelector('img');
+    return img
+      ? { src: img.getAttribute('src') || '', alt: img.getAttribute('alt') || '', width: img.getAttribute('width') || '' }
+      : { src: '', alt: '', width: '' };
+  }
+
   // ====================== GITHUB API ======================
   async function ghFetch(path, options = {}) {
     const url = path.startsWith('http') ? path : `https://api.github.com${path}`;
@@ -386,71 +594,218 @@
     return fetch(url, { ...options, headers });
   }
 
-  // ====================== FILE TREE ======================
+  // Дістає вміст файлу (base64) незалежно від розміру (Contents API обмежений 1MB — падаємо на Git Blobs API)
+  async function fetchFileB64(path) {
+    const res = await ghFetch(`/repos/${owner}/${repo}/contents/${encodeURIComponent(path)}`);
+    if (!res.ok) throw new Error(await res.text());
+    const data = await res.json();
+    let b64 = data.content;
+    if (!b64 && data.sha) {
+      const blobRes = await ghFetch(`/repos/${owner}/${repo}/git/blobs/${data.sha}`);
+      if (blobRes.ok) {
+        const blobData = await blobRes.json();
+        b64 = blobData.content;
+      }
+    }
+    if (!b64) throw new Error('Не вдалося прочитати вміст файлу (можливо, він завеликий)');
+    return { b64: b64.replace(/\n/g, ''), sha: data.sha };
+  }
+
+  async function fetchFileAsDataUrl(path) {
+    try {
+      const { b64 } = await fetchFileB64(path);
+      return `data:${guessMime(path)};base64,${b64}`;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  async function putFile(path, contentB64, message, sha) {
+    const body = { message, content: contentB64 };
+    if (sha) body.sha = sha;
+    const res = await ghFetch(`/repos/${owner}/${repo}/contents/${encodeURIComponent(path)}`, {
+      method: 'PUT',
+      body: JSON.stringify(body)
+    });
+    if (!res.ok) {
+      let msg;
+      try { msg = (await res.json()).message; } catch (_) { msg = await res.text(); }
+      throw new Error(msg || 'Невідома помилка запису');
+    }
+    return res.json();
+  }
+
+  async function deleteFile(path, sha, message) {
+    const res = await ghFetch(`/repos/${owner}/${repo}/contents/${encodeURIComponent(path)}`, {
+      method: 'DELETE',
+      body: JSON.stringify({ message, sha })
+    });
+    if (!res.ok) {
+      let msg;
+      try { msg = (await res.json()).message; } catch (_) { msg = await res.text(); }
+      throw new Error(msg || 'Невідома помилка видалення');
+    }
+    return res.json();
+  }
+
+  // ====================== ФАЙЛОВЕ ДЕРЕВО ======================
   async function loadTree() {
     const treeEl = document.getElementById('file-tree');
     treeEl.innerHTML = '<div style="padding:12px;color:var(--muted)">Завантаження...</div>';
 
     try {
-      // Отримуємо дерево всього репо (recursive)
-      const res = await ghFetch(`/repos/${owner}/${repo}/git/trees/HEAD?recursive=1`);
+      const ref = branch || 'HEAD';
+      const res = await ghFetch(`/repos/${owner}/${repo}/git/trees/${encodeURIComponent(ref)}?recursive=1`);
       if (!res.ok) throw new Error(await res.text());
       const data = await res.json();
 
-      // Фільтруємо тільки .md і папки, які їх містять
-      const mdFiles = data.tree
-        .filter(item => item.type === 'blob' && item.path.endsWith('.md'))
+      allFilesCache = data.tree
+        .filter(item => item.type === 'blob')
+        .map(item => ({ path: item.path, sha: item.sha }))
         .sort((a, b) => a.path.localeCompare(b.path));
 
-      fileTreeCache = mdFiles;
-      renderTree(mdFiles);
+      renderTree(allFilesCache);
     } catch (e) {
       treeEl.innerHTML = `<div style="padding:12px;color:#f85149">Помилка: ${e.message}</div>`;
     }
+  }
+
+  function buildTreeStructure(files) {
+    const root = { name: '', path: '', type: 'folder', children: {} };
+    files.forEach(item => {
+      const parts = item.path.split('/');
+      let node = root;
+      for (let i = 0; i < parts.length - 1; i++) {
+        const p = parts[i];
+        if (!node.children[p]) {
+          node.children[p] = { name: p, path: (node.path ? node.path + '/' : '') + p, type: 'folder', children: {} };
+        }
+        node = node.children[p];
+      }
+      const fname = parts[parts.length - 1];
+      node.children[fname] = { name: fname, path: item.path, type: 'file', sha: item.sha };
+    });
+    return root;
   }
 
   function renderTree(files) {
     const treeEl = document.getElementById('file-tree');
     treeEl.innerHTML = '';
 
-    // Групуємо по папках для краси
-    const folders = {};
-    files.forEach(f => {
-      const parts = f.path.split('/');
-      const name = parts.pop();
-      const folder = parts.join('/') || '.';
-      if (!folders[folder]) folders[folder] = [];
-      folders[folder].push({ ...f, name });
+    // Зона для перетягування у корінь репозиторію
+    const rootDrop = document.createElement('div');
+    rootDrop.className = 'tree-root-drop';
+    rootDrop.textContent = '⬆ перетягніть сюди, щоб перемістити в корінь';
+    rootDrop.dataset.dropFolder = '';
+    treeEl.appendChild(rootDrop);
+    wireDropTarget(rootDrop, '');
+
+    const root = buildTreeStructure(files);
+    renderTreeLevel(root, treeEl, 0);
+  }
+
+  function renderTreeLevel(node, container, depth) {
+    const folderNames = Object.keys(node.children)
+      .filter(k => node.children[k].type === 'folder').sort();
+    const fileNames = Object.keys(node.children)
+      .filter(k => node.children[k].type === 'file').sort();
+
+    folderNames.forEach(name => {
+      const folder = node.children[name];
+      const collapsed = collapsedFolders.has(folder.path);
+
+      const el = document.createElement('div');
+      el.className = 'file-item folder';
+      el.style.paddingLeft = (12 + depth * 14) + 'px';
+      el.dataset.path = folder.path;
+      el.innerHTML = `<span class="folder-toggle">${collapsed ? '▸' : '▾'}</span><span class="icon">📁</span><span class="name">${escapeAttr(name)}</span>`;
+      el.onclick = () => {
+        if (collapsedFolders.has(folder.path)) collapsedFolders.delete(folder.path);
+        else collapsedFolders.add(folder.path);
+        renderTree(allFilesCache);
+      };
+      wireDropTarget(el, folder.path);
+      container.appendChild(el);
+
+      if (!collapsed) {
+        renderTreeLevel(folder, container, depth + 1);
+      }
     });
 
-    Object.keys(folders).sort().forEach(folder => {
-      if (folder !== '.') {
-        const folderEl = document.createElement('div');
-        folderEl.className = 'file-item folder';
-        folderEl.innerHTML = `<span class="icon">📁</span> ${folder}`;
-        treeEl.appendChild(folderEl);
+    fileNames.forEach(name => {
+      const file = node.children[name];
+      const isMd = extOf(file.path) === 'md';
+      const isImg = isImagePath(file.path);
+      const icon = isMd ? '📄' : (isImg ? '🖼️' : '📦');
+
+      const el = document.createElement('div');
+      el.className = 'file-item' + (isMd || isImg ? '' : ' other');
+      el.style.paddingLeft = (12 + (depth + 1) * 14) + 'px';
+      el.dataset.path = file.path;
+      el.title = file.path;
+      el.innerHTML = `<span class="icon">${icon}</span><span class="name">${escapeAttr(name)}</span>`;
+
+      if (isMd) {
+        el.onclick = () => openFile(file.path);
+      } else if (isImg) {
+        el.onclick = () => previewImageFile(file.path);
       }
 
-      folders[folder].forEach(file => {
-        const el = document.createElement('div');
-        el.className = 'file-item';
-        el.dataset.path = file.path;
-        el.innerHTML = `<span class="icon">📄</span> ${file.name}`;
-        el.onclick = () => openFile(file.path);
-        treeEl.appendChild(el);
+      el.draggable = true;
+      el.addEventListener('dragstart', (e) => {
+        e.dataTransfer.setData('text/plain', file.path);
+        e.dataTransfer.effectAllowed = 'move';
+        el.classList.add('dragging');
       });
+      el.addEventListener('dragend', () => el.classList.remove('dragging'));
+
+      if (currentPath === file.path) el.classList.add('active');
+
+      container.appendChild(el);
     });
   }
 
-  // ====================== OPEN / SAVE ======================
+  function wireDropTarget(el, folderPath) {
+    el.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      el.classList.add('drop-target');
+    });
+    el.addEventListener('dragleave', () => el.classList.remove('drop-target'));
+    el.addEventListener('drop', async (e) => {
+      e.preventDefault();
+      el.classList.remove('drop-target');
+      const srcPath = e.dataTransfer.getData('text/plain');
+      if (!srcPath) return;
+      await moveFile(srcPath, folderPath);
+    });
+  }
+
+  function previewImageFile(path) {
+    const overlay = document.createElement('div');
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.8);z-index:200;display:flex;align-items:center;justify-content:center;cursor:zoom-out;';
+    overlay.innerHTML = `<div style="max-width:90vw;max-height:90vh;text-align:center;">
+      <div style="color:#8b949e;font-size:12px;margin-bottom:8px;">${escapeAttr(path)}</div>
+      <img style="max-width:90vw;max-height:80vh;border-radius:6px;" />
+    </div>`;
+    overlay.onclick = () => overlay.remove();
+    document.body.appendChild(overlay);
+    fetchFileAsDataUrl(path).then(url => {
+      const img = overlay.querySelector('img');
+      if (url) img.src = url;
+      else overlay.querySelector('div div').textContent = 'Не вдалося завантажити зображення: ' + path;
+    });
+  }
+
+  // ====================== ВІДКРИТТЯ / ЗБЕРЕЖЕННЯ ======================
   async function openFile(path) {
-    // Підсвітка
     document.querySelectorAll('.file-item').forEach(el => el.classList.remove('active'));
-    const active = document.querySelector(`.file-item[data-path="${path}"]`);
+    const active = document.querySelector(`.file-item[data-path="${CSS.escape(path)}"]`);
     if (active) active.classList.add('active');
 
     document.getElementById('current-file').textContent = path;
     document.getElementById('btn-save').disabled = true;
+    document.getElementById('btn-export-pdf').disabled = true;
     setSaveStatus('Завантаження...', false);
 
     try {
@@ -465,6 +820,7 @@
       easyMDE.value(content);
 
       document.getElementById('btn-save').disabled = false;
+      document.getElementById('btn-export-pdf').disabled = false;
       setSaveStatus('Готово', false);
     } catch (e) {
       setSaveStatus('Помилка: ' + e.message, true);
@@ -481,21 +837,7 @@
     setSaveStatus('Збереження...', false);
 
     try {
-      const res = await ghFetch(`/repos/${owner}/${repo}/contents/${encodeURIComponent(currentPath)}`, {
-        method: 'PUT',
-        body: JSON.stringify({
-          message: `Update ${currentPath}`,
-          content: b64,
-          sha: currentSha
-        })
-      });
-
-      if (!res.ok) {
-        const err = await res.json();
-        throw new Error(err.message || JSON.stringify(err));
-      }
-
-      const data = await res.json();
+      const data = await putFile(currentPath, b64, `Update ${currentPath}`, currentSha);
       currentSha = data.content.sha;
       setSaveStatus('Збережено ✓', false);
     } catch (e) {
@@ -505,7 +847,7 @@
     }
   }
 
-  // ====================== NEW FILE ======================
+  // ====================== НОВИЙ ФАЙЛ ======================
   async function createNewFile() {
     const path = prompt('Шлях нового файлу (наприклад docs/new.md):');
     if (!path || !path.endsWith('.md')) {
@@ -514,15 +856,7 @@
     }
 
     try {
-      const res = await ghFetch(`/repos/${owner}/${repo}/contents/${encodeURIComponent(path)}`, {
-        method: 'PUT',
-        body: JSON.stringify({
-          message: `Create ${path}`,
-          content: btoa(unescape(encodeURIComponent('# New file\n')))
-        })
-      });
-
-      if (!res.ok) throw new Error(await res.text());
+      await putFile(path, btoa(unescape(encodeURIComponent('# New file\n'))), `Create ${path}`);
       await loadTree();
       openFile(path);
     } catch (e) {
@@ -530,7 +864,132 @@
     }
   }
 
-  // ====================== IMAGE UPLOAD ======================
+  // ====================== ПЕРЕМІЩЕННЯ ФАЙЛІВ МІЖ ПАПКАМИ ======================
+  async function moveFile(oldPath, targetFolder) {
+    const filename = basenameOf(oldPath);
+    const newPath = targetFolder ? `${targetFolder}/${filename}` : filename;
+    if (newPath === oldPath) return;
+
+    setSaveStatus(`Переміщення ${oldPath} → ${newPath}...`, false);
+    try {
+      const { b64, sha } = await fetchFileB64(oldPath);
+      let finalB64 = b64;
+
+      // Якщо переміщуємо .md файл — перетворюємо його ВІДНОСНІ посилання на кореневі,
+      // щоб вони лишились коректними незалежно від нової теки.
+      if (extOf(oldPath) === 'md') {
+        try {
+          const text = decodeURIComponent(escape(atob(b64)));
+          const fixed = rewriteRelativeLinksToAbsolute(text, dirnameOf(oldPath));
+          finalB64 = btoa(unescape(encodeURIComponent(fixed)));
+        } catch (_) { /* лишаємо як є, якщо не текстовий вміст */ }
+      }
+
+      await putFile(newPath, finalB64, `Move ${oldPath} to ${newPath}`);
+      await deleteFile(oldPath, sha, `Remove ${oldPath} (moved to ${newPath})`);
+
+      // Регенерація посилань в усіх інших .md файлах репозиторію
+      const updated = await updateReferencesEverywhere(oldPath, newPath);
+
+      if (currentPath === oldPath) {
+        currentPath = newPath;
+        document.getElementById('current-file').textContent = newPath;
+      }
+      if (currentPath && updated.includes(currentPath)) {
+        await openFile(currentPath); // підтягнути свіжий вміст/sha після автозаміни посилань
+      }
+
+      imageCache.delete(oldPath);
+      await loadTree();
+      setSaveStatus(`Переміщено: ${oldPath} → ${newPath}` + (updated.length ? ` (оновлено посилань у ${updated.length} файл(ах))` : ''), false);
+    } catch (e) {
+      setSaveStatus('Помилка переміщення: ' + e.message, true);
+    }
+  }
+
+  // Перетворює відносні markdown-посилання/зображення на кореневі ("/шлях") — викликається при переміщенні .md файлу
+  function rewriteRelativeLinksToAbsolute(text, oldDir) {
+    return text.replace(IMG_TOKEN_RE, (full, alt, src, title) => {
+      const isMdImg = src !== undefined;
+      const attrs = isMdImg ? { src, alt: alt || '' } : extractImgAttrs(full);
+      const s = attrs.src;
+      if (!s || s.startsWith('/') || /^[a-z][a-z0-9+.-]*:/i.test(s) || s.startsWith('#')) return full;
+      const abs = '/' + resolveRelativePath(oldDir, s);
+      if (isMdImg) {
+        return `![${alt || ''}](${abs}${title ? ` "${title}"` : ''})`;
+      }
+      const div = document.createElement('div');
+      div.innerHTML = full;
+      div.querySelector('img').setAttribute('src', abs);
+      return div.innerHTML;
+    });
+  }
+
+  // Шукає й замінює в УСІХ .md файлах репо кореневі посилання, що вказують на старий шлях
+  async function updateReferencesEverywhere(oldPath, newPath) {
+    const updatedFiles = [];
+    const token = '/' + oldPath;
+    const re = new RegExp(escapeRegExp(token) + '(?=[)"\'\\s]|$)', 'g');
+
+    const mdFiles = allFilesCache.filter(f => extOf(f.path) === 'md' && f.path !== newPath);
+    for (const f of mdFiles) {
+      try {
+        const { b64, sha } = await fetchFileB64(f.path);
+        const text = decodeURIComponent(escape(atob(b64)));
+        if (!re.test(text)) continue;
+        re.lastIndex = 0;
+        const newText = text.replace(re, '/' + newPath);
+        const newB64 = btoa(unescape(encodeURIComponent(newText)));
+        await putFile(f.path, newB64, `Update links after moving ${oldPath} to ${newPath}`, sha);
+        updatedFiles.push(f.path);
+      } catch (e) {
+        console.warn('Не вдалося оновити посилання у', f.path, e);
+      }
+    }
+    return updatedFiles;
+  }
+
+  // ====================== ЗАВАНТАЖЕННЯ ЗОБРАЖЕНЬ (drag&drop / вибір файлу) ======================
+  function setupDropzone() {
+    const zone = document.getElementById('editor-container');
+    const overlay = document.getElementById('editor-dropzone-overlay');
+    let dragCounter = 0;
+
+    zone.addEventListener('dragenter', (e) => {
+      if (!hasFiles(e)) return;
+      e.preventDefault();
+      dragCounter++;
+      overlay.classList.remove('hidden');
+    });
+    zone.addEventListener('dragover', (e) => {
+      if (!hasFiles(e)) return;
+      e.preventDefault();
+    });
+    zone.addEventListener('dragleave', (e) => {
+      if (!hasFiles(e)) return;
+      e.preventDefault();
+      dragCounter = Math.max(0, dragCounter - 1);
+      if (dragCounter === 0) overlay.classList.add('hidden');
+    });
+    zone.addEventListener('drop', async (e) => {
+      if (!hasFiles(e)) return;
+      e.preventDefault();
+      dragCounter = 0;
+      overlay.classList.add('hidden');
+
+      if (!currentPath) {
+        alert('Спочатку відкрийте .md файл');
+        return;
+      }
+      const files = Array.from(e.dataTransfer.files || []).filter(f => f.type.startsWith('image/'));
+      for (const f of files) await uploadImage(f);
+    });
+
+    function hasFiles(e) {
+      return e.dataTransfer && Array.from(e.dataTransfer.types || []).includes('Files');
+    }
+  }
+
   async function uploadImage(file) {
     if (!currentPath) {
       alert('Спочатку відкрийте .md файл');
@@ -546,37 +1005,196 @@
       for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
       const b64 = btoa(binary);
 
-      // Шлях для картинки
-      const ext = file.name.split('.').pop().toLowerCase();
       const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
-      const imgPath = `assets/${Date.now()}_${safeName}`;
+      const folder = dirnameOf(currentPath) ? `${dirnameOf(currentPath)}/assets` : 'assets';
+      const imgPath = `${folder}/${Date.now()}_${safeName}`;
 
-      // Створюємо файл картинки
-      const res = await ghFetch(`/repos/${owner}/${repo}/contents/${encodeURIComponent(imgPath)}`, {
-        method: 'PUT',
-        body: JSON.stringify({
-          message: `Add image ${imgPath}`,
-          content: b64
-        })
-      });
+      await putFile(imgPath, b64, `Add image ${imgPath}`);
 
-      if (!res.ok) throw new Error(await res.text());
+      // Кешуємо прев'ю одразу з локального файлу — не чекаємо на повторний запит до API
+      imageCache.set(imgPath, `data:${file.type || guessMime(imgPath)};base64,${b64}`);
 
-      // Вставляємо в редактор
-      const cm = easyMDE.codemirror;
-      const doc = cm.getDoc();
-      const cursor = doc.getCursor();
-      doc.replaceRange(`![${file.name}](/${imgPath})`, cursor);
+      insertMarkdownAtCursor(`<img src="/${imgPath}" alt="${file.name.replace(/"/g, '')}">`);
 
-      setSaveStatus('Картинку додано', false);
+      await loadTree();
+      setSaveStatus('Картинку додано ✓', false);
     } catch (e) {
       setSaveStatus('Помилка картинки: ' + e.message, true);
     }
   }
 
-  // Додаємо кнопку завантаження картинки в тулбар EasyMDE (після ініціалізації)
-  // EasyMDE вже має кнопку image, але вона тільки вставляє markdown.
-  // Для реального upload використовуємо drop або можна розширити.
+  function insertMarkdownAtCursor(text) {
+    const cm = easyMDE.codemirror;
+    const doc = cm.getDoc();
+    const cursor = doc.getCursor();
+    const line = doc.getLine(cursor.line) || '';
+    const prefix = (cursor.ch === 0 || line.trim() === '') ? '' : '\n';
+    doc.replaceRange(prefix + text + '\n', cursor);
+    cm.focus();
+  }
+
+  // ====================== РЕНДЕР ПРЕВ'Ю: markdown → HTML з резолвом зображень ======================
+  // Перетворює markdown-текст на HTML, де кожне зображення позначене data-md-line/data-md-occ/data-md-src
+  // і поки що показує прозорий піксель-заглушку — реальне джерело підвантажується асинхронно.
+  function markdownToCanonicalHtml(text) {
+    const lineOcc = {};
+    const withCanonicalImages = text.replace(IMG_TOKEN_RE, (full, altG, srcG, titleG, offset) => {
+      const isMdImg = srcG !== undefined;
+      const attrs = isMdImg ? { src: srcG, alt: altG || '', width: '' } : extractImgAttrs(full);
+      const ln = (text.slice(0, offset).match(/\n/g) || []).length;
+      const occ = lineOcc[ln] || 0;
+      lineOcc[ln] = occ + 1;
+
+      const widthPart = attrs.width ? ` width="${escapeAttr(attrs.width)}" style="width:${parseInt(attrs.width, 10)}px;height:auto;"` : '';
+      return `<span class="md-img-wrap loading"><img data-md-line="${ln}" data-md-occ="${occ}" data-md-src="${escapeAttr(attrs.src)}" alt="${escapeAttr(attrs.alt)}"${widthPart} src="${TRANSPARENT_PIXEL}"><span class="md-img-resize-handle"></span><span class="md-img-size-badge"></span></span>`;
+    });
+    return marked.parse(withCanonicalImages, { gfm: true, breaks: false });
+  }
+
+  async function resolveImageSrc(origSrc) {
+    if (!origSrc) return null;
+    if (origSrc.startsWith('data:')) return origSrc;
+    if (/^[a-z][a-z0-9+.-]*:/i.test(origSrc)) return origSrc; // http(s):// та інші зовнішні схеми
+
+    const path = origSrc.startsWith('/')
+      ? origSrc.slice(1)
+      : resolveRelativePath(dirnameOf(currentPath || ''), origSrc);
+
+    if (imageCache.has(path)) return imageCache.get(path);
+    const dataUrl = await fetchFileAsDataUrl(path);
+    if (dataUrl) imageCache.set(path, dataUrl);
+    return dataUrl;
+  }
+
+  async function renderPreviewAsync(text, previewEl) {
+    const myToken = ++previewRenderToken;
+    const html = markdownToCanonicalHtml(text);
+    if (myToken !== previewRenderToken) return;
+    previewEl.innerHTML = html;
+
+    const wraps = Array.from(previewEl.querySelectorAll('.md-img-wrap'));
+    attachResizeHandles(previewEl);
+
+    await Promise.all(wraps.map(async (wrap) => {
+      const img = wrap.querySelector('img');
+      const orig = img.getAttribute('data-md-src');
+      const url = await resolveImageSrc(orig).catch(() => null);
+      if (myToken !== previewRenderToken) return;
+      if (url) {
+        img.src = url;
+        wrap.classList.remove('loading');
+      } else {
+        wrap.classList.remove('loading');
+        wrap.classList.add('broken');
+        img.alt = '⚠ не вдалося завантажити: ' + orig;
+      }
+    }));
+  }
+
+  function attachResizeHandles(previewEl) {
+    previewEl.querySelectorAll('.md-img-wrap').forEach((wrap) => {
+      const img = wrap.querySelector('img');
+      const handle = wrap.querySelector('.md-img-resize-handle');
+      const badge = wrap.querySelector('.md-img-size-badge');
+      if (!handle || handle.dataset.wired) return;
+      handle.dataset.wired = '1';
+
+      handle.addEventListener('pointerdown', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const startX = e.clientX;
+        const startWidth = img.getBoundingClientRect().width;
+        wrap.classList.add('resizing');
+        handle.setPointerCapture(e.pointerId);
+
+        function onMove(ev) {
+          const w = Math.max(20, Math.round(startWidth + (ev.clientX - startX)));
+          img.style.width = w + 'px';
+          img.style.height = 'auto';
+          badge.textContent = w + 'px';
+        }
+        function onUp() {
+          handle.removeEventListener('pointermove', onMove);
+          handle.removeEventListener('pointerup', onUp);
+          wrap.classList.remove('resizing');
+          const finalWidth = Math.max(20, Math.round(img.getBoundingClientRect().width));
+          commitImageWidth(img, finalWidth);
+        }
+        handle.addEventListener('pointermove', onMove);
+        handle.addEventListener('pointerup', onUp);
+      });
+    });
+  }
+
+  function commitImageWidth(imgEl, width) {
+    const lineIndex = parseInt(imgEl.getAttribute('data-md-line'), 10);
+    const occ = parseInt(imgEl.getAttribute('data-md-occ'), 10);
+    const src = imgEl.getAttribute('data-md-src') || '';
+    const alt = imgEl.getAttribute('alt') || '';
+    setImageWidthInSource(lineIndex, occ, src, alt, width);
+  }
+
+  function setImageWidthInSource(lineIndex, occIndex, src, alt, width) {
+    const cm = easyMDE.codemirror;
+    const line = cm.getLine(lineIndex);
+    if (line === undefined) return;
+
+    let count = -1;
+    const newLine = line.replace(IMG_TOKEN_RE, (full, altG, srcG, titleG) => {
+      count++;
+      if (count !== occIndex) return full;
+      return `<img src="${escapeAttr(src)}" alt="${escapeAttr(alt)}" width="${width}">`;
+    });
+
+    if (newLine !== line) {
+      cm.replaceRange(newLine, { line: lineIndex, ch: 0 }, { line: lineIndex, ch: line.length });
+    }
+  }
+
+  // ====================== ЕКСПОРТ АКТИВНОЇ СТОРІНКИ У PDF ======================
+  async function exportCurrentPageToPdf() {
+    if (!currentPath) return;
+    const btn = document.getElementById('btn-export-pdf');
+    btn.disabled = true;
+    setSaveStatus('Підготовка PDF...', false);
+
+    const container = document.createElement('div');
+    container.id = 'pdf-export-container';
+    document.body.appendChild(container);
+
+    try {
+      const text = easyMDE.value();
+      container.innerHTML = markdownToCanonicalHtml(text);
+
+      const wraps = Array.from(container.querySelectorAll('.md-img-wrap'));
+      await Promise.all(wraps.map(async (wrap) => {
+        const img = wrap.querySelector('img');
+        const orig = img.getAttribute('data-md-src');
+        const url = await resolveImageSrc(orig).catch(() => null);
+        if (url) img.src = url;
+        else img.alt = '[зображення недоступне: ' + orig + ']';
+        img.removeAttribute('data-md-src');
+      }));
+
+      const filename = (basenameOf(currentPath) || 'document').replace(/\.md$/i, '') + '.pdf';
+
+      await html2pdf().set({
+        margin: 10,
+        filename,
+        image: { type: 'jpeg', quality: 0.95 },
+        html2canvas: { scale: 2, useCORS: true, backgroundColor: '#ffffff' },
+        jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
+        pagebreak: { mode: ['css', 'legacy'] }
+      }).from(container).save();
+
+      setSaveStatus('PDF експортовано ✓', false);
+    } catch (e) {
+      setSaveStatus('Помилка PDF: ' + e.message, true);
+    } finally {
+      container.remove();
+      btn.disabled = false;
+    }
+  }
 </script>
 </body>
-</html> 
+</html>
