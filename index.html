@@ -1,0 +1,582 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MD Editor — GitHub</title>
+
+  <!-- EasyMDE -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/easymde/dist/easymde.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/easymde/dist/easymde.min.js"></script>
+
+  <style>
+    :root {
+      --bg: #0f1115;
+      --panel: #161b22;
+      --border: #30363d;
+      --text: #e6edf3;
+      --muted: #8b949e;
+      --accent: #238636;
+      --accent-hover: #2ea043;
+      --danger: #da3633;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* ===== Header ===== */
+    header {
+      background: var(--panel);
+      border-bottom: 1px solid var(--border);
+      padding: 10px 16px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    header h1 {
+      font-size: 16px;
+      font-weight: 600;
+      margin-right: auto;
+    }
+
+    input, select, button {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 6px 10px;
+      border-radius: 6px;
+      font-size: 13px;
+    }
+
+    input { min-width: 180px; }
+    input:focus, select:focus { outline: 1px solid #58a6ff; }
+
+    button {
+      cursor: pointer;
+      background: var(--accent);
+      border-color: var(--accent);
+      font-weight: 500;
+    }
+    button:hover { background: var(--accent-hover); }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    button.secondary { background: transparent; border-color: var(--border); }
+    button.secondary:hover { background: #21262d; }
+    button.danger { background: var(--danger); border-color: var(--danger); }
+
+    .status {
+      font-size: 12px;
+      color: var(--muted);
+      margin-left: 8px;
+    }
+    .status.ok { color: #3fb950; }
+    .status.err { color: #f85149; }
+
+    /* ===== Layout ===== */
+    .main {
+      flex: 1;
+      display: flex;
+      overflow: hidden;
+    }
+
+    /* ===== Sidebar ===== */
+    .sidebar {
+      width: 280px;
+      background: var(--panel);
+      border-right: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    .sidebar-header {
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--border);
+      font-size: 13px;
+      color: var(--muted);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .file-tree {
+      flex: 1;
+      overflow-y: auto;
+      padding: 8px 0;
+      font-size: 13px;
+    }
+
+    .file-item {
+      padding: 5px 12px 5px 16px;
+      cursor: pointer;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .file-item:hover { background: #21262d; }
+    .file-item.active { background: #1f6feb33; color: #58a6ff; }
+    .file-item.folder { color: var(--muted); font-weight: 500; }
+    .file-item .icon { width: 16px; text-align: center; opacity: 0.7; }
+
+    /* ===== Editor area ===== */
+    .editor-area {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    .editor-toolbar {
+      padding: 8px 12px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      background: var(--panel);
+      font-size: 13px;
+    }
+
+    .current-file {
+      color: var(--muted);
+      margin-right: auto;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    #editor-container {
+      flex: 1;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .EasyMDEContainer {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+    }
+    .EasyMDEContainer .CodeMirror {
+      flex: 1;
+      border: none;
+      background: var(--bg);
+      color: var(--text);
+    }
+    .editor-toolbar {
+      background: var(--panel) !important;
+      border-color: var(--border) !important;
+    }
+    .editor-toolbar button {
+      color: var(--text) !important;
+    }
+    .editor-toolbar button:hover {
+      background: #21262d !important;
+    }
+    .editor-preview {
+      background: var(--bg) !important;
+      color: var(--text) !important;
+    }
+
+    /* Login overlay */
+    #login-screen {
+      position: fixed;
+      inset: 0;
+      background: var(--bg);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 100;
+    }
+    .login-box {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 32px;
+      width: 100%;
+      max-width: 420px;
+    }
+    .login-box h2 { margin-bottom: 8px; font-size: 20px; }
+    .login-box p { color: var(--muted); font-size: 13px; margin-bottom: 20px; line-height: 1.5; }
+    .login-box label { display: block; font-size: 13px; margin-bottom: 4px; color: var(--muted); }
+    .login-box input { width: 100%; margin-bottom: 14px; }
+    .login-box button { width: 100%; padding: 10px; margin-top: 8px; }
+
+    .hidden { display: none !important; }
+  </style>
+</head>
+<body>
+
+  <!-- ===== LOGIN ===== -->
+  <div id="login-screen">
+    <div class="login-box">
+      <h2>GitHub MD Editor</h2>
+      <p>
+        Вставте Personal Access Token з правом <code>repo</code>.<br>
+        Токен зберігається тільки у вашому браузері.
+      </p>
+
+      <label>Owner (нік або організація)</label>
+      <input id="input-owner" placeholder="username" />
+
+      <label>Repository</label>
+      <input id="input-repo" placeholder="my-private-repo" />
+
+      <label>Personal Access Token</label>
+      <input id="input-token" type="password" placeholder="ghp_xxxxxxxxxxxx" />
+
+      <button id="btn-login">Увійти</button>
+      <div id="login-status" class="status" style="margin-top:12px"></div>
+    </div>
+  </div>
+
+  <!-- ===== MAIN APP ===== -->
+  <header class="hidden" id="app-header">
+    <h1>MD Editor</h1>
+    <span id="repo-label" style="color:var(--muted);font-size:13px"></span>
+    <button class="secondary" id="btn-refresh" title="Оновити дерево">↻</button>
+    <button class="secondary" id="btn-logout">Вийти</button>
+  </header>
+
+  <div class="main hidden" id="app-main">
+    <!-- Sidebar -->
+    <div class="sidebar">
+      <div class="sidebar-header">
+        <span>Файли</span>
+        <button class="secondary" id="btn-new-file" style="padding:2px 8px;font-size:12px">+ файл</button>
+      </div>
+      <div class="file-tree" id="file-tree"></div>
+    </div>
+
+    <!-- Editor -->
+    <div class="editor-area">
+      <div class="editor-toolbar">
+        <span class="current-file" id="current-file">Файл не вибрано</span>
+        <button id="btn-save" disabled>Зберегти</button>
+        <span id="save-status" class="status"></span>
+      </div>
+      <div id="editor-container">
+        <textarea id="editor"></textarea>
+      </div>
+    </div>
+  </div>
+
+<script>
+  // ====================== STATE ======================
+  let token = sessionStorage.getItem('gh_token') || '';
+  let owner = sessionStorage.getItem('gh_owner') || '';
+  let repo  = sessionStorage.getItem('gh_repo')  || '';
+  let currentPath = null;
+  let currentSha  = null;
+  let easyMDE = null;
+  let fileTreeCache = null;
+
+  // ====================== INIT ======================
+  if (token && owner && repo) {
+    showApp();
+    loadTree();
+  }
+
+  document.getElementById('btn-login').onclick = async () => {
+    owner = document.getElementById('input-owner').value.trim();
+    repo  = document.getElementById('input-repo').value.trim();
+    token = document.getElementById('input-token').value.trim();
+
+    if (!owner || !repo || !token) {
+      setLoginStatus('Заповніть усі поля', true);
+      return;
+    }
+
+    setLoginStatus('Перевірка...', false);
+    try {
+      const res = await ghFetch(`/repos/${owner}/${repo}`);
+      if (!res.ok) throw new Error(await res.text());
+      
+      sessionStorage.setItem('gh_token', token);
+      sessionStorage.setItem('gh_owner', owner);
+      sessionStorage.setItem('gh_repo', repo);
+      
+      showApp();
+      loadTree();
+    } catch (e) {
+      setLoginStatus('Помилка: ' + e.message, true);
+    }
+  };
+
+  document.getElementById('btn-logout').onclick = () => {
+    sessionStorage.clear();
+    location.reload();
+  };
+
+  document.getElementById('btn-refresh').onclick = () => loadTree();
+  document.getElementById('btn-save').onclick = saveFile;
+  document.getElementById('btn-new-file').onclick = createNewFile;
+
+  // ====================== UI HELPERS ======================
+  function showApp() {
+    document.getElementById('login-screen').classList.add('hidden');
+    document.getElementById('app-header').classList.remove('hidden');
+    document.getElementById('app-main').classList.remove('hidden');
+    document.getElementById('repo-label').textContent = `${owner}/${repo}`;
+    
+    // Init EasyMDE
+    if (!easyMDE) {
+      easyMDE = new EasyMDE({
+        element: document.getElementById('editor'),
+        spellChecker: false,
+        autosave: { enabled: false },
+        placeholder: 'Почніть писати markdown...',
+        toolbar: [
+          'bold', 'italic', 'heading', '|',
+          'quote', 'unordered-list', 'ordered-list', '|',
+          'link', 'image', '|',
+          'preview', 'side-by-side', 'fullscreen', '|',
+          'guide'
+        ],
+        status: ['lines', 'words', 'cursor'],
+        renderingConfig: {
+          singleLineBreaks: false,
+          codeSyntaxHighlighting: true
+        }
+      });
+
+      // Image upload via toolbar button + drag-drop
+      easyMDE.codemirror.on('drop', async (cm, e) => {
+        const files = e.dataTransfer.files;
+        if (files.length && files[0].type.startsWith('image/')) {
+          e.preventDefault();
+          await uploadImage(files[0]);
+        }
+      });
+    }
+  }
+
+  function setLoginStatus(msg, isError) {
+    const el = document.getElementById('login-status');
+    el.textContent = msg;
+    el.className = 'status ' + (isError ? 'err' : 'ok');
+  }
+
+  function setSaveStatus(msg, isError) {
+    const el = document.getElementById('save-status');
+    el.textContent = msg;
+    el.className = 'status ' + (isError ? 'err' : 'ok');
+  }
+
+  // ====================== GITHUB API ======================
+  async function ghFetch(path, options = {}) {
+    const url = path.startsWith('http') ? path : `https://api.github.com${path}`;
+    const headers = {
+      'Accept': 'application/vnd.github+json',
+      'Authorization': `Bearer ${token}`,
+      'X-GitHub-Api-Version': '2022-11-28',
+      ...options.headers
+    };
+    return fetch(url, { ...options, headers });
+  }
+
+  // ====================== FILE TREE ======================
+  async function loadTree() {
+    const treeEl = document.getElementById('file-tree');
+    treeEl.innerHTML = '<div style="padding:12px;color:var(--muted)">Завантаження...</div>';
+
+    try {
+      // Отримуємо дерево всього репо (recursive)
+      const res = await ghFetch(`/repos/${owner}/${repo}/git/trees/HEAD?recursive=1`);
+      if (!res.ok) throw new Error(await res.text());
+      const data = await res.json();
+
+      // Фільтруємо тільки .md і папки, які їх містять
+      const mdFiles = data.tree
+        .filter(item => item.type === 'blob' && item.path.endsWith('.md'))
+        .sort((a, b) => a.path.localeCompare(b.path));
+
+      fileTreeCache = mdFiles;
+      renderTree(mdFiles);
+    } catch (e) {
+      treeEl.innerHTML = `<div style="padding:12px;color:#f85149">Помилка: ${e.message}</div>`;
+    }
+  }
+
+  function renderTree(files) {
+    const treeEl = document.getElementById('file-tree');
+    treeEl.innerHTML = '';
+
+    // Групуємо по папках для краси
+    const folders = {};
+    files.forEach(f => {
+      const parts = f.path.split('/');
+      const name = parts.pop();
+      const folder = parts.join('/') || '.';
+      if (!folders[folder]) folders[folder] = [];
+      folders[folder].push({ ...f, name });
+    });
+
+    Object.keys(folders).sort().forEach(folder => {
+      if (folder !== '.') {
+        const folderEl = document.createElement('div');
+        folderEl.className = 'file-item folder';
+        folderEl.innerHTML = `<span class="icon">📁</span> ${folder}`;
+        treeEl.appendChild(folderEl);
+      }
+
+      folders[folder].forEach(file => {
+        const el = document.createElement('div');
+        el.className = 'file-item';
+        el.dataset.path = file.path;
+        el.innerHTML = `<span class="icon">📄</span> ${file.name}`;
+        el.onclick = () => openFile(file.path);
+        treeEl.appendChild(el);
+      });
+    });
+  }
+
+  // ====================== OPEN / SAVE ======================
+  async function openFile(path) {
+    // Підсвітка
+    document.querySelectorAll('.file-item').forEach(el => el.classList.remove('active'));
+    const active = document.querySelector(`.file-item[data-path="${path}"]`);
+    if (active) active.classList.add('active');
+
+    document.getElementById('current-file').textContent = path;
+    document.getElementById('btn-save').disabled = true;
+    setSaveStatus('Завантаження...', false);
+
+    try {
+      const res = await ghFetch(`/repos/${owner}/${repo}/contents/${encodeURIComponent(path)}`);
+      if (!res.ok) throw new Error(await res.text());
+      const data = await res.json();
+
+      currentPath = path;
+      currentSha  = data.sha;
+
+      const content = decodeURIComponent(escape(atob(data.content.replace(/\n/g, ''))));
+      easyMDE.value(content);
+
+      document.getElementById('btn-save').disabled = false;
+      setSaveStatus('Готово', false);
+    } catch (e) {
+      setSaveStatus('Помилка: ' + e.message, true);
+    }
+  }
+
+  async function saveFile() {
+    if (!currentPath) return;
+
+    const content = easyMDE.value();
+    const b64 = btoa(unescape(encodeURIComponent(content)));
+
+    document.getElementById('btn-save').disabled = true;
+    setSaveStatus('Збереження...', false);
+
+    try {
+      const res = await ghFetch(`/repos/${owner}/${repo}/contents/${encodeURIComponent(currentPath)}`, {
+        method: 'PUT',
+        body: JSON.stringify({
+          message: `Update ${currentPath}`,
+          content: b64,
+          sha: currentSha
+        })
+      });
+
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.message || JSON.stringify(err));
+      }
+
+      const data = await res.json();
+      currentSha = data.content.sha;
+      setSaveStatus('Збережено ✓', false);
+    } catch (e) {
+      setSaveStatus('Помилка: ' + e.message, true);
+    } finally {
+      document.getElementById('btn-save').disabled = false;
+    }
+  }
+
+  // ====================== NEW FILE ======================
+  async function createNewFile() {
+    const path = prompt('Шлях нового файлу (наприклад docs/new.md):');
+    if (!path || !path.endsWith('.md')) {
+      alert('Шлях має закінчуватися на .md');
+      return;
+    }
+
+    try {
+      const res = await ghFetch(`/repos/${owner}/${repo}/contents/${encodeURIComponent(path)}`, {
+        method: 'PUT',
+        body: JSON.stringify({
+          message: `Create ${path}`,
+          content: btoa(unescape(encodeURIComponent('# New file\n')))
+        })
+      });
+
+      if (!res.ok) throw new Error(await res.text());
+      await loadTree();
+      openFile(path);
+    } catch (e) {
+      alert('Помилка створення: ' + e.message);
+    }
+  }
+
+  // ====================== IMAGE UPLOAD ======================
+  async function uploadImage(file) {
+    if (!currentPath) {
+      alert('Спочатку відкрийте .md файл');
+      return;
+    }
+
+    setSaveStatus('Завантаження картинки...', false);
+
+    try {
+      const arrayBuffer = await file.arrayBuffer();
+      const bytes = new Uint8Array(arrayBuffer);
+      let binary = '';
+      for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+      const b64 = btoa(binary);
+
+      // Шлях для картинки
+      const ext = file.name.split('.').pop().toLowerCase();
+      const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+      const imgPath = `assets/${Date.now()}_${safeName}`;
+
+      // Створюємо файл картинки
+      const res = await ghFetch(`/repos/${owner}/${repo}/contents/${encodeURIComponent(imgPath)}`, {
+        method: 'PUT',
+        body: JSON.stringify({
+          message: `Add image ${imgPath}`,
+          content: b64
+        })
+      });
+
+      if (!res.ok) throw new Error(await res.text());
+
+      // Вставляємо в редактор
+      const cm = easyMDE.codemirror;
+      const doc = cm.getDoc();
+      const cursor = doc.getCursor();
+      doc.replaceRange(`![${file.name}](/${imgPath})`, cursor);
+
+      setSaveStatus('Картинку додано', false);
+    } catch (e) {
+      setSaveStatus('Помилка картинки: ' + e.message, true);
+    }
+  }
+
+  // Додаємо кнопку завантаження картинки в тулбар EasyMDE (після ініціалізації)
+  // EasyMDE вже має кнопку image, але вона тільки вставляє markdown.
+  // Для реального upload використовуємо drop або можна розширити.
+</script>
+</body>
+</html>
