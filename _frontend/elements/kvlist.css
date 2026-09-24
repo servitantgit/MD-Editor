@@ -1,0 +1,55 @@
+.kvlist {
+    @apply w-full max-w-screen-lg flex flex-col bg-white border border-slate-200;
+}
+
+.kvlist.kvlist-full {
+    @apply border-l-0 border-r-0 lg:border-l lg:border-r;
+}
+
+.kvlist-item {
+    @apply w-full flex flex-col md:flex-row items-stretch border-b border-b-slate-200 last:border-b-0;
+}
+
+.kvlist-item:has(+ template:last-child),
+.kvlist-item:has(> .kvlist-add) {
+    @apply border-b-0;
+}
+
+.kvlist-input {
+    @apply md:basis-2/6 py-3 px-4 min-h-12 bg-white rounded-none appearance-none block outline-none font-mono text-base text-left transition hover:bg-slate-100 focus:bg-slate-100;
+}
+
+input:is(
+        [type="date"],
+        [type="datetime-local"]
+    ).kvlist-input::-webkit-date-and-time-value {
+    text-align: left;
+}
+
+textarea.kvlist-input {
+    @apply resize-none;
+}
+
+.kvlist-input.kvlist-input-key {
+    @apply md:basis-2/6 bg-slate-50 hover:bg-slate-100 focus:bg-slate-100;
+}
+
+.kvlist-input.kvlist-input-value {
+    @apply md:basis-4/6 h-12;
+}
+
+.kvlist-add {
+    @apply w-full bg-slate-50 min-h-12 flex flex-row gap-2 items-center justify-center font-medium hover:bg-slate-100;
+}
+
+.kvlist-item > .awesomplete {
+    @apply md:basis-4/6 block w-full min-h-12 bg-white rounded-none appearance-none outline-none font-mono text-base transition hover:bg-slate-100 focus:bg-slate-100;
+}
+
+.kvlist-item > .awesomplete > input {
+    @apply basis-auto;
+}
+
+.kvlist-item > .awesomplete > input {
+    @apply basis-full;
+}

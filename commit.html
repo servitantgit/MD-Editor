@@ -1,0 +1,63 @@
+---
+title: Commit changes
+buttonsEnd: modal_close_button.html
+---
+
+<form
+    x-data="commit"
+    x-on:submit.prevent="submit"
+    class="flex flex-col gap-4 md:gap-6"
+>
+    <ul class="w-full kvlist">
+        <li class="kvlist-item">
+            <input
+                type="text"
+                class="kvlist-input kvlist-input-key"
+                value="Message"
+                readonly
+            />
+            <textarea
+                name="message"
+                class="kvlist-input kvlist-input-value"
+                required
+                x-bind:value="message"
+                x-data
+                x-autosize
+            ></textarea>
+        </li>
+        <li class="kvlist-item">
+            <input
+                type="text"
+                class="kvlist-input kvlist-input-key"
+                value="Skip CI?"
+                readonly
+            />
+            <div class="kvlist-input kvlist-input-value">
+                <input type="checkbox" class="toggle" name="skip" value="1" />
+            </div>
+        </li>
+        <template x-if="useDeleteOld">
+            <li class="kvlist-item">
+                <input
+                    type="text"
+                    class="kvlist-input kvlist-input-key"
+                    value="Delete old file?"
+                    readonly
+                />
+                <div class="kvlist-input kvlist-input-value">
+                    <input
+                        type="checkbox"
+                        class="toggle"
+                        name="deleteOld"
+                        value="1"
+                    />
+                </div>
+            </li>
+        </template>
+    </ul>
+
+    <button
+        class="w-full button button-success-filled"
+        x-html="`${icons.save} Push commit`"
+    ></button>
+</form>

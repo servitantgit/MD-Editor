@@ -1,0 +1,87 @@
+---
+layout: default
+title: Editing the file
+header: false
+full: true
+---
+
+<template x-init="!auth.check() ? location.href='/' : ''"></template>
+
+<form
+    class="flex flex-col gap-6 items-center"
+    id="editor-form"
+    x-data="editor"
+    x-on:change="handleChange"
+    x-on:submit.prevent="save"
+    x-on:attributes-updated="updateAttributes"
+    x-on:beforeunload.window="handlePageUnload"
+>
+    <header class="header">
+        <div class="header-buttons header-buttons-start">
+            <a
+                href="reprose:browse"
+                class="button"
+                x-html="`${icons.open} <span class='hidden lg:block'>Open</span>`"
+                x-bind:data-disabled="loading || saving"
+            ></a>
+        </div>
+
+        <div class="header-buttons header-buttons-end">
+            <a
+                class="button"
+                target="_blank"
+                x-bind:href="statusUrl"
+                x-html="statusHtml"
+                x-on:click="clearStatus"
+                x-show="Boolean(status)"
+            ></a>
+            <a
+                href="reprose:delete"
+                class="button"
+                x-html="`${icons.trash} <span class='hidden lg:block'>Delete</span>`"
+                x-show="!loading && isExists()"
+            ></a>
+            <a
+                href="reprose:save"
+                x-html="saving ? icons.spinner : `${icons.save} <span class='hidden lg:block'>Save</span>`"
+                x-bind:data-disabled="loading || saving"
+                x-bind:class="`button ${changed ? 'button-primary' : ''}`"
+                title="Save"
+            ></a>
+        </div>
+    </header>
+
+    <template x-if="!loading">
+        <ul class="kvlist">
+            <li class="kvlist-item">
+                <input
+                    type="text"
+                    class="kvlist-input kvlist-input-key"
+                    value="filename"
+                    readonly
+                />
+                <input
+                    type="text"
+                    name="filename"
+                    class="kvlist-input kvlist-input-value"
+                    required
+                    x-model:value="filename"
+                />
+            </li>
+        </ul>
+    </template>
+
+    <template x-if="!loading">
+        <!-- prettier-ingore -->
+        {% include attributes.html %}
+    </template>
+
+    <template x-if="!loading">
+        <textarea
+            x-ref="input"
+            class="bg-transparent resize-none pointer-events-none"
+        ></textarea>
+    </template>
+
+    <div x-show="loading" class="loading" x-html="icons.spinner"></div>
+</form>

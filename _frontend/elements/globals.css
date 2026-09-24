@@ -1,0 +1,12 @@
+html,
+body {
+    overscroll-behavior: none;
+}
+
+body {
+    @apply text-slate-900;
+}
+
+input {
+    @apply bg-white;
+}
