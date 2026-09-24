@@ -221,18 +221,43 @@
       position: relative;
       display: inline-block;
       max-width: 100%;
+      min-width: 160px;
+      min-height: 90px;
       vertical-align: top;
       line-height: 0;
+      background: #1c2128;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      box-sizing: border-box;
     }
     .md-img-wrap img {
       max-width: 100%;
       display: block;
-      border-radius: 4px;
+      border-radius: 5px;
       background: #21262d;
       transition: opacity .15s;
     }
-    .md-img-wrap.loading img { opacity: .35; }
-    .md-img-wrap.broken img { outline: 1px solid var(--danger); }
+    /* Поки джерело не резолвлено, img — прозорий 1x1px; показуємо явний плейсхолдер поверх нього */
+    .md-img-wrap.loading, .md-img-wrap.broken {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      padding: 10px;
+    }
+    .md-img-wrap.loading img, .md-img-wrap.broken img { display: none; }
+    .md-img-wrap .md-img-placeholder-text {
+      display: none;
+      font-size: 12px;
+      color: var(--muted);
+      max-width: 260px;
+      word-break: break-word;
+      white-space: pre-line;
+    }
+    .md-img-wrap.loading .md-img-placeholder-text,
+    .md-img-wrap.broken .md-img-placeholder-text { display: block; }
+    .md-img-wrap.broken { border-color: var(--danger); background: #2d1214; }
+    .md-img-wrap.broken .md-img-placeholder-text { color: #ff9d94; }
     .md-img-resize-handle {
       position: absolute;
       right: 2px;
@@ -350,6 +375,11 @@
     #pdf-export-container th { background: #f8fafc; }
     #pdf-export-container ul, #pdf-export-container ol { padding-left: 1.4em; margin: .5em 0; }
     #pdf-export-container hr { border: none; border-top: 1px solid #e2e8f0; margin: 1.2em 0; }
+    #pdf-export-container .md-img-wrap { background: #f8fafc; border-color: #e2e8f0; }
+    #pdf-export-container .md-img-wrap.broken { background: #fef2f2; border-color: #fca5a5; }
+    #pdf-export-container .md-img-placeholder-text { color: #64748b; }
+    #pdf-export-container .md-img-wrap.broken .md-img-placeholder-text { color: #b91c1c; }
+    #pdf-export-container .md-img-resize-handle { display: none; }
   </style>
 </head>
 <body>
@@ -667,7 +697,14 @@
   // Дістає вміст файлу (base64) незалежно від розміру (Contents API обмежений 1MB — падаємо на Git Blobs API)
   async function fetchFileB64(path) {
     const res = await ghFetch(`/repos/${owner}/${repo}/contents/${encodePathForApi(path)}`);
-    if (!res.ok) throw new Error(await res.text());
+    if (!res.ok) {
+      let msg = `HTTP ${res.status}`;
+      try {
+        const j = await res.json();
+        if (j && j.message) msg = j.message;
+      } catch (_) { /* тіло не JSON — лишаємо статус-код */ }
+      throw new Error(`${msg} (${path})`);
+    }
     const data = await res.json();
     let b64 = data.content;
     if (!b64 && data.sha) {
@@ -677,17 +714,13 @@
         b64 = blobData.content;
       }
     }
-    if (!b64) throw new Error('Не вдалося прочитати вміст файлу (можливо, він завеликий)');
+    if (!b64) throw new Error(`Порожній вміст або файл завеликий (${path})`);
     return { b64: b64.replace(/\n/g, ''), sha: data.sha };
   }
 
   async function fetchFileAsDataUrl(path) {
-    try {
-      const { b64 } = await fetchFileB64(path);
-      return `data:${guessMime(path)};base64,${b64}`;
-    } catch (e) {
-      return null;
-    }
+    const { b64 } = await fetchFileB64(path); // помилка навмисно НЕ проковтується — потрібна для діагностики у прев'ю
+    return `data:${guessMime(path)};base64,${b64}`;
   }
 
   async function putFile(path, contentB64, message, sha) {
@@ -870,11 +903,12 @@
     </div>`;
     overlay.onclick = () => overlay.remove();
     document.body.appendChild(overlay);
-    fetchFileAsDataUrl(path).then(url => {
-      const img = overlay.querySelector('img');
-      if (url) img.src = url;
-      else overlay.querySelector('div div').textContent = 'Не вдалося завантажити зображення: ' + path;
-    });
+    fetchFileAsDataUrl(path)
+      .then(url => { overlay.querySelector('img').src = url; })
+      .catch(err => {
+        overlay.querySelector('div div').textContent = 'Не вдалося завантажити: ' + err.message;
+        console.warn('previewImageFile', path, err);
+      });
   }
 
   // ====================== ВІДКРИТТЯ / ЗБЕРЕЖЕННЯ ======================
@@ -1156,8 +1190,11 @@
 
   // ====================== РЕНДЕР ПРЕВ'Ю: markdown → HTML з резолвом зображень ======================
   // Перетворює markdown-текст на HTML, де кожне зображення позначене data-md-line/data-md-occ/data-md-src
-  // і поки що показує прозорий піксель-заглушку — реальне джерело підвантажується асинхронно.
+  // і поки що показує видимий плейсхолдер "Завантаження…" — реальне джерело підвантажується асинхронно.
   function markdownToCanonicalHtml(text) {
+    if (typeof marked === 'undefined' || !marked.parse) {
+      throw new Error('Бібліотека markdown-рендерингу (marked.js) не завантажилась із CDN. Перевірте інтернет-з’єднання/фаєрвол і перезавантажте сторінку.');
+    }
     const lineOcc = {};
     const withCanonicalImages = text.replace(IMG_TOKEN_RE, (full, altG, srcG, titleG, offset) => {
       const isMdImg = srcG !== undefined;
@@ -1167,13 +1204,13 @@
       lineOcc[ln] = occ + 1;
 
       const widthPart = attrs.width ? ` width="${escapeAttr(attrs.width)}" style="width:${parseInt(attrs.width, 10)}px;height:auto;"` : '';
-      return `<span class="md-img-wrap loading"><img data-md-line="${ln}" data-md-occ="${occ}" data-md-src="${escapeAttr(attrs.src)}" alt="${escapeAttr(attrs.alt)}"${widthPart} src="${TRANSPARENT_PIXEL}"><span class="md-img-resize-handle"></span><span class="md-img-size-badge"></span></span>`;
+      return `<span class="md-img-wrap loading"><img data-md-line="${ln}" data-md-occ="${occ}" data-md-src="${escapeAttr(attrs.src)}" alt="${escapeAttr(attrs.alt)}"${widthPart} src="${TRANSPARENT_PIXEL}"><span class="md-img-resize-handle"></span><span class="md-img-size-badge"></span><span class="md-img-placeholder-text">⏳ ${escapeAttr(attrs.src)}</span></span>`;
     });
     return marked.parse(withCanonicalImages, { gfm: true, breaks: false });
   }
 
   async function resolveImageSrc(origSrc) {
-    if (!origSrc) return null;
+    if (!origSrc) throw new Error('порожній шлях до зображення');
     if (origSrc.startsWith('data:')) return origSrc;
     if (/^[a-z][a-z0-9+.-]*:/i.test(origSrc)) return origSrc; // http(s):// та інші зовнішні схеми
 
@@ -1182,34 +1219,55 @@
       : resolveRelativePath(dirnameOf(currentPath || ''), origSrc);
 
     if (imageCache.has(path)) return imageCache.get(path);
-    const dataUrl = await fetchFileAsDataUrl(path);
-    if (dataUrl) imageCache.set(path, dataUrl);
+    const dataUrl = await fetchFileAsDataUrl(path); // кидає помилку з причиною замість тихого null
+    imageCache.set(path, dataUrl);
     return dataUrl;
   }
 
   async function renderPreviewAsync(text, previewEl) {
     const myToken = ++previewRenderToken;
-    const html = markdownToCanonicalHtml(text);
+    let html;
+    try {
+      html = markdownToCanonicalHtml(text);
+    } catch (e) {
+      console.error('Помилка рендерингу прев’ю:', e);
+      if (myToken === previewRenderToken) {
+        previewEl.innerHTML = `<div style="padding:16px;border:1px solid var(--danger);border-radius:6px;color:#ff9d94;background:#2d1214;">
+          <strong>⚠ Помилка рендерингу прев’ю</strong><br>${escapeAttr(e.message)}
+        </div>`;
+      }
+      return;
+    }
     if (myToken !== previewRenderToken) return;
     previewEl.innerHTML = html;
 
     const wraps = Array.from(previewEl.querySelectorAll('.md-img-wrap'));
     attachResizeHandles(previewEl);
 
+    let failCount = 0;
     await Promise.all(wraps.map(async (wrap) => {
       const img = wrap.querySelector('img');
+      const placeholder = wrap.querySelector('.md-img-placeholder-text');
       const orig = img.getAttribute('data-md-src');
-      const url = await resolveImageSrc(orig).catch(() => null);
-      if (myToken !== previewRenderToken) return;
-      if (url) {
+      try {
+        const url = await resolveImageSrc(orig);
+        if (myToken !== previewRenderToken) return;
         img.src = url;
         wrap.classList.remove('loading');
-      } else {
+      } catch (err) {
+        if (myToken !== previewRenderToken) return;
+        failCount++;
+        console.warn('Не вдалося завантажити зображення прев’ю:', orig, err);
         wrap.classList.remove('loading');
         wrap.classList.add('broken');
         img.alt = '⚠ не вдалося завантажити: ' + orig;
+        if (placeholder) placeholder.textContent = `⚠ ${orig}\n${err.message}`;
       }
     }));
+
+    if (myToken === previewRenderToken && failCount > 0) {
+      setSaveStatus(`Прев’ю: не вдалося завантажити ${failCount} зображення(нь) — див. деталі просто на місці картинки`, true);
+    }
   }
 
   function attachResizeHandles(previewEl) {
@@ -1290,10 +1348,18 @@
       const wraps = Array.from(container.querySelectorAll('.md-img-wrap'));
       await Promise.all(wraps.map(async (wrap) => {
         const img = wrap.querySelector('img');
+        const placeholder = wrap.querySelector('.md-img-placeholder-text');
         const orig = img.getAttribute('data-md-src');
-        const url = await resolveImageSrc(orig).catch(() => null);
-        if (url) img.src = url;
-        else img.alt = '[зображення недоступне: ' + orig + ']';
+        try {
+          img.src = await resolveImageSrc(orig);
+          wrap.classList.remove('loading');
+        } catch (err) {
+          wrap.classList.remove('loading');
+          wrap.classList.add('broken');
+          img.alt = `[зображення недоступне: ${orig}]`;
+          if (placeholder) placeholder.textContent = `⚠ ${orig} — ${err.message}`;
+          console.warn('exportCurrentPageToPdf image', orig, err);
+        }
         img.removeAttribute('data-md-src');
       }));
 
