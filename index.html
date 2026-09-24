@@ -423,6 +423,7 @@
   let easyMDE = null;
   let allFilesCache = [];       // весь список файлів репо (для дерева й переміщень)
   let collapsedFolders = new Set();
+  let treeInitialized = false;  // при першому завантаженні згортаємо всі теки (зручно для великих репо)
   let imageCache = new Map();   // repo-path (без "/") -> data: URL
   let previewRenderToken = 0;   // захист від "гонки" асинхронних рендерів прев'ю
 
@@ -581,6 +582,75 @@
       ? { src: img.getAttribute('src') || '', alt: img.getAttribute('alt') || '', width: img.getAttribute('width') || '' }
       : { src: '', alt: '', width: '' };
   }
+  // Кодує шлях для GitHub Contents API ПОСЕГМЕНТНО: encodeURIComponent(повного шляху)
+  // перетворює "/" на "%2F", а частина реалізацій маршрутизації GitHub це не розкодовує —
+  // тому для глибоко вкладених тек (з пробілами/юнікодом у назвах) запити просто провалювались би.
+  function encodePathForApi(path) {
+    return path.split('/').map(encodeURIComponent).join('/');
+  }
+  // Кодує шлях для встановлення у markdown-посилання (пробіли, дужки тощо — щоб не ламати синтаксис)
+  function encodeLinkPath(path) {
+    return path.split('/').map(encodeURIComponent).join('/');
+  }
+  function decodeUriSafe(s) {
+    try { return decodeURIComponent(s); } catch (_) { return s; }
+  }
+  // Обчислює відносний шлях від теки fromDir до файлу toPath (у стилі, який вже використовує репозиторій)
+  function relativePathFromTo(fromDir, toPath) {
+    const fromParts = fromDir ? fromDir.split('/') : [];
+    const toParts = toPath.split('/');
+    const toFile = toParts.pop();
+    let i = 0;
+    while (i < fromParts.length && i < toParts.length && fromParts[i] === toParts[i]) i++;
+    const ups = fromParts.length - i;
+    const downs = toParts.slice(i);
+    const relParts = [];
+    for (let k = 0; k < ups; k++) relParts.push('..');
+    relParts.push(...downs, toFile);
+    return relParts.join('/');
+  }
+  function commonPrefixLen(a, b) {
+    let i = 0;
+    while (i < a.length && i < b.length && a[i] === b[i]) i++;
+    return i;
+  }
+  // Знаходить теку для нових зображень: спершу шукає найближчу теку з "асетною" назвою
+  // (Asset/Assets/Images/...), інакше — теку з найбільшою кількістю вже наявних зображень,
+  // інакше — фолбек "<тека файлу>/assets"
+  function findAssetFolder(currentFilePath) {
+    const nameRe = /^(assets?|images?|img|attachments?|files|resources?)$/i;
+    const dirSet = new Set();
+    allFilesCache.forEach(f => {
+      let d = dirnameOf(f.path);
+      while (true) {
+        dirSet.add(d);
+        if (!d) break;
+        d = dirnameOf(d);
+      }
+    });
+    const namedCandidates = Array.from(dirSet).filter(d => d && nameRe.test(basenameOf(d)));
+    if (namedCandidates.length) {
+      const curChain = dirnameOf(currentFilePath).split('/').filter(Boolean);
+      namedCandidates.sort((a, b) => {
+        const da = dirnameOf(a).split('/').filter(Boolean);
+        const db = dirnameOf(b).split('/').filter(Boolean);
+        return commonPrefixLen(curChain, db) - commonPrefixLen(curChain, da);
+      });
+      return namedCandidates[0];
+    }
+    const counts = {};
+    allFilesCache.forEach(f => {
+      if (isImagePath(f.path)) {
+        const d = dirnameOf(f.path);
+        counts[d] = (counts[d] || 0) + 1;
+      }
+    });
+    let best = null, bestCount = 0;
+    Object.keys(counts).forEach(d => { if (counts[d] > bestCount) { best = d; bestCount = counts[d]; } });
+    if (best !== null && bestCount > 0) return best;
+    const own = dirnameOf(currentFilePath);
+    return own ? `${own}/assets` : 'assets';
+  }
 
   // ====================== GITHUB API ======================
   async function ghFetch(path, options = {}) {
@@ -596,7 +666,7 @@
 
   // Дістає вміст файлу (base64) незалежно від розміру (Contents API обмежений 1MB — падаємо на Git Blobs API)
   async function fetchFileB64(path) {
-    const res = await ghFetch(`/repos/${owner}/${repo}/contents/${encodeURIComponent(path)}`);
+    const res = await ghFetch(`/repos/${owner}/${repo}/contents/${encodePathForApi(path)}`);
     if (!res.ok) throw new Error(await res.text());
     const data = await res.json();
     let b64 = data.content;
@@ -623,7 +693,7 @@
   async function putFile(path, contentB64, message, sha) {
     const body = { message, content: contentB64 };
     if (sha) body.sha = sha;
-    const res = await ghFetch(`/repos/${owner}/${repo}/contents/${encodeURIComponent(path)}`, {
+    const res = await ghFetch(`/repos/${owner}/${repo}/contents/${encodePathForApi(path)}`, {
       method: 'PUT',
       body: JSON.stringify(body)
     });
@@ -636,7 +706,7 @@
   }
 
   async function deleteFile(path, sha, message) {
-    const res = await ghFetch(`/repos/${owner}/${repo}/contents/${encodeURIComponent(path)}`, {
+    const res = await ghFetch(`/repos/${owner}/${repo}/contents/${encodePathForApi(path)}`, {
       method: 'DELETE',
       body: JSON.stringify({ message, sha })
     });
@@ -655,7 +725,7 @@
 
     try {
       const ref = branch || 'HEAD';
-      const res = await ghFetch(`/repos/${owner}/${repo}/git/trees/${encodeURIComponent(ref)}?recursive=1`);
+      const res = await ghFetch(`/repos/${owner}/${repo}/git/trees/${encodePathForApi(ref)}?recursive=1`);
       if (!res.ok) throw new Error(await res.text());
       const data = await res.json();
 
@@ -691,6 +761,16 @@
   function renderTree(files) {
     const treeEl = document.getElementById('file-tree');
     treeEl.innerHTML = '';
+
+    if (!treeInitialized) {
+      treeInitialized = true;
+      const dirSet = new Set();
+      files.forEach(f => {
+        let d = dirnameOf(f.path);
+        while (d) { dirSet.add(d); d = dirnameOf(d); }
+      });
+      collapsedFolders = dirSet; // за замовчуванням усе згорнуто, крім кореня
+    }
 
     // Зона для перетягування у корінь репозиторію
     const rootDrop = document.createElement('div');
@@ -809,14 +889,12 @@
     setSaveStatus('Завантаження...', false);
 
     try {
-      const res = await ghFetch(`/repos/${owner}/${repo}/contents/${encodeURIComponent(path)}`);
-      if (!res.ok) throw new Error(await res.text());
-      const data = await res.json();
+      const { b64, sha } = await fetchFileB64(path);
 
       currentPath = path;
-      currentSha  = data.sha;
+      currentSha  = sha;
 
-      const content = decodeURIComponent(escape(atob(data.content.replace(/\n/g, ''))));
+      const content = decodeURIComponent(escape(atob(b64)));
       easyMDE.value(content);
 
       document.getElementById('btn-save').disabled = false;
@@ -865,6 +943,14 @@
   }
 
   // ====================== ПЕРЕМІЩЕННЯ ФАЙЛІВ МІЖ ПАПКАМИ ======================
+  // Знаходить у markdown-тексті або зображення (![]()/<img>), або звичайне посилання ([]())
+  // і повертає {kind, target, alt/text, title} — використовується і для читання, і для заміни.
+  const REF_TOKEN_RE = /!\[([^\]]*)\]\(\s*(\S+?)(?:\s+"([^"]*)")?\s*\)|(?<!!)\[([^\]]*)\]\(\s*(\S+?)(?:\s+"([^"]*)")?\s*\)|<img\b[^>]*\/?>/g;
+
+  function isExternalOrAnchor(target) {
+    return !target || target.startsWith('#') || target.startsWith('data:') || /^[a-z][a-z0-9+.-]*:/i.test(target);
+  }
+
   async function moveFile(oldPath, targetFolder) {
     const filename = basenameOf(oldPath);
     const newPath = targetFolder ? `${targetFolder}/${filename}` : filename;
@@ -875,12 +961,13 @@
       const { b64, sha } = await fetchFileB64(oldPath);
       let finalB64 = b64;
 
-      // Якщо переміщуємо .md файл — перетворюємо його ВІДНОСНІ посилання на кореневі,
-      // щоб вони лишились коректними незалежно від нової теки.
+      // Якщо переміщуємо .md файл — перераховуємо його ВЛАСНІ відносні посилання так,
+      // щоб вони й далі вказували на ті самі файли з нової теки (стиль лишається відносним,
+      // як прийнято в цьому репозиторії).
       if (extOf(oldPath) === 'md') {
         try {
           const text = decodeURIComponent(escape(atob(b64)));
-          const fixed = rewriteRelativeLinksToAbsolute(text, dirnameOf(oldPath));
+          const fixed = rewriteOwnRelativeLinks(text, dirnameOf(oldPath), dirnameOf(newPath));
           finalB64 = btoa(unescape(encodeURIComponent(fixed)));
         } catch (_) { /* лишаємо як є, якщо не текстовий вміст */ }
       }
@@ -888,7 +975,7 @@
       await putFile(newPath, finalB64, `Move ${oldPath} to ${newPath}`);
       await deleteFile(oldPath, sha, `Remove ${oldPath} (moved to ${newPath})`);
 
-      // Регенерація посилань в усіх інших .md файлах репозиторію
+      // Регенерація посилань в усіх інших .md файлах репозиторію (і відносних, і кореневих)
       const updated = await updateReferencesEverywhere(oldPath, newPath);
 
       if (currentPath === oldPath) {
@@ -907,38 +994,70 @@
     }
   }
 
-  // Перетворює відносні markdown-посилання/зображення на кореневі ("/шлях") — викликається при переміщенні .md файлу
-  function rewriteRelativeLinksToAbsolute(text, oldDir) {
-    return text.replace(IMG_TOKEN_RE, (full, alt, src, title) => {
-      const isMdImg = src !== undefined;
-      const attrs = isMdImg ? { src, alt: alt || '' } : extractImgAttrs(full);
-      const s = attrs.src;
-      if (!s || s.startsWith('/') || /^[a-z][a-z0-9+.-]*:/i.test(s) || s.startsWith('#')) return full;
-      const abs = '/' + resolveRelativePath(oldDir, s);
-      if (isMdImg) {
-        return `![${alt || ''}](${abs}${title ? ` "${title}"` : ''})`;
-      }
+  // Перераховує ВЛАСНІ відносні посилання файлу, який сам переміщується, зберігаючи їх відносний стиль
+  function rewriteOwnRelativeLinks(text, oldDir, newDir) {
+    if (oldDir === newDir) return text;
+    return text.replace(REF_TOKEN_RE, (full, imgAlt, imgSrc, imgTitle, linkText, linkHref, linkTitle) => {
+      let kind, target;
+      if (imgSrc !== undefined) { kind = 'img-md'; target = imgSrc; }
+      else if (linkHref !== undefined) { kind = 'link-md'; target = linkHref; }
+      else { kind = 'img-html'; target = extractImgAttrs(full).src; }
+
+      if (isExternalOrAnchor(target) || target.startsWith('/')) return full; // кореневі й зовнішні не чіпаємо
+
+      const decoded = decodeUriSafe(target);
+      const resolvedAbs = resolveRelativePath(oldDir, decoded);
+      const newRel = encodeLinkPath(relativePathFromTo(newDir, resolvedAbs));
+
+      if (kind === 'img-md') return `![${imgAlt || ''}](${newRel}${imgTitle ? ` "${imgTitle}"` : ''})`;
+      if (kind === 'link-md') return `[${linkText || ''}](${newRel}${linkTitle ? ` "${linkTitle}"` : ''})`;
       const div = document.createElement('div');
       div.innerHTML = full;
-      div.querySelector('img').setAttribute('src', abs);
+      div.querySelector('img').setAttribute('src', newRel);
       return div.innerHTML;
     });
   }
 
-  // Шукає й замінює в УСІХ .md файлах репо кореневі посилання, що вказують на старий шлях
+  // Шукає й замінює в УСІХ .md файлах репо (крім самого переміщеного) посилання,
+  // що фактично вказують на oldPath — незалежно від того, написані вони відносно чи кореневим "/шляхом".
   async function updateReferencesEverywhere(oldPath, newPath) {
     const updatedFiles = [];
-    const token = '/' + oldPath;
-    const re = new RegExp(escapeRegExp(token) + '(?=[)"\'\\s]|$)', 'g');
-
     const mdFiles = allFilesCache.filter(f => extOf(f.path) === 'md' && f.path !== newPath);
+
     for (const f of mdFiles) {
       try {
         const { b64, sha } = await fetchFileB64(f.path);
         const text = decodeURIComponent(escape(atob(b64)));
-        if (!re.test(text)) continue;
-        re.lastIndex = 0;
-        const newText = text.replace(re, '/' + newPath);
+        const fDir = dirnameOf(f.path);
+        let changed = false;
+
+        const newText = text.replace(REF_TOKEN_RE, (full, imgAlt, imgSrc, imgTitle, linkText, linkHref, linkTitle) => {
+          let kind, target;
+          if (imgSrc !== undefined) { kind = 'img-md'; target = imgSrc; }
+          else if (linkHref !== undefined) { kind = 'link-md'; target = linkHref; }
+          else { kind = 'img-html'; target = extractImgAttrs(full).src; }
+
+          if (isExternalOrAnchor(target)) return full;
+
+          const decoded = decodeUriSafe(target);
+          const isAbsoluteStyle = decoded.startsWith('/');
+          const resolved = isAbsoluteStyle ? decoded.slice(1) : resolveRelativePath(fDir, decoded);
+          if (resolved !== oldPath) return full;
+
+          changed = true;
+          const newTarget = isAbsoluteStyle
+            ? '/' + encodeLinkPath(newPath)
+            : encodeLinkPath(relativePathFromTo(fDir, newPath));
+
+          if (kind === 'img-md') return `![${imgAlt || ''}](${newTarget}${imgTitle ? ` "${imgTitle}"` : ''})`;
+          if (kind === 'link-md') return `[${linkText || ''}](${newTarget}${linkTitle ? ` "${linkTitle}"` : ''})`;
+          const div = document.createElement('div');
+          div.innerHTML = full;
+          div.querySelector('img').setAttribute('src', newTarget);
+          return div.innerHTML;
+        });
+
+        if (!changed) continue;
         const newB64 = btoa(unescape(encodeURIComponent(newText)));
         await putFile(f.path, newB64, `Update links after moving ${oldPath} to ${newPath}`, sha);
         updatedFiles.push(f.path);
@@ -1006,7 +1125,7 @@
       const b64 = btoa(binary);
 
       const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
-      const folder = dirnameOf(currentPath) ? `${dirnameOf(currentPath)}/assets` : 'assets';
+      const folder = findAssetFolder(currentPath); // напр. вже наявна спільна тека "Asset/"
       const imgPath = `${folder}/${Date.now()}_${safeName}`;
 
       await putFile(imgPath, b64, `Add image ${imgPath}`);
@@ -1014,7 +1133,9 @@
       // Кешуємо прев'ю одразу з локального файлу — не чекаємо на повторний запит до API
       imageCache.set(imgPath, `data:${file.type || guessMime(imgPath)};base64,${b64}`);
 
-      insertMarkdownAtCursor(`<img src="/${imgPath}" alt="${file.name.replace(/"/g, '')}">`);
+      // Вставляємо ВІДНОСНЕ посилання — саме такий стиль вже використовується в цьому репозиторії
+      const relLink = encodeLinkPath(relativePathFromTo(dirnameOf(currentPath), imgPath));
+      insertMarkdownAtCursor(`![${file.name.replace(/[\[\]]/g, '')}](${relLink})`);
 
       await loadTree();
       setSaveStatus('Картинку додано ✓', false);
