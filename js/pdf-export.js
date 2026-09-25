@@ -20,9 +20,21 @@ export async function exportCurrentPageToPdf(deps) {
   if (!currentPath) return;
 
   deps.onStatus('Підготовка PDF...', false);
+
+  // Ховаємо контейнер від очей ЗОВНИ (opacity:0 + z-index:-9999 на holder).
+  // HTML2PDF.js клонує саме `container` і малює її через html2canvas — тож сам
+  // контейнер мусить бути нейтральним блоком без position:fixed/z-index/opacity
+  // (будь-яке позиціонування збиває canvas -> порожня сторінка PDF). Holder
+  // html2canvas не бачить, бо ми віддаємо .from(container), а не holder.
+  const holder = document.createElement('div');
+  holder.style.cssText =
+    'position:fixed;left:0;top:0;width:1000px;height:1000px;overflow:hidden;' +
+    'opacity:0;pointer-events:none;z-index:-9999;';
+  document.body.appendChild(holder);
+
   const container = document.createElement('div');
   container.id = 'pdf-export-container';
-  document.body.appendChild(container);
+  holder.appendChild(container);
 
   try {
     const text = deps.getMarkdownText();
@@ -46,6 +58,6 @@ export async function exportCurrentPageToPdf(deps) {
   } catch (e) {
     deps.onStatus('Помилка PDF: ' + e.message, true);
   } finally {
-    container.remove();
+    holder.remove();
   }
 }
