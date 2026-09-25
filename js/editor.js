@@ -114,80 +114,80 @@ export function createEditor(textareaEl, deps) {
     renderInlineImages();
   }
 
+  function scheduleInlineImages() {
+    clearTimeout(inlineImageTimer);
+    inlineImageTimer = setTimeout(() => renderInlineImages(), 120);
+  }
+
+  async function renderInlineImages() {
+    const cm = easyMDE.codemirror;
+    const currentPath = deps.getCurrentPath();
+    const generation = ++inlineImageGeneration;
+
+    for (const mark of inlineImageMarks) mark.clear();
+    inlineImageMarks = [];
+
+    if (!currentPath) return;
+
+    const text = cm.getValue();
+    const re = /!\[([^\]]*)\]\(\s*(\S+?)(?:\s+"([^"]*)")?\s*\)/g;
+    const matches = [];
+    let match;
+    while ((match = re.exec(text))) {
+      matches.push({
+        fromIndex: match.index,
+        toIndex: match.index + match[0].length,
+        alt: match[1] || '',
+        src: match[2],
+      });
+    }
+
+    for (const item of matches) {
+      if (generation !== inlineImageGeneration) return;
+
+      const from = cm.posFromIndex(item.fromIndex);
+      const to = cm.posFromIndex(item.toIndex);
+      const wrapper = document.createElement('span');
+      wrapper.className = 'cm-inline-image';
+      wrapper.title = item.src;
+
+      const img = document.createElement('img');
+      img.alt = item.alt;
+      img.className = 'cm-inline-image-img';
+      img.style.maxWidth = '100%';
+      img.style.maxHeight = '420px';
+      img.style.height = 'auto';
+      img.style.display = 'block';
+
+      const loading = document.createElement('span');
+      loading.className = 'cm-inline-image-loading';
+      loading.textContent = '⏳';
+      wrapper.append(img, loading);
+
+      const mark = cm.markText(from, to, { replacedWith: wrapper, clearOnEnter: false });
+      inlineImageMarks.push(mark);
+
+      try {
+        const url = await deps.imageResolver.resolve(item.src, currentPath);
+        if (generation !== inlineImageGeneration || mark.find() == null) return;
+        img.src = url;
+        img.onload = () => loading.remove();
+        img.onerror = () => {
+          if (mark.find() != null) mark.clear();
+        };
+        loading.remove();
+      } catch (err) {
+        if (generation !== inlineImageGeneration || mark.find() == null) return;
+        // Якщо GitHub не віддав файл, не ховаємо Markdown від користувача.
+        mark.clear();
+        console.warn('Не вдалося показати inline-зображення:', item.src, err);
+      }
+    }
+  }
+
   refreshInlineImages();
 
   return { easyMDE, refreshLayout, refreshInlineImages };
-}
-
-function scheduleInlineImages() {
-  clearTimeout(inlineImageTimer);
-  inlineImageTimer = setTimeout(() => renderInlineImages(), 120);
-}
-
-async function renderInlineImages() {
-  const cm = easyMDE.codemirror;
-  const currentPath = deps.getCurrentPath();
-  const generation = ++inlineImageGeneration;
-
-  for (const mark of inlineImageMarks) mark.clear();
-  inlineImageMarks = [];
-
-  if (!currentPath) return;
-
-  const text = cm.getValue();
-  const re = /!\[([^\]]*)\]\(\s*(\S+?)(?:\s+"([^"]*)")?\s*\)/g;
-  const matches = [];
-  let match;
-  while ((match = re.exec(text))) {
-    matches.push({
-      fromIndex: match.index,
-      toIndex: match.index + match[0].length,
-      alt: match[1] || '',
-      src: match[2],
-    });
-  }
-
-  for (const item of matches) {
-    if (generation !== inlineImageGeneration) return;
-
-    const from = cm.posFromIndex(item.fromIndex);
-    const to = cm.posFromIndex(item.toIndex);
-    const wrapper = document.createElement('span');
-    wrapper.className = 'cm-inline-image';
-    wrapper.title = item.src;
-
-    const img = document.createElement('img');
-    img.alt = item.alt;
-    img.className = 'cm-inline-image-img';
-    img.style.maxWidth = '100%';
-    img.style.maxHeight = '420px';
-    img.style.height = 'auto';
-    img.style.display = 'block';
-
-    const loading = document.createElement('span');
-    loading.className = 'cm-inline-image-loading';
-    loading.textContent = '⏳';
-    wrapper.append(img, loading);
-
-    const mark = cm.markText(from, to, { replacedWith: wrapper, clearOnEnter: false });
-    inlineImageMarks.push(mark);
-
-    try {
-      const url = await deps.imageResolver.resolve(item.src, currentPath);
-      if (generation !== inlineImageGeneration || mark.find() == null) return;
-      img.src = url;
-      img.onload = () => loading.remove();
-      img.onerror = () => {
-        if (mark.find() != null) mark.clear();
-      };
-      loading.remove();
-    } catch (err) {
-      if (generation !== inlineImageGeneration || mark.find() == null) return;
-      // Якщо GitHub не віддав файл, не ховаємо Markdown від користувача.
-      mark.clear();
-      console.warn('Не вдалося показати inline-зображення:', item.src, err);
-    }
-  }
 }
 
 function escapeHtml(s) {
