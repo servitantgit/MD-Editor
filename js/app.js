@@ -7,7 +7,7 @@ import { GitHubClient, utf8ToB64, b64ToUtf8 } from './github-client.js';
 import { ImageResolver } from './image-resolver.js';
 import { createEditor } from './editor.js';
 import { FileTree } from './file-tree.js';
-import { setupImageDropzone, pickImageFiles } from './upload.js';
+import { setupImageDropzone, pickImageFiles, uploadImage } from './upload.js';
 import { exportCurrentPageToPdf } from './pdf-export.js';
 import { moveFile } from './file-mover.js';
 
@@ -143,6 +143,15 @@ function showApp(owner, repo) {
     imageResolver,
     getCurrentPath: () => state.currentPath,
     onImageUploadRequest: () => els.imageFileInput.click(),
+    onImagePaste: (file) => uploadImage(file, {
+      client: state.client,
+      imageResolver,
+      getCurrentPath: () => state.currentPath,
+      getAllFiles: () => state.allFiles,
+      insertText: insertMarkdownAtCursor,
+      onStatus: setSaveStatus,
+      onUploaded: () => loadTree(),
+    }),
     onImageResolveFailures: (count) =>
       setSaveStatus(`Прев’ю: не вдалося завантажити ${count} зображення(нь) — деталі показані на місці картинки`, true),
   });

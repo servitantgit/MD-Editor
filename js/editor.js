@@ -23,12 +23,12 @@ export function createEditor(textareaEl, deps) {
     toolbar: [
       'bold', 'italic', 'heading', '|',
       'quote', 'unordered-list', 'ordered-list', '|',
-      'link', 'image',
+      'link',
       {
-        name: 'upload-image',
+        name: 'image',
         action: () => deps.onImageUploadRequest(),
-        className: 'fa fa-upload',
-        title: 'Завантажити зображення у репозиторій',
+        className: 'fa fa-image',
+        title: 'Додати зображення у репозиторій',
       }, '|',
       'preview', 'side-by-side', 'fullscreen', '|',
       'guide',
@@ -81,6 +81,20 @@ export function createEditor(textareaEl, deps) {
     easyMDE.codemirror.refresh();
     requestAnimationFrame(() => easyMDE.codemirror.refresh());
   }
+
+  // Вставка зображень із буфера: браузер передає скріншоти/скопійовані картинки
+  // як ClipboardItem/Files. Текстову вставку не перехоплюємо.
+  easyMDE.codemirror.getInputField().addEventListener('paste', (event) => {
+    const items = Array.from(event.clipboardData?.items || []);
+    const imageItems = items.filter((item) => item.kind === 'file' && item.type.startsWith('image/'));
+    if (!imageItems.length) return;
+
+    event.preventDefault();
+    for (const item of imageItems) {
+      const file = item.getAsFile();
+      if (file) deps.onImagePaste(file);
+    }
+  });
 
   // Реагуємо на зміну розміру вікна/контейнера — той самий клас проблем.
   const resizeObserver = new ResizeObserver(() => refreshLayout());

@@ -62,7 +62,7 @@ export function pickImageFiles(inputEl, deps) {
   });
 }
 
-async function uploadImage(file, deps) {
+export async function uploadImage(file, deps) {
   const currentPath = deps.getCurrentPath();
   if (!currentPath) {
     deps.onStatus('Спочатку відкрийте .md файл', true);

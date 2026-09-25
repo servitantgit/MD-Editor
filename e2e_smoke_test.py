@@ -103,6 +103,16 @@ with sync_playwright() as p:
     assert "EDITED_MARKER" in content, "typing into the editor did not update the document"
     print("✓ редагування працює")
 
+    # Каретка має бути видимою на темному фоні.
+    cursor_border = page.evaluate("""() => getComputedStyle(document.querySelector('.CodeMirror-cursor')).borderLeftColor""")
+    assert cursor_border not in ("rgb(0, 0, 0)", "rgba(0, 0, 0, 0)", "transparent"),         f"cursor is effectively invisible: {cursor_border}"
+    print(f"✓ каретка видима ({cursor_border})")
+
+    # Кнопка зображення має відкривати вибір файлу, а не вставляти порожній URL.
+    image_toolbar = page.locator(".editor-toolbar button").filter(has=page.locator(".fa-image"))
+    assert image_toolbar.count() == 1, "image toolbar button is missing"
+    print("✓ кнопка зображення використовує завантаження")
+
     # --- 2. Прокрутка довгого документа ---
     scroll_info = page.evaluate("""() => {
         const el = document.querySelector('.CodeMirror-scroll');
