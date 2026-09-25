@@ -1,35 +1,98 @@
-# Reprose is a Markdown editor for GitHub
+# GitHub MD Editor
 
-[Demo](https://reprose.pp.ua)
+Легкий редактор `.md` файлів для GitHub-репозиторію: працює прямо в браузері
+(жоден бекенд, жодного білд-кроку, жодного Electron) через GitHub REST API з
+Personal Access Token. Показує/редагує зображення, підтримує drag&drop файлів
+між папками з автоматичною регенерацією посилань, і експортує активну сторінку
+в PDF.
 
-When I need to edit a Markdown document on GitHub, I want to use a beautiful editor that seamlessly handles front-matter fields and supports image uploads. That’s why I started developing my own Markdown editor for GitHub.
+## Архітектура
 
-The current version of the editor is a functional Proof of Concept (PoC). It can display a list of Markdown files from your GitHub repository, allowing you to edit them through a basic Markdown editor.
+Плейн JavaScript (ES-модулі), без TypeScript і без збірки — відкривається
+браузером як є. Код розбитий по відповідальності:
 
-Ideally, I want to add image uploads and an editing experience similar to GitBook.
+```
+index.html              HTML-каркас, підключає CDN-бібліотеки та js/app.js
+css/app.css              усі стилі
+js/
+  paths.js                чисті функції для роботи зі шляхами (без DOM/мережі)
+  markdown-tokens.js       розпізнавання зображень/посилань у markdown, побудова
+                           "канонічного" HTML для прев'ю (без DOM/мережі)
+  reference-rewriter.js    логіка перерахунку посилань при переміщенні файлів
+                           (чисті функції, без мережі)
+  github-client.js         тонкий клієнт GitHub REST API (auth, contents, trees)
+  image-resolver.js        шлях у markdown -> data: URL через GitHub API, з кешем
+  file-mover.js            оркестрація переміщення файлу (читає/пише через
+                           github-client, використовує reference-rewriter)
+  image-preview.js         DOM-частина прев'ю: підстановка src, ручка resize
+  editor.js                обгортка над EasyMDE (створення, preview-рендер,
+                           коректний CodeMirror.refresh())
+  file-tree.js             дерево файлів + drag&drop
+  upload.js                завантаження зображень (drag&drop з ОС + тулбар)
+  pdf-export.js            експорт активної сторінки в PDF
+  app.js                   точка збирання: логін, стан, підключення модулів
+test/                      юніт-тести (node:test) для чистої логіки
+e2e_smoke_test.py          наскрізний браузерний тест (Playwright)
+serve.mjs                  мінімальний локальний сервер для розробки/тестів
+```
 
-The editor can be deployed on GitHub Pages or Cloudflare Pages. The latter is preferable since the app uses a simple Cloudflare function for GitHub authentication. If you figure out how to host it elsewhere, please let me know by opening an issue.
+Чому саме так: `paths.js`, `markdown-tokens.js` і `reference-rewriter.js` не
+мають ЖОДНОЇ залежності від DOM чи мережі — це і є вся "небезпечна" логіка
+(парсинг посилань, перерахунок відносних шляхів), яку можна й потрібно
+перевіряти ізольовано. Саме там ховались реальні баги в попередніх версіях.
 
-The original idea for the editor was inspired by the Prose.io editor. I don’t use Prose.io because its image uploader is broken, and its code is based on BackboneJS, which is outdated. I built Reprose with Jekyll and AlpineJS—both are incredibly simple, making it easy for any developer to understand the codebase. 😉
+## Запуск
 
-**Screenshot of Finder:**
+Браузери не дозволяють `<script type="module">` завантажуватись із `file://`
+— сторінку треба віддавати по http(s). Варіанти:
 
-![Reprose editor page](https://github.com/jmas/reprose/blob/main/.assets/reprose-finder-screenshot.png?raw=true)
+- **GitHub Pages** — найпростіше для реального використання: закиньте всі
+  файли в репозиторій, увімкніть Pages, відкрийте посилання.
+- **Локально для розробки**: `node serve.mjs` (нічого встановлювати не треба,
+  Node.js вбудований `http` модуль) → http://localhost:8080
+- Або будь-який інший статичний сервер (`npx serve`, VSCode Live Server тощо).
 
-**Screenshot of Editor:**
+## Тестування
 
-![Reprose editor page](https://github.com/jmas/reprose/blob/main/.assets/reprose-editor-screenshot.png?raw=true)
+```bash
+npm install          # ставить jsdom + marked як dev-залежності для тестів
+npm test             # 34 юніт-тести на чисту логіку (paths, markdown-tokens,
+                      # reference-rewriter, file-mover, image-preview через jsdom)
+```
 
-**Features:**
+Наскрізний браузерний тест (справжній Chromium, GitHub API підмінений мок-відповідями):
 
-- [x] Browse markdown files via Finder
-- [x] Open markdown files in Editor
-- [x] Create a new markdown file
-- [x] Preview editing markdown file in split view
-- [x] Editor buttons that insert popular markdown markup
-- [x] View and edit Front-matter markup
-- [x] Add into repository configuration file [`.reprosers.yaml`](https://github.com/jmas/dev-blog/blob/main/.reproserc.yaml) that describe Front-matter fields and values for them
-- [x] Setup next types of Front-matter fields: `text`, `multiline`, `select`, `multiselect`, `datetime`
-- [x] Delete file from repository
+```bash
+pip install playwright && playwright install chromium
+node serve.mjs &                  # підняти застосунок на :8080
+python3 e2e_smoke_test.py         # перевіряє редагування, прокрутку, прев'ю зображень
+```
 
-Thanks for using this wonderful editor. :)
+## Що вміє
+
+- **Показ зображень у прев'ю** — резолвляться через GitHub API (працює і з
+  приватними репозиторіями), а не як прямі посилання.
+- **Масштабування зображень** — тягніть за ручку в правому нижньому куті
+  картинки в прев'ю; ширина записується прямо в markdown (`<img ... width="...">`).
+- **Drag & drop зображень** — перетягніть файл у вікно редактора, або кнопка
+  завантаження в тулбарі. Автоматично визначає спільну теку для зображень
+  (шукає теку на кшталт `Asset/`/`Images/`, або з найбільшою кількістю
+  наявних картинок) і вставляє **відносне** посилання — той самий стиль, що
+  вже використовує решта нотаток.
+- **Drag & drop файлів між папками** — перетягніть будь-який файл на іншу
+  теку в дереві зліва. Автоматично перераховує власні посилання файлу, що
+  рухається, і виправляє посилання в усіх інших нотатках репозиторію, що на
+  нього вказують (і відносні, і кореневі `/шлях`, і зображення, і звичайні
+  `[текст](шлях)` посилання).
+- **Експорт у PDF** — кнопка "📄 PDF" рендерить активну сторінку з
+  підставленими зображеннями.
+
+## Відомі обмеження
+
+- Іконки тулбару (Font Awesome) підключені з CDN — якщо мережа недоступна,
+  зникають тільки візуальні іконки, функціональність не страждає.
+- Автозаміна посилань обробляє markdown-зображення, markdown-посилання й
+  сирі `<img>` теги; посилання виду `onenote:...` та інші зовнішні схеми
+  свідомо не чіпаються.
+- PDF-експорт залежить від `html2pdf.js` (html2canvas) — дуже великі
+  зображення можуть уповільнити генерацію.

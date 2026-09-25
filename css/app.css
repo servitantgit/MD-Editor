@@ -1,0 +1,393 @@
+:root {
+  --bg: #0f1115;
+  --panel: #161b22;
+  --border: #30363d;
+  --text: #e6edf3;
+  --muted: #8b949e;
+  --accent: #238636;
+  --accent-hover: #2ea043;
+  --danger: #da3633;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  height: 100%;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* ===== Header ===== */
+header {
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+  padding: 10px 16px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  flex-shrink: 0;
+}
+header h1 { font-size: 16px; font-weight: 600; margin-right: auto; }
+
+input, select, button {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 6px 10px;
+  border-radius: 6px;
+  font-size: 13px;
+}
+input { min-width: 180px; }
+input:focus, select:focus { outline: 1px solid #58a6ff; }
+
+button { cursor: pointer; background: var(--accent); border-color: var(--accent); font-weight: 500; }
+button:hover { background: var(--accent-hover); }
+button:disabled { opacity: 0.5; cursor: not-allowed; }
+button.secondary { background: transparent; border-color: var(--border); }
+button.secondary:hover { background: #21262d; }
+
+.status { font-size: 12px; color: var(--muted); margin-left: 8px; }
+.status.ok { color: #3fb950; }
+.status.err { color: #f85149; }
+
+/* ===== Layout ===== */
+.main {
+  flex: 1;
+  display: flex;
+  min-height: 0; /* КЛЮЧОВЕ для flex-контейнерів: без цього дочірні елементи з overflow не скроляться */
+  overflow: hidden;
+}
+
+/* ===== Sidebar ===== */
+.sidebar {
+  width: 300px;
+  flex-shrink: 0;
+  background: var(--panel);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+.sidebar-header {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+  color: var(--muted);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-shrink: 0;
+}
+.file-tree {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 8px 0;
+  font-size: 13px;
+}
+.tree-loading, .tree-error { padding: 12px; color: var(--muted); }
+.tree-error { color: #f85149; }
+
+.file-item {
+  padding: 5px 12px;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  margin: 0 4px;
+}
+.file-item:hover { background: #21262d; }
+.file-item.active { background: #1f6feb33; color: #58a6ff; }
+.file-item.folder { color: var(--text); font-weight: 500; }
+.file-item.other { color: var(--muted); cursor: default; }
+.file-item .icon { width: 16px; text-align: center; opacity: 0.8; flex-shrink: 0; }
+.file-item .name { overflow: hidden; text-overflow: ellipsis; }
+.file-item.dragging { opacity: 0.4; }
+.file-item.drop-target { outline: 2px dashed #58a6ff; background: #1f6feb22; }
+.folder-toggle { display: inline-block; width: 12px; text-align: center; opacity: 0.7; }
+.tree-root-drop {
+  margin: 4px 8px 8px;
+  padding: 6px 10px;
+  border: 1px dashed var(--border);
+  border-radius: 6px;
+  font-size: 12px;
+  color: var(--muted);
+  text-align: center;
+}
+.tree-root-drop.drop-target { outline: 2px dashed #58a6ff; background: #1f6feb22; color: #58a6ff; }
+
+/* ===== Editor area ===== */
+.editor-area {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+  position: relative;
+}
+.editor-toolbar {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  background: var(--panel);
+  font-size: 13px;
+  flex-wrap: wrap;
+  flex-shrink: 0;
+}
+.current-file {
+  color: var(--muted);
+  margin-right: auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#editor-container {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+}
+
+/* EasyMDE/CodeMirror: без min-height:0 і явного flex тут CodeMirror інколи "застрягає"
+   з висотою за замовчуванням (~300px чи 0) і виглядає так, ніби не можна ні
+   прокрутити, ні редагувати довгий текст. */
+/* EasyMDE/CodeMirror: без min-height:0 і явного flex тут CodeMirror інколи "застрягає"
+   з висотою за замовчуванням (розтягується під увесь текст) і виглядає так, ніби не
+   можна ні прокрутити, ні побачити кінець довгого документа. !important навмисно —
+   easymde.min.css визначає .EasyMDEContainer{display:block} з тією самою специфічністю,
+   і без !important порядок підключення CSS у <head> міг би знову це зламати. */
+.EasyMDEContainer {
+  flex: 1 !important;
+  min-height: 0 !important;
+  display: flex !important;
+  flex-direction: column !important;
+}
+.EasyMDEContainer .CodeMirror {
+  flex: 1 !important;
+  min-height: 0 !important;
+  height: auto !important;
+  border: none;
+  background: var(--bg);
+  color: var(--text);
+}
+.EasyMDEContainer .CodeMirror-scroll {
+  min-height: 0 !important;
+}
+.editor-toolbar.editor-toolbar {
+  background: var(--panel);
+  border-color: var(--border);
+}
+.editor-toolbar button, .editor-toolbar.editor-toolbar button {
+  color: var(--text);
+  background: transparent;
+  border: none;
+}
+.editor-toolbar button:hover { background: #21262d; }
+.editor-preview { background: var(--bg); color: var(--text); }
+.CodeMirror-fullscreen { z-index: 50; }
+
+/* ===== Прев'ю зображень: обгортка + ручка масштабування ===== */
+.md-img-wrap {
+  position: relative;
+  display: inline-block;
+  max-width: 100%;
+  min-width: 160px;
+  min-height: 90px;
+  vertical-align: top;
+  line-height: 0;
+  background: #1c2128;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-sizing: border-box;
+}
+.md-img-wrap img {
+  max-width: 100%;
+  display: block;
+  border-radius: 5px;
+  background: #21262d;
+  transition: opacity .15s;
+}
+.md-img-wrap.loading, .md-img-wrap.broken {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 10px;
+}
+.md-img-wrap.loading img, .md-img-wrap.broken img { display: none; }
+.md-img-wrap .md-img-placeholder-text {
+  display: none;
+  font-size: 12px;
+  color: var(--muted);
+  max-width: 260px;
+  word-break: break-word;
+  white-space: pre-line;
+}
+.md-img-wrap.loading .md-img-placeholder-text,
+.md-img-wrap.broken .md-img-placeholder-text { display: block; }
+.md-img-wrap.broken { border-color: var(--danger); background: #2d1214; }
+.md-img-wrap.broken .md-img-placeholder-text { color: #ff9d94; }
+.md-img-resize-handle {
+  position: absolute;
+  right: 2px;
+  bottom: 2px;
+  width: 14px;
+  height: 14px;
+  background: var(--accent);
+  border: 2px solid #fff;
+  border-radius: 3px;
+  cursor: nwse-resize;
+  opacity: 0;
+  transition: opacity .15s;
+  touch-action: none;
+}
+.md-img-wrap:hover .md-img-resize-handle,
+.md-img-wrap.resizing .md-img-resize-handle { opacity: 1; }
+.md-img-size-badge {
+  position: absolute;
+  left: 2px;
+  bottom: 2px;
+  background: rgba(0,0,0,.7);
+  color: #fff;
+  font-size: 11px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity .15s;
+}
+.md-img-wrap.resizing .md-img-size-badge { opacity: 1; }
+.render-error {
+  padding: 16px;
+  border: 1px solid var(--danger);
+  border-radius: 6px;
+  color: #ff9d94;
+  background: #2d1214;
+}
+
+/* ===== Drop-зона для перетягування файлів із ОС ===== */
+#editor-dropzone-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(35,134,54,0.18);
+  border: 2px dashed var(--accent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 15px;
+  font-weight: 500;
+  color: #fff;
+  pointer-events: none;
+  z-index: 20;
+}
+
+/* ===== Image preview overlay (клік по картинці в дереві) ===== */
+.image-preview-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,.8);
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: zoom-out;
+}
+.image-preview-box { max-width: 90vw; max-height: 90vh; text-align: center; }
+.image-preview-path { color: var(--muted); font-size: 12px; margin-bottom: 8px; }
+.image-preview-box img { max-width: 90vw; max-height: 80vh; border-radius: 6px; }
+
+/* ===== Login overlay ===== */
+#login-screen {
+  position: fixed;
+  inset: 0;
+  background: var(--bg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+.login-box {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 32px;
+  width: 100%;
+  max-width: 420px;
+}
+.login-box h2 { margin-bottom: 8px; font-size: 20px; }
+.login-box p { color: var(--muted); font-size: 13px; margin-bottom: 20px; line-height: 1.5; }
+.login-box label { display: block; font-size: 13px; margin-bottom: 4px; color: var(--muted); }
+.login-box input { width: 100%; margin-bottom: 14px; }
+.login-box button { width: 100%; padding: 10px; margin-top: 8px; }
+
+.hidden { display: none !important; }
+
+/* ===== Стилі контейнера, що йде в PDF (завжди світла "паперова" тема) ===== */
+#pdf-export-container {
+  position: fixed;
+  left: -99999px;
+  top: 0;
+  width: 780px;
+  background: #ffffff;
+  color: #111111;
+  padding: 32px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  font-size: 14px;
+  line-height: 1.6;
+}
+#pdf-export-container h1, #pdf-export-container h2, #pdf-export-container h3,
+#pdf-export-container h4, #pdf-export-container h5, #pdf-export-container h6 {
+  color: #0f172a;
+  margin: 1.2em 0 .5em;
+  line-height: 1.3;
+}
+#pdf-export-container h1 { font-size: 26px; border-bottom: 1px solid #e2e8f0; padding-bottom: 6px; }
+#pdf-export-container h2 { font-size: 21px; border-bottom: 1px solid #e2e8f0; padding-bottom: 4px; }
+#pdf-export-container h3 { font-size: 17px; }
+#pdf-export-container p { margin: .6em 0; }
+#pdf-export-container a { color: #1d4ed8; }
+#pdf-export-container img { max-width: 100%; border-radius: 4px; }
+#pdf-export-container code {
+  background: #f1f5f9; color: #b91c1c; padding: 1px 5px; border-radius: 4px;
+  font-family: "SFMono-Regular", Consolas, Menlo, monospace; font-size: 12.5px;
+}
+#pdf-export-container pre {
+  background: #0f172a; color: #e2e8f0; padding: 12px 14px; border-radius: 6px;
+  overflow-x: auto; margin: .8em 0;
+}
+#pdf-export-container pre code { background: none; color: inherit; padding: 0; }
+#pdf-export-container blockquote {
+  border-left: 3px solid #cbd5e1; margin: .8em 0; padding: 2px 14px; color: #475569;
+}
+#pdf-export-container table { border-collapse: collapse; width: 100%; margin: .8em 0; }
+#pdf-export-container th, #pdf-export-container td {
+  border: 1px solid #e2e8f0; padding: 6px 10px; text-align: left; font-size: 13px;
+}
+#pdf-export-container th { background: #f8fafc; }
+#pdf-export-container ul, #pdf-export-container ol { padding-left: 1.4em; margin: .5em 0; }
+#pdf-export-container hr { border: none; border-top: 1px solid #e2e8f0; margin: 1.2em 0; }
+#pdf-export-container .md-img-wrap { background: #f8fafc; border-color: #e2e8f0; }
+#pdf-export-container .md-img-wrap.broken { background: #fef2f2; border-color: #fca5a5; }
+#pdf-export-container .md-img-placeholder-text { color: #64748b; }
+#pdf-export-container .md-img-wrap.broken .md-img-placeholder-text { color: #b91c1c; }
+#pdf-export-container .md-img-resize-handle { display: none; }
