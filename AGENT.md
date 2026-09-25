@@ -1,160 +1,168 @@
-# AGENT.md — правила роботи агента с проектом MD-Editor
+# AGENT.md — rules for working with the MD-Editor project
 
-Цей файл — «шпаргалка» для AI-ассистента (або новаго разработчика) у наступних
-сессиях. Тут зiбрано: технології, нюанси архітектуры, що уже робить, що планується,
-а головне — реалні «гро́бли» з минулого досвіду, чтобы не наступати на них знову.
+This file is a quick-reference / cheat-sheet for AI assistants (or new developers)
+working on this repository in future sessions. It covers: technologies, architecture
+conventions, what is already implemented, what is planned, and — most importantly —
+the real pitfalls learned from past experience, so we don't step on them again.
 
 ---
 
-## 1. Коротке о проекті
+## 1. About the project
 
-Лёгкий **редактор `.md`-файлов для GitHub-репозитория**, що працюе прямо в браузері.
-Клиент GitHub REST API через **Personal Access Token** (PAT), який зберігається
-**тільки** в `sessionStorage`. Без бекенда, без збірки, без Electron — відкривається
-статично (GitHub Pages / чисто `node serve.mjs`).
+A lightweight **editor for `.md` files in a GitHub repository** that runs entirely
+in the browser. It talks to the GitHub REST API using a **Personal Access Token
+(PAT)**, which is stored **only** in `sessionStorage`. No backend, no build step,
+no Electron — it runs as a static site (GitHub Pages / plain `node serve.mjs`).
 
-Гарантия «без збірки» — **фундаментальне правило**. Не вводити TypeScript,
-бандлеры, препроцессори чи бекенд без явного згодзи с користувачем.
+**The "no build" guarantee is a fundamental rule.** Do not introduce TypeScript,
+bundlers, preprocessors, or a backend without explicit user agreement.
 
-## 2. Технологіи / стек
+## 2. Tech stack
 
-| Що | Де (як підключено) |
+| What | How it's loaded |
 |---|---|
-| Чистий JS (ES-модули, `type="module"`) | Свой код в `js/*.js` — без збірки, браузер разбирає как є |
-| **EasyMDE** (на базі CodeMirror 5) | CDN (`easymde.min.js/css`) |
-| **marked** (markdown -> HTML) | CDN (глобально `window.marked`) |
-| **html2pdf.js** v0.14.0 (html2canvas + jsPDF) | CDN — для PDF-експорту |
-| **Font Awesome** | CDN — іконки тулбару |
+| Plain JS (ES modules, `type="module"`) | Our code lives in `js/*.js` — no build, the browser parses it as-is |
+| **EasyMDE** (based on CodeMirror 5) | CDN (`easymde.min.js/css`) |
+| **marked** (markdown -> HTML) | CDN (global `window.marked`) |
+| **html2pdf.js** v0.14.0 (html2canvas + jsPDF) | CDN — for PDF export |
+| **Font Awesome** | CDN — toolbar icons |
 
-GitHub REST API: `https://api.github.com${path}` с заголовками
-`Authorization: Bearer <token>`, `X-GitHub-Api-Version: 2022-11-28`.
+GitHub REST API: `https://api.github.com${path}` with headers
+`Authorization: Bearer <token>` and `X-GitHub-Api-Version: 2022-11-28`.
 
-## 3. Запуск и тестирование
+## 3. Run and test
 
 ```bash
-node serve.mjs            # локальный сервер -> http://localhost:8080 (порт: process.env.PORT)
-npm install               # поставить dev-залежності для тестів (jsdom, marked, ...)
-npm test                  # node --test test/*.test.js - 34 юніт-тести
+node serve.mjs            # local server -> http://localhost:8080 (port: process.env.PORT)
+npm install               # install dev-dependencies for tests (jsdom, marked, ...)
+npm test                  # node --test test/*.test.js — 34 unit tests
 ```
-- Браузер не дає `<script type="module">` з `file://` — обов'язково по http(s).
-- E2E: `pip install playwright && playwright install chromium`, далі
-  `node serve.mjs &`, `python3 e2e_smoke_test.py` (мок GitHub API, реальний Chromium).
+- Browsers won't load `<script type="module">` from `file://` — the page must be
+  served over http(s).
+- E2E: `pip install playwright && playwright install chromium`, then
+  `node serve.mjs &`, then `python3 e2e_smoke_test.py` (mocks the GitHub API,
+  real Chromium).
 
-Тести, що потребує підключені бібліотеки (`image-preview`, `markdown-tokens`),
-вимагають `npm install` сперва (вимагають `jsdom`, `marked`). Якщо нема
-`node_modules` — вони падають как «module not found», это норма окружения, а не ваш код.
+Tests that pull in libraries (`image-preview`, `markdown-tokens`) need `npm install`
+first (they require `jsdom` and `marked`). If `node_modules` is missing they fail
+with "module not found" — that's an environment issue, not your code.
 
-## 4. Структура проекта
+## 4. Project structure
 
 ```
-index.html               HTML-каркас; підключає CDN і js/app.js
-css/app.css               всі стилі
-AGENT.md                  цей файл
-doc/future.md             ідеи/планы на майбутні
-serve.mjs                 мінімальний локальний сервер (Node, вбудований http)
+index.html               HTML skeleton; loads the CDN libs and js/app.js
+css/app.css              all styles
+AGENT.md                 this file
+doc/future.md            ideas/plans for the near future
+serve.mjs                minimal local server (Node built-in http)
 js/
-  paths.js                чисті функції шляхів/кодування (без DOM/сети)
-  markdown-tokens.js      розбір зображень/посилань, «канонічний» HTML (без DOM/сети)
-  reference-rewriter.js   перерахунок відносних посилань при переміщенні (без сети)
-  github-client.js        тонкий клієнт GitHub REST API
-  image-resolver.js       шлях у markdown -> data: URL через API, з кешем
-  file-mover.js           оркестрація переміщення файлу + авто-оновление посилань
-  image-preview.js        DOM: превью зображень, ручка resize
-  editor.js               обгортка EasyMDE (previewRender, refresh, inline-картинки)
-  file-tree.js            дерево файлів + drag&drop
-  upload.js               завантаження зображень (drag&drop ОС + буфер + кнопка)
-  pdf-export.js           експорт активної сторінки в PDF
-  app.js                  точка збирання, стан, обробники DOM
-test/*.test.js            34 юніт-тести (node:test)
-e2e_smoke_test.py         наскрізний тест (Playwright)
+  paths.js               pure path/encoding helpers (no DOM, no network)
+  markdown-tokens.js     image/link recognition, "canonical" HTML (no DOM, no network)
+  reference-rewriter.js  relative-link recomputation on move (no network)
+  github-client.js       thin GitHub REST API client
+  image-resolver.js      markdown path -> data: URL via the API, with cache
+  file-mover.js          file-move orchestration + auto reference update
+  image-preview.js       DOM: preview images, resize handle
+  editor.js              EasyMDE wrapper (previewRender, refresh, inline images)
+  file-tree.js           file tree + drag&drop
+  upload.js              image upload (OS drag&drop + clipboard + toolbar button)
+  pdf-export.js          export the active page to PDF
+  app.js                 wiring point, state, DOM event handlers
+test/*.test.js           34 unit tests (node:test)
+e2e_smoke_test.py        end-to-end browser test (Playwright)
 ```
 
-`.kilo/` — службове робоче дерево/обслуговіщі dump, **не чіпати и не комитить**.
+`.kilo/` is workspace/support dump — **don't touch it and don't commit it**.
 
-## 5. Архитектурні принципи
+## 5. Architecture principles
 
-1. **Чистий шар від UI.** `paths.js`, `markdown-tokens.js`, `reference-rewriter.js`
-   не мають **ЖОДНОЇ** залежності від DOM/`document` та мережі (`fetch`). Всю
-   «небезпечну» логіку (парсинг, перерахунок шляхів) тримаем ізоловано, щоб можна
-   було юніт-тестувати в Node без браузера. Дотримуйся — не тягай `document`/`fetch` в ці модулі.
-2. Модулі спілкується через «dependency injection» (deps-объекти, рендерер передається
-   ззовні) — так чисту логіку легко підмінити моком в тестах.
-3. Всі коментарии и сообщения — **украинская** (стандарт репозиторію).
-4. Ніяких глобальных змін стану без необхідної причини.
+1. **Keep logic separated from the UI.** `paths.js`, `markdown-tokens.js` and
+   `reference-rewriter.js` must have **ZERO** dependency on DOM/`document` or the
+   network (`fetch`). Keep all "dangerous" logic (parsing, path recomputation)
+   isolated so it can be unit-tested in Node without a browser. Follow this — don't
+   drag `document`/`fetch` into those modules.
+2. Modules communicate via **dependency injection** (deps objects; the renderer is
+   passed in from outside) — this makes it easy to swap in mocks for tests.
+3. All comments and user-facing messages are in **Ukrainian** (the repo standard).
+4. No global state changes unless necessary.
 
-## 6. Ключеві нюансы (гро́бли из опыта — ВАЖНО)
+## 6. Key gotchas (learned the hard way — IMPORTANT)
 
-### 6.1 Порядок CSS-каскада
-`css/app.css` підключать **ПІСЛЯ** `easymde.min.css` і fontawesome.
-Якщо `app.css` завантажать раніше — `easymde.min.css` перебʼе наш `display:flex`
-на `.EasyMDEContainer`, и CodeMirror перестає обмежуваться по висоті
-(«не скролится, показує весь текст одним блоком»). Закоментовано и в `index.html`.
+### 6.1 CSS cascade order
+Load `css/app.css` **AFTER** `easymde.min.css` and Font Awesome.
+If `app.css` loads earlier, `easymde.min.css` overrides our `display:flex` on
+`.EasyMDEContainer`, and CodeMirror stops being height-limited ("doesn't scroll,
+shows the whole text as one block"). This is also commented in `index.html`.
 
-### 6.2 EasyMDE `previewRender` — чисто синхронний
-У `editor.js` превью-рендер мусить **нічого не присво́юва** в `previewEl` самостно.
-EasyMDE САМ виконує `previewEl.innerHTML = ...` після виклику. Всю постобробку
-(ручки resize + резолв картинок) плануємо на наступний тік `setTimeout(0)`, і
-защищаєм от гонк через лічилник `previewRenderToken` (якщо прийшов новіший
-рендер — старий пром-результат отмається).
+### 6.2 EasyMDE `previewRender` must stay synchronous
+In `editor.js` the preview renderer must **not assign anything** to `previewEl`
+itself. EasyMDE itself runs `previewEl.innerHTML = ...` after calling it. All
+post-processing (resize handles + image resolving) is scheduled on the next tick
+via `setTimeout(0)`, protected from races with the `previewRenderToken` counter
+(a newer render arriving means the older async result is dropped).
 
-### 6.3 CodeMirror.refresh() після показа / ресайзу
-CodeMirror може замірити висоту контейнера ДО того, як отримав реальні розміри
-(flex-layout, скрытые батьківськи елементи) и «застряти». Тому при відкрітті файлу
-і зміні розміру викликаемо `refresh()` — и одразу, и ще раз на наступному кадрі
-(`requestAnimationFrame`). Також `ResizeObserver` на `.editor-area`.
+### 6.3 Call CodeMirror.refresh() after showing / resizing
+CodeMirror can measure the container height *before* it actually gets its real size
+(flex layouts, temporarily hidden parents) and get stuck. So when a file opens or
+the size changes we call `refresh()` — both immediately and again on the next frame
+(`requestAnimationFrame`). There's also a `ResizeObserver` on `.editor-area`.
 
-### 6.4 Live inline preview зображень в CodeMirror
-В `editor.js` зображення markdown (`![alt](path)`) візуально заміняється реальною
-картинкою прямо в коді через `cm.markText(..., { replacedWith })`. Оригинальный
-`.md` текст не міняється — GitHub зберігає оригінальне. Оброблено и как вставка
-из буфера (paste image). Тільки для markdown-посилань на зображення.
+### 6.4 Live inline image preview in CodeMirror
+In `editor.js`, markdown images (`![alt](path)`) are visually replaced by the real
+image right inside the code via `cm.markText(..., { replacedWith })`. The original
+`.md` text is unchanged — GitHub still stores the original. Clipboard paste of
+images is also handled. Only markdown image links.
 
-### 6.5 Экспорт PDF (ПОСТІЙННАЯ пастка — ЗАПАМЯТУЙ!)
-HTML2PDF.js (html2canvas) **клонирует** элемент в свой контейнер и малює його.
-- **НЕ задавай контейнеру, що йде в `.from()`, стили `position: fixed`,
-  негативный `z-index`, `opacity`, `transform`, `left: -99999px`** — інак canvas
-  рендерится порожнім, и в PDF попадає **порожня сторінка**.
-- Правильный патерн (вже реализован в `pdf-export.js`): нейтральный контейнер
-  (в css без позиціонування) + **прозорий holder** (`position:fixed;left:0;top:0;
-  opacity:0;pointer-events:none;z-index:-9999;`), в який вкладаємо контейнер.
-  В `.from(container)` передаємо тільки нейтральный контейнер, holder html2canvas не бачить.
-- Версия плагина: `html2pdf.js@0.14.0`, должна совпадать с `package.json`.
+### 6.5 PDF export (REPEATED GOTCHA — REMEMBER THIS!)
+html2pdf.js (html2canvas) **clones** the element into its own container and renders it.
+- **Do NOT put `position: fixed`, a negative `z-index`, `opacity`, `transform`, or
+  `left: -99999px` on the element passed to `.from()`** — otherwise the canvas
+  renders blank and the PDF comes out as a **blank page**.
+- The correct pattern (already implemented in `pdf-export.js`): a neutral container
+  (no positioning in the CSS) plus a **transparent holder**
+  (`position:fixed;left:0;top:0;opacity:0;pointer-events:none;z-index:-9999;`)
+  that wraps the container. Pass only the neutral `container` to `.from(container)`;
+  html2canvas never sees the holder.
+- Plugin version: `html2pdf.js@0.14.0`, must match `package.json`.
 
-### 6.6 Base64 и кирилица/эмодзи
-`btoa`/`atob` не робат с UTF-8 (кирилица, эмодзи). Завжди использовать
-`utf8ToB64`/`b64ToUtf8` (на базі `encodeURIComponent`/`decodeURIComponent`).
+### 6.6 base64 with Cyrillic / emoji
+`btoa`/`atob` don't work with UTF-8 (Cyrillic, emoji). Always use
+`utf8ToB64`/`b64ToUtf8` (built on `encodeURIComponent`/`decodeURIComponent`).
 
-### 6.7 GitHub Contents API лимит ~1MB
-`getFileB64` спочатку пробує Contents API; при невдачі падає на Git Blobs API
-(покрывает большие файлы). Не спускати на лимит без fallback.
+### 6.7 GitHub Contents API ~1MB limit
+`getFileB64` first tries the Contents API; on failure it falls back to the Git
+Blobs API (covers larger files). Don't drop to the limit without that fallback.
 
-### 6.8 Безопаснiсть токена
-Токен тільки в **`sessionStorage`** (не `localStorage`), очистка при «Вийти».
+### 6.8 Token security
+The token lives only in **`sessionStorage`** (not `localStorage`); cleared on log-out.
 
-## 7. Що вже реализовано (v2.0.0)
-- Авторизація через PAT + перевірка репозиторію (getRepoInfo).
-- Дерево файлів + drag&drop файлів между папками с авто-перерахунком власных и
-  чужих посилань (відносні, кореневі `/шлях`, `<img>`, `[текст](шлях)`).
-- Редагування markdown через EasyMDE; створення нових `.md`.
-- Зображення: показ у превью и **live картинки прямо в CodeMirror**, масштабування
-  ручкою (ширина пише в `<img width>`), вставка из буфера (скріншот) и drag&drop ОС,
-  авто-оновление у репозиторій + відносні поселенки.
-- Кеш зображень (`ImageResolver`).
-- Експорт активної сторінки в PDF (html2pdf.js, зі вставленными картинками).
+## 7. Already implemented (v2.0.0)
+- Authentication via PAT + repo validation (`getRepoInfo`).
+- File tree + drag&drop of files between folders, with automatic recomputation of
+  own and other links (relative, root-relative `/path`, `<img>`, `[text](path)`).
+- Editing markdown via EasyMDE; creating new `.md` files.
+- Images: shown in the preview **and live right in CodeMirror**, resizable by a
+  handle (width written into `<img width>`), insert from clipboard (screenshot) and
+  OS drag&drop, auto-uploaded to the repo with relative links.
+- Image cache (`ImageResolver`).
+- PDF export of the active page (html2pdf.js, with images included).
 
-## 8. Плани (див. `doc/future.md`)
-**OAuth-вхід через GitHub** без ручного PAT («увійти через аккаунт», 2FA на телефон).
-&#9888; GitHub OAuth не поддерживает PKCE и вимагає `client_secret` для обміну коду
-на токен ⇒ потрібен **міні-бекенд/прокси** (Node или serverless). Детальні варіанти
-(міні-Node, serverless-функції, Device Flow, гібрид с PAT) чистя в `doc/future.md` —
-там же список правок в `app.js`/`index.html`/`github-client.js`/`serve.mjs`.
+## 8. Plans (see `doc/future.md`)
+**OAuth login via GitHub** without a hand-typed PAT ("sign in with your account",
+2FA on the phone). ⚠ GitHub OAuth does NOT support PKCE and requires a
+`client_secret` to exchange the code for a token ⇒ a **mini-backend/proxy** (Node or
+serverless) is needed. The detailed options (mini-Node, serverless functions,
+Device Flow, hybrid with PAT) are in `doc/future.md` — along with the list of
+touch points in `app.js` / `index.html` / `github-client.js` / `serve.mjs`.
 
-## 9. Правила перед/після правок
-1. **Перед зміною** прочитай відповідний модуль и `AGENT.md` (особенно роздiл 6).
-2. Перевірь, що не порушив «чистий шар» (нема `document`/`fetch` в paths/markdown-tokens/reference-rewriter).
-3. Після правок `css/` — перевірь каскад (роздiл 6.1) и при PDF-правках — роздiл 6.5.
-4. Запусти `npm test` (34 тести). Якщо падають `image-preview`/`markdown-tokens`
-   без `node_modules` — це окружение, не твой код.
-5. Після правок редактора/превью — запусти `e2e_smoke_test.py`.
-6. Не редактируй/не комити файли в `.kilo/`.
-7. Коментарий в коді пиш у росчій на украинском.
+## 9. Working rules / checklist
+1. **Before changing something**, read the relevant module and `AGENT.md`
+   (especially Section 6).
+2. Verify you haven't broken the "pure layer" (no `document`/`fetch` in
+   `paths.js`, `markdown-tokens.js`, `reference-rewriter.js`).
+3. After CSS changes, check the cascade (Section 6.1); for PDF changes see Section 6.5.
+4. Run `npm test` (34 tests). If `image-preview`/`markdown-tokens` fail without
+   `node_modules`, that's the environment, not your code.
+5. After editor/preview changes, run `e2e_smoke_test.py`.
+6. Don't edit or commit files under `.kilo/`.
+7. Write code comments in Ukrainian.
