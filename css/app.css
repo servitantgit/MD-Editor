@@ -397,3 +397,30 @@ button.secondary:hover { background: #21262d; }
 #pdf-export-container .md-img-placeholder-text { color: #64748b; }
 #pdf-export-container .md-img-wrap.broken .md-img-placeholder-text { color: #b91c1c; }
 #pdf-export-container .md-img-resize-handle { display: none; }
+
+
+/* ===== Live Preview зображень прямо в CodeMirror =====
+   Текст ![alt](path) залишається в документі, але в редакторі його візуально
+   замінює реальна картинка. MarkText EasyMDE/CodeMirror зберігає оригінальний
+   Markdown, тому збереження у GitHub не змінюється. */
+.cm-inline-image {
+  display: inline-block;
+  vertical-align: middle;
+  max-width: 100%;
+  margin: 4px 0;
+  border-radius: 4px;
+  cursor: default;
+}
+.cm-inline-image-img {
+  max-width: 100%;
+  max-height: 420px;
+  width: auto;
+  height: auto;
+  border-radius: 4px;
+}
+.cm-inline-image-loading {
+  display: inline-block;
+  padding: 2px 6px;
+  color: var(--muted);
+  font-size: 13px;
+}

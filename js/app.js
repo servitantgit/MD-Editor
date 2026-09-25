@@ -264,6 +264,7 @@ async function openFile(path) {
     state.currentSha = sha;
     editorHandle.easyMDE.value(b64ToUtf8(b64));
     editorHandle.refreshLayout();
+    editorHandle.refreshInlineImages();
 
     els.btnSave.disabled = false;
     els.btnExportPdf.disabled = false;
