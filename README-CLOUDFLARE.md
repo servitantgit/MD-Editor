@@ -1,12 +1,11 @@
 # Cloudflare deployment
 
-Wrangler must use `md-editor-v2` as the Workers static-assets directory.
-Do not deploy the repository root as the assets directory, because the build
-may create `node_modules/`, including `node_modules/workerd/bin/workerd`.
+The application files stay in the repository root so GitHub renders `README.md` normally and the editor is served from `/`.
 
-The included `wrangler.toml` sets:
+`wrangler.toml` keeps the Workers Assets directory at the repository root, while `.assetsignore` excludes `node_modules` and development-only files from the deployed assets.
 
-[assets]
-directory = "./md-editor-v2"
+Deploy from the repository root:
 
-Deploy from the repository root with `npx wrangler deploy`.
+```bash
+npx wrangler deploy
+```
