@@ -348,16 +348,12 @@ button.secondary:hover { background: #21262d; }
 
 .hidden { display: none !important; }
 
-/* ===== Стилі контейнера, що йде в PDF (завжди світла "паперова" тема) =====
-   ВАЖЛИВО: тут НЕ задаємо position/fixed/z-index/opacity/transform!
-   html2pdf.js КЛОНУЕ цей елемент у своЙ контейнер сторінки і малює її через
-   html2canvas. Клон зберігає id, тож стили нижче справедливі і для клону.
-   Будь-яке позиціонування (напр. position:fixed + left:-99999px або
-   z-index:-9999) збиває рендер canvas -> у PDF потрапляє порожня сторінка.
-   Тож сховаємо контейнер від очей ЗОВНИ (у непрозорий holder) прямо в
-   pdf-export.js, а сам контейнер має бути нейтральним блоком. */
+/* ===== Стилі контейнера, що йде в PDF (завжди світла "паперова" тема) ===== */
 #pdf-export-container {
-  width: 800px;
+  position: fixed;
+  left: -99999px;
+  top: 0;
+  width: 780px;
   background: #ffffff;
   color: #111111;
   padding: 32px;
