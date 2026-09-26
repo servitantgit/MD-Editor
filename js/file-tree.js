@@ -143,13 +143,17 @@ export class FileTree {
     });
   }
 
-  setActive(path) {
+  clearActive() {
     this.containerEl.querySelectorAll('.file-item').forEach((el) => el.classList.remove('active'));
+  }
+
+  setActive(path) {
+    this.clearActive();
     const active = this.containerEl.querySelector(`.file-item[data-path="${cssEscape(path)}"]`);
     if (active) active.classList.add('active');
   }
 }
 
 function cssEscape(s) {
-  return window.CSS && CSS.escape ? CSS.escape(s) : s.replace(/["\\]/g, '\\$&');
+  return typeof CSS !== 'undefined' && CSS.escape ? CSS.escape(s) : s.replace(/["\\]/g, '\\$&');
 }

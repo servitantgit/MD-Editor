@@ -113,6 +113,13 @@ with sync_playwright() as p:
     assert image_toolbar.count() == 1, "image toolbar button is missing"
     print("✓ кнопка зображення використовує завантаження")
 
+    # Кнопка видалення поруч із "Зберегти"/"PDF" має бути доступною для відкритого
+    # файлу (клік по ній не робимо: він тягне confirm() і реальний DELETE у мок).
+    delete_btn = page.locator("#btn-delete")
+    assert delete_btn.count() == 1, "delete toolbar button is missing"
+    assert delete_btn.is_enabled(), "delete button must be enabled once a file is open"
+    print("✓ кнопка видалення доступна для відкритого файлу")
+
     # --- 2. Прокрутка довгого документа ---
     scroll_info = page.evaluate("""() => {
         const el = document.querySelector('.CodeMirror-scroll');

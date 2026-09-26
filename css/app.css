@@ -209,6 +209,14 @@ button.secondary:hover { background: #21262d; }
   border: none;
 }
 .editor-toolbar button:hover { background: #21262d; }
+/* Кнопка видалення: єдина "небезпечна" в панелі. Її треба прописати тут (а не в
+   базових стилях кнопок), бо .editor-toolbar button вище задає color і border: none
+   з такою ж специфічністю — без цих правил вона виглядала б як звичайна сіра. */
+.editor-toolbar button.danger, .editor-toolbar.editor-toolbar button.danger {
+  color: #ff7b72;
+  border: 1px solid var(--danger);
+}
+.editor-toolbar button.danger:hover:not(:disabled) { background: #2d1214; }
 .editor-preview { background: var(--bg); color: var(--text); }
 .CodeMirror-fullscreen { z-index: 50; }
 

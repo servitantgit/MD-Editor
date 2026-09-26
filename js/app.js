@@ -31,6 +31,7 @@ const els = {
   currentFileLabel: document.getElementById('current-file'),
   btnSave: document.getElementById('btn-save'),
   btnExportPdf: document.getElementById('btn-export-pdf'),
+  btnDelete: document.getElementById('btn-delete'),
   saveStatus: document.getElementById('save-status'),
 
   editorContainer: document.getElementById('editor-container'),
@@ -72,6 +73,7 @@ function init() {
   els.btnNewFile.onclick = onCreateNewFile;
   els.btnSave.onclick = onSaveFile;
   els.btnExportPdf.onclick = onExportPdf;
+  els.btnDelete.onclick = onDeleteFile;
 }
 
 function readSession() {
@@ -256,6 +258,7 @@ async function openFile(path) {
   els.currentFileLabel.textContent = path;
   els.btnSave.disabled = true;
   els.btnExportPdf.disabled = true;
+  els.btnDelete.disabled = true;
   setSaveStatus('Завантаження...', false);
 
   try {
@@ -268,6 +271,7 @@ async function openFile(path) {
 
     els.btnSave.disabled = false;
     els.btnExportPdf.disabled = false;
+    els.btnDelete.disabled = false;
     setSaveStatus('Готово', false);
   } catch (e) {
     setSaveStatus('Помилка: ' + e.message, true);
@@ -289,6 +293,49 @@ async function onSaveFile() {
   } finally {
     els.btnSave.disabled = false;
   }
+}
+
+// Видалення активного файлу. GitHub API вимагає sha того самого blob'а, тож
+// беремо state.currentSha (він завжди відповідає останній відомій версії файлу).
+async function onDeleteFile() {
+  const path = state.currentPath;
+  if (!path) return;
+
+  const confirmed = confirm(`Ви дійсно хочете видалити файл?\n\n${path}\n\nФайл буде видалено з репозиторію, дію не можна скасувати.`);
+  if (!confirmed) return;
+
+  els.btnDelete.disabled = true;
+  els.btnSave.disabled = true;
+  setSaveStatus('Видалення...', false);
+
+  try {
+    await state.client.deleteFile(path, state.currentSha, `Delete ${path}`);
+    imageResolver.invalidate(path);
+    closeCurrentFile();
+    await loadTree();
+    setSaveStatus(`Файл видалено: ${path}`, false);
+  } catch (e) {
+    // Файл лишився на місці — повертаємо кнопки в робочий стан, щоб можна було
+    // або повторити спробу, або зберегти решту правок.
+    els.btnSave.disabled = false;
+    els.btnDelete.disabled = false;
+    setSaveStatus('Помилка видалення: ' + e.message, true);
+  }
+}
+
+// Після видалення (або коли жоден файл не відкритий) редактор не має тримати
+// вміст видаленого файлу: чистимо текст, знімаємо inline-картинки й блокуємо дії.
+function closeCurrentFile() {
+  state.currentPath = null;
+  state.currentSha = null;
+  els.currentFileLabel.textContent = 'Файл не вибрано';
+  fileTree.clearActive();
+  editorHandle.easyMDE.value('');
+  editorHandle.refreshLayout();
+  editorHandle.refreshInlineImages();
+  els.btnSave.disabled = true;
+  els.btnExportPdf.disabled = true;
+  els.btnDelete.disabled = true;
 }
 
 async function onCreateNewFile() {
