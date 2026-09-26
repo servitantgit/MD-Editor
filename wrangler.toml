@@ -1,0 +1,5 @@
+name = "gh-md-editor"
+compatibility_date = "2026-09-26"
+
+[assets]
+directory = "./md-editor-v2"
