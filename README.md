@@ -12,6 +12,18 @@ Works with no backend and no build step: renders and edits Markdown, resolves
 images in the preview, supports drag & drop for files and images,
 **folder management**, and exports the active page to PDF.
 
+## Screenshots
+
+<p align="center">
+  <img src="https://github.com/user-attachments/assets/d86d4d1d-4472-40e0-b778-76da0290da4c" alt="GitHub MD Editor — sign-in screen" width="460"><br>
+  <sub><b>Sign in with GitHub</b> — OAuth login, no manual token to create or paste.</sub>
+</p>
+
+<p align="center">
+  <img src="https://github.com/user-attachments/assets/f4949051-31fd-4fca-acf3-c976a22b9685" alt="GitHub MD Editor — main editing view" width="900"><br>
+  <sub>File tree, live preview and toolbar side by side while editing a note.</sub>
+</p>
+
 ## Architecture
 
 Plain JavaScript (ES modules), no TypeScript, no bundler — opens directly in
