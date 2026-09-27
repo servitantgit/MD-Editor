@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { moveFile } from '../js/file-mover.js';
 import { utf8ToB64, b64ToUtf8 } from '../js/github-client.js';
 
-/** Мінімальний фейковий клієнт із тим самим інтерфейсом, що й GitHubClient, поверх Map у пам'яті. */
+/** Minimal fake client with the same interface as GitHubClient, backed by an in-memory Map. */
 class FakeClient {
   constructor(files) {
     // files: { path: text }
@@ -65,7 +65,7 @@ test('moveFile updates references in OTHER md files across the repo (relative an
 
   assert.equal(client.files.get('AI corrected/Other/refA.md').text, '![p](../../Asset/sub/pic.jpg)\n');
   assert.equal(client.files.get('AI corrected/Other/refB.md').text, '![p](/Asset/sub/pic.jpg)\n');
-  // непов'язаний файл лишається без змін
+  // the unrelated file stays unchanged
   assert.equal(client.files.get('AI corrected/Other/refC.md').text, '![p](../../Asset/unrelated.jpg)\n');
 });
 
@@ -77,7 +77,7 @@ test('moveFile does not choke when one referencing file fails to update (keeps g
   const allFiles = [
     { path: 'Asset/pic.jpg' },
     { path: 'AI corrected/A/ref.md' },
-    { path: 'AI corrected/B/missing.md' }, // існує в дереві, але зник із "репо" -> getFileB64 кине помилку
+    { path: 'AI corrected/B/missing.md' }, // in the tree but gone from the "repo" -> getFileB64 will throw
   ];
 
   const result = await moveFile(client, allFiles, 'Asset/pic.jpg', 'Asset/new');

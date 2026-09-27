@@ -63,7 +63,7 @@ button.secondary:hover { background: #21262d; }
 .main {
   flex: 1;
   display: flex;
-  min-height: 0; /* КЛЮЧОВЕ для flex-контейнерів: без цього дочірні елементи з overflow не скроляться */
+  min-height: 0; /* KEY for flex containers: without this, overflowing children don't scroll */
   overflow: hidden;
 }
 
@@ -221,14 +221,14 @@ button.secondary:hover { background: #21262d; }
   position: relative;
 }
 
-/* EasyMDE/CodeMirror: без min-height:0 і явного flex тут CodeMirror інколи "застрягає"
-   з висотою за замовчуванням (~300px чи 0) і виглядає так, ніби не можна ні
-   прокрутити, ні редагувати довгий текст. */
-/* EasyMDE/CodeMirror: без min-height:0 і явного flex тут CodeMirror інколи "застрягає"
-   з висотою за замовчуванням (розтягується під увесь текст) і виглядає так, ніби не
-   можна ні прокрутити, ні побачити кінець довгого документа. !important навмисно —
-   easymde.min.css визначає .EasyMDEContainer{display:block} з тією самою специфічністю,
-   і без !important порядок підключення CSS у <head> міг би знову це зламати. */
+/* EasyMDE/CodeMirror: without min-height:0 and explicit flex here, CodeMirror sometimes "gets stuck"
+   with the default height (~300px or 0) and looks like you can neither
+   scroll nor edit long text. */
+/* EasyMDE/CodeMirror: without min-height:0 and explicit flex here, CodeMirror sometimes "gets stuck"
+   with the default height (stretches to fit all text) and looks like you can neither
+   scroll nor see the end of a long document. !important on purpose —
+   easymde.min.css defines .EasyMDEContainer{display:block} with the same specificity,
+   and without !important the CSS load order in <head> could break this again. */
 .EasyMDEContainer {
   flex: 1 !important;
   min-height: 0 !important;
@@ -262,9 +262,9 @@ button.secondary:hover { background: #21262d; }
   border: none;
 }
 .editor-toolbar button:hover { background: #21262d; }
-/* Кнопка видалення: єдина "небезпечна" в панелі. Її треба прописати тут (а не в
-   базових стилях кнопок), бо .editor-toolbar button вище задає color і border: none
-   з такою ж специфічністю — без цих правил вона виглядала б як звичайна сіра. */
+/* Delete button: the only "dangerous" one in the toolbar. It has to be defined here (not in
+   the base button styles), because .editor-toolbar button above sets color and border: none
+   with the same specificity — without these rules it would look like an ordinary gray one. */
 .editor-toolbar button.danger, .editor-toolbar.editor-toolbar button.danger {
   color: #ff7b72;
   border: 1px solid var(--danger);
@@ -273,7 +273,7 @@ button.secondary:hover { background: #21262d; }
 .editor-preview { background: var(--bg); color: var(--text); }
 .CodeMirror-fullscreen { z-index: 50; }
 
-/* ===== Прев'ю зображень: обгортка + ручка масштабування ===== */
+/* ===== Image preview: wrapper + resize handle ===== */
 .md-img-wrap {
   position: relative;
   display: inline-block;
@@ -352,7 +352,7 @@ button.secondary:hover { background: #21262d; }
   background: #2d1214;
 }
 
-/* ===== Drop-зона для перетягування файлів із ОС ===== */
+/* ===== Drop zone for dragging files from the OS ===== */
 #editor-dropzone-overlay {
   position: absolute;
   inset: 0;
@@ -368,7 +368,7 @@ button.secondary:hover { background: #21262d; }
   z-index: 20;
 }
 
-/* ===== Image preview overlay (клік по картинці в дереві) ===== */
+/* ===== Image preview overlay (click on an image in the tree) ===== */
 .image-preview-overlay {
   position: fixed;
   inset: 0;
@@ -409,7 +409,7 @@ button.secondary:hover { background: #21262d; }
 
 .hidden { display: none !important; }
 
-/* ===== Стилі контейнера, що йде в PDF (завжди світла "паперова" тема) ===== */
+/* ===== Styles for the container that goes into the PDF (always a light "paper" theme) ===== */
 #pdf-export-container {
   position: fixed;
   left: -99999px;
@@ -460,10 +460,10 @@ button.secondary:hover { background: #21262d; }
 #pdf-export-container .md-img-resize-handle { display: none; }
 
 
-/* ===== Live Preview зображень прямо в CodeMirror =====
-   Текст ![alt](path) залишається в документі, але в редакторі його візуально
-   замінює реальна картинка. MarkText EasyMDE/CodeMirror зберігає оригінальний
-   Markdown, тому збереження у GitHub не змінюється. */
+/* ===== Live Preview of images right inside CodeMirror =====
+   The ![alt](path) text stays in the document, but in the editor it is visually
+   replaced by the real picture. EasyMDE/CodeMirror's MarkText keeps the original
+   Markdown, so saving to GitHub doesn't change. */
 .cm-inline-image {
   display: inline-block;
   vertical-align: middle;

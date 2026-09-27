@@ -29,8 +29,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - **Folder drag & drop upload** — drag a folder from OS into the sidebar drop zone to recursively upload all files preserving structure (`js/folder-upload.js`)
 - **Folder management** — create, rename, delete folders via UI:
-  - "+ папка" button in sidebar header creates folder via `.gitkeep`
-  - Right-click folder in tree → "Перейменувати" / "Видалити"
+  - "+ folder" button in sidebar header creates folder via `.gitkeep`
+  - Right-click folder in tree → "Rename" / "Delete"
   - Rename moves all files recursively and updates references in `.md` files
 - **Folder context menu** — right-click on folders in file tree for rename/delete actions
 - **`js/folder-manager.js`** — pure logic for folder operations (create, rename, delete, list, check empty)
@@ -39,7 +39,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - Updated README with new features documentation
 - File tree now shows folders with context menu support
-- Sidebar header includes "+ папка" button alongside "+ файл"
+- Sidebar header includes "+ folder" button alongside "+ file"
 
 ## [2.0.0] - 2026-09-24
 

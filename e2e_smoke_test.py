@@ -1,15 +1,12 @@
-"""
-Наскрізний браузерний тест (не юніт-тест): піднімає застосунок у справжньому
-headless Chromium, підміняє GitHub API фейковими відповідями (щоб не потрібен
-був реальний токен) і перевіряє три речі, на які скаржився користувач:
-редагування, прокрутку довгого документа та рендер зображень у прев'ю.
-
-Запуск: спочатку `node serve.mjs` (порт 8080), потім `python3 e2e_smoke_test.py`.
-Потребує: pip install playwright && playwright install chromium
-
-CDN-бібліотеки (jsdelivr/cdnjs) тут підмінені локальними копіями з node_modules —
-це підміна ЛИШЕ для тестового середовища; продакшн index.html і далі використовує
-реальний CDN.
+"""End-to-end browser test (not a unit test): launches the app in a real
+headless Chromium, replaces the GitHub API with fake responses (so no
+real token is needed) and checks the three things the user complained about:
+editing, scrolling a long document, and rendering images in the preview.
+Run: first `node serve.mjs` (port 8080), then `python3 e2e_smoke_test.py`.
+Requires: pip install playwright && playwright install chromium
+CDN libraries (jsdelivr/cdnjs) are replaced here with local copies from node_modules —
+this replacement is ONLY for the test environment; production index.html still uses
+the real CDN.
 """
 import re
 import json
@@ -77,19 +74,19 @@ with sync_playwright() as p:
     page.route(re.compile(r"https://api\.github\.com/.*"), handle_github_api)
     for cdn_url in CDN_MOCKS:
         page.route(cdn_url, handle_cdn)
-    # fontawesome — суто іконки, не критично для функціональності
+    # fontawesome — icons only, not critical for functionality
     page.route(re.compile(r"https://cdnjs\.cloudflare\.com/.*"), lambda r, _: r.fulfill(status=200, content_type="text/css", body=b""))
     page.route(re.compile(r"https://maxcdn\.bootstrapcdn\.com/.*"), lambda r, _: r.fulfill(status=200, content_type="text/css", body=b""))
 
     page.goto("http://localhost:8080/", wait_until="networkidle")
 
-    # Форма логіну більше не приймає PAT напряму (замінено на "Увійти через
-    # GitHub" + Cloudflare Worker OAuth) — це недоступно в ізольованому
-    # e2e-середовищі без справжнього GitHub OAuth App. Тому імітуємо вже
-    # завершений логін так само, як це робить сам застосунок після
-    # /auth/callback: кладемо токен/owner/repo у sessionStorage і
-    # перезавантажуємось — readSession() у app.js підхопить це й одразу
-    # покаже застосунок, минаючи екран логіну.
+    # The login form no longer accepts a PAT directly (replaced with "Sign in
+    # with GitHub" + Cloudflare Worker OAuth) — that's unavailable in the isolated
+    # e2e environment without a real GitHub OAuth App. So we simulate an already
+    # completed login the same way the app itself does after
+    # /auth/callback: put token/owner/repo into sessionStorage and
+    # reload — readSession() in app.js picks it up and immediately
+    # shows the app, skipping the login screen.
     page.evaluate(
         """() => {
             sessionStorage.setItem('gh_token', 'ghp_faketoken');
@@ -106,33 +103,33 @@ with sync_playwright() as p:
     page.click("text=Notes")
     page.click("text=Test note.md")
     page.wait_for_function("document.getElementById('btn-save').disabled === false", timeout=5000)
-    print("✓ файл відкрито")
+    print("✓ file opened")
 
-    # --- 1. Редагування ---
+    # --- 1. Editing ---
     page.click(".CodeMirror")
     page.keyboard.type("EDITED_MARKER")
     content = page.evaluate("document.querySelector('.CodeMirror').CodeMirror.getValue()")
     assert "EDITED_MARKER" in content, "typing into the editor did not update the document"
-    print("✓ редагування працює")
+    print("✓ editing works")
 
-    # Каретка має бути видимою на темному фоні.
+    # The caret must be visible on the dark background.
     cursor_border = page.evaluate("""() => getComputedStyle(document.querySelector('.CodeMirror-cursor')).borderLeftColor""")
     assert cursor_border not in ("rgb(0, 0, 0)", "rgba(0, 0, 0, 0)", "transparent"),         f"cursor is effectively invisible: {cursor_border}"
-    print(f"✓ каретка видима ({cursor_border})")
+    print(f"✓ caret visible ({cursor_border})")
 
-    # Кнопка зображення має відкривати вибір файлу, а не вставляти порожній URL.
+    # The image button must open a file picker, not insert an empty URL.
     image_toolbar = page.locator(".editor-toolbar button").filter(has=page.locator(".fa-image"))
     assert image_toolbar.count() == 1, "image toolbar button is missing"
-    print("✓ кнопка зображення використовує завантаження")
+    print("✓ image button uses upload")
 
-    # Кнопка видалення поруч із "Зберегти"/"PDF" має бути доступною для відкритого
-    # файлу (клік по ній не робимо: він тягне confirm() і реальний DELETE у мок).
+    # The delete button next to "Save"/"PDF" must be available for the opened
+    # file (we don't click it: it pulls confirm() and a real DELETE in the mock).
     delete_btn = page.locator("#btn-delete")
     assert delete_btn.count() == 1, "delete toolbar button is missing"
     assert delete_btn.is_enabled(), "delete button must be enabled once a file is open"
-    print("✓ кнопка видалення доступна для відкритого файлу")
+    print("✓ delete button available for the opened file")
 
-    # --- 2. Прокрутка довгого документа ---
+    # --- 2. Scrolling a long document ---
     scroll_info = page.evaluate("""() => {
         const el = document.querySelector('.CodeMirror-scroll');
         return {scrollHeight: el.scrollHeight, clientHeight: el.clientHeight};
@@ -142,9 +139,9 @@ with sync_playwright() as p:
     page.evaluate("document.querySelector('.CodeMirror-scroll').scrollTop = 500")
     scroll_top = page.evaluate("document.querySelector('.CodeMirror-scroll').scrollTop")
     assert scroll_top > 0, "scrollTop did not change — scrolling is broken"
-    print(f"✓ прокрутка працює (scrollHeight={scroll_info['scrollHeight']}, scrollTop={scroll_top})")
+    print(f"✓ scrolling works (scrollHeight={scroll_info['scrollHeight']}, scrollTop={scroll_top})")
 
-    # --- 3. Рендер зображення у прев'ю (через мок GitHub API) ---
+    # --- 3. Image rendering in the preview (via the GitHub API mock) ---
     page.click("button.preview")
     page.wait_for_selector(".editor-preview .md-img-wrap", timeout=5000)
     page.wait_for_function(
@@ -155,9 +152,9 @@ with sync_playwright() as p:
     img_src = page.get_attribute(".editor-preview img", "src")
     assert "broken" not in wrap_classes, f"image marked broken: {wrap_classes}"
     assert img_src.startswith("data:image/"), f"unexpected img src: {img_src[:60]}"
-    print("✓ зображення в прев'ю рендериться (реальний data: URL, не застрягла заглушка)")
+    print("✓ preview image renders (real data: URL, not a stuck placeholder)")
 
-    assert not page_errors, f"необроблені помилки сторінки: {page_errors}"
+    assert not page_errors, f"unhandled page errors: {page_errors}"
     browser.close()
 
-print("\nУСІ ПЕРЕВІРКИ ПРОЙШЛИ")
+print("\nALL CHECKS PASSED")

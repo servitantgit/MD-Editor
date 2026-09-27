@@ -1,16 +1,16 @@
 // image-preview.js
-// DOM-частина роботи з картинками в прев'ю: підстановка реального src замість
-// прозорого пікселя-заглушки, і drag-resize ручка в правому нижньому куті.
+// DOM part of working with preview images: substituting the real src for the
+// transparent placeholder pixel, and the drag-resize handle in the bottom-right corner.
 
 import { setImageAttrsInLine } from './markdown-tokens.js';
 
 /**
- * Підвантажує реальні джерела для всіх .md-img-wrap у previewEl.
+ * Loads real sources for all .md-img-wrap in previewEl.
  * @param {HTMLElement} previewEl
  * @param {import('./image-resolver.js').ImageResolver} resolver
  * @param {string|null} currentFilePath
- * @param {() => boolean} stillCurrent  callback: чи ще актуальний цей рендер (захист від "гонки")
- * @returns {Promise<number>} кількість зображень, які не вдалося завантажити
+ * @param {() => boolean} stillCurrent  callback: is this render still current ("race" guard)
+ * @returns {Promise<number>} number of images that failed to load
  */
 export async function resolveAllImages(previewEl, resolver, currentFilePath, stillCurrent) {
   const wraps = Array.from(previewEl.querySelectorAll('.md-img-wrap'));
@@ -29,10 +29,10 @@ export async function resolveAllImages(previewEl, resolver, currentFilePath, sti
       } catch (err) {
         if (!stillCurrent()) return;
         failCount++;
-        console.warn('Не вдалося завантажити зображення прев’ю:', orig, err);
+        console.warn('Failed to load preview image:', orig, err);
         wrap.classList.remove('loading');
         wrap.classList.add('broken');
-        img.alt = '⚠ не вдалося завантажити: ' + orig;
+        img.alt = '⚠ failed to load: ' + orig;
         if (placeholder) placeholder.textContent = `⚠ ${orig}\n${err.message}`;
       }
     })
@@ -41,7 +41,7 @@ export async function resolveAllImages(previewEl, resolver, currentFilePath, sti
   return failCount;
 }
 
-/** Вішає drag-to-resize на ручку кожного .md-img-wrap; при відпусканні пише нову ширину в CodeMirror. */
+/** Attaches drag-to-resize to the handle of each .md-img-wrap; on release writes the new width into CodeMirror. */
 export function attachResizeHandles(previewEl, codemirror) {
   previewEl.querySelectorAll('.md-img-wrap').forEach((wrap) => {
     const img = wrap.querySelector('img');

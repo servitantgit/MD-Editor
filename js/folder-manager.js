@@ -1,27 +1,27 @@
 // folder-manager.js
-// Операції з папками: створення (через .gitkeep), перейменування, видалення.
-// У Git папок не існує без файлів — працюємо через маніпуляцію файлами.
+// Folder operations: create (via .gitkeep), rename, delete.
+// Git has no folders without files — we work through file manipulations.
 
 import { dirnameOf, basenameOf } from './paths.js';
 import { utf8ToB64 } from './github-client.js';
 import { moveFile } from './file-mover.js';
 
 /**
- * Створює папку шляхом додавання .gitkeep файлу.
+ * Creates a folder by adding a .gitkeep file.
  * @param {import('./github-client.js').GitHubClient} client
- * @param {string} folderPath  шлях папки (наприклад "docs/new-folder")
- * @returns {Promise<string>} шлях створеного .gitkeep
+ * @param {string} folderPath  folder path (e.g. "docs/new-folder")
+ * @returns {Promise<string>} path of the created .gitkeep
  */
 export async function createFolder(client, folderPath) {
   const cleanPath = folderPath.replace(/^\/+|\/+$/g, '');
-  if (!cleanPath) throw new Error('Шлях папки не може бути порожнім');
+  if (!cleanPath) throw new Error('Folder path cannot be empty');
   const gitkeepPath = `${cleanPath}/.gitkeep`;
   await client.putFile(gitkeepPath, utf8ToB64(''), `Create folder ${cleanPath}`);
   return gitkeepPath;
 }
 
 /**
- * Перейменовує папку: переміщує всі файли з oldFolderPath у newFolderPath.
+ * Renames a folder: moves all files from oldFolderPath to newFolderPath.
  * @param {import('./github-client.js').GitHubClient} client
  * @param {{path:string, sha:string}[]} allFiles
  * @param {string} oldFolderPath
@@ -31,11 +31,11 @@ export async function createFolder(client, folderPath) {
 export async function renameFolder(client, allFiles, oldFolderPath, newFolderPath) {
   const oldClean = oldFolderPath.replace(/^\/+|\/+$/g, '');
   const newClean = newFolderPath.replace(/^\/+|\/+$/g, '');
-  if (!oldClean || !newClean) throw new Error('Шляхи не можуть бути порожніми');
+  if (!oldClean || !newClean) throw new Error('Paths cannot be empty');
   if (oldClean === newClean) return { moved: [], updatedFiles: [] };
 
   const filesInFolder = allFiles.filter((f) => f.path.startsWith(oldClean + '/'));
-  if (!filesInFolder.length) throw new Error('Папка порожня або не існує');
+  if (!filesInFolder.length) throw new Error('Folder is empty or does not exist');
 
   const moved = [];
   const allUpdated = [];
@@ -52,18 +52,18 @@ export async function renameFolder(client, allFiles, oldFolderPath, newFolderPat
 }
 
 /**
- * Видаляє папку: видаляє всі файли в ній.
+ * Deletes a folder: removes all files in it.
  * @param {import('./github-client.js').GitHubClient} client
  * @param {{path:string, sha:string}[]} allFiles
  * @param {string} folderPath
- * @returns {Promise<string[]>} шляхи видалених файлів
+ * @returns {Promise<string[]>} paths of the deleted files
  */
 export async function deleteFolder(client, allFiles, folderPath) {
   const cleanPath = folderPath.replace(/^\/+|\/+$/g, '');
-  if (!cleanPath) throw new Error('Шлях папки не може бути порожнім');
+  if (!cleanPath) throw new Error('Folder path cannot be empty');
 
   const filesInFolder = allFiles.filter((f) => f.path.startsWith(cleanPath + '/'));
-  if (!filesInFolder.length) throw new Error('Папка порожня або не існує');
+  if (!filesInFolder.length) throw new Error('Folder is empty or does not exist');
 
   const deleted = [];
   for (const file of filesInFolder) {
@@ -74,9 +74,9 @@ export async function deleteFolder(client, allFiles, folderPath) {
 }
 
 /**
- * Отримує список папок з дерева файлів.
+ * Gets the folder list from the file tree.
  * @param {{path:string, sha:string}[]} allFiles
- * @returns {string[]} унікальні шляхи папок
+ * @returns {string[]} unique folder paths
  */
 export function getFolders(allFiles) {
   const folders = new Set();
@@ -91,7 +91,7 @@ export function getFolders(allFiles) {
 }
 
 /**
- * Перевіряє, чи папка порожня (немає файлів, крім можливого .gitkeep).
+ * Checks whether a folder is empty (no files except a possible .gitkeep).
  * @param {{path:string, sha:string}[]} allFiles
  * @param {string} folderPath
  * @returns {boolean}

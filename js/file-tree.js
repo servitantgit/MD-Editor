@@ -1,10 +1,10 @@
 // file-tree.js
-// Побудова дерева файлів + drag&drop між папками. Сама механіка "що змінити при
-// переміщенні" — у file-mover.js; тут тільки DOM.
+// File-tree rendering + drag&drop between folders. The "what to change when
+// moving" mechanics live in file-mover.js; only DOM here.
 
 import { dirnameOf, basenameOf, extOf, isImagePath, escapeAttr } from './paths.js';
 
-/** Перетворює плаский список {path} на вкладену структуру тек/файлів. */
+/** Turns a flat {path} list into a nested folder/file structure. */
 export function buildTreeStructure(files) {
   const root = { name: '', path: '', type: 'folder', children: {} };
   files.forEach((item) => {
@@ -62,12 +62,12 @@ export class FileTree {
           d = dirnameOf(d);
         }
       });
-      this.collapsedFolders = dirSet; // за замовчуванням усе згорнуто (зручно для великих репо)
+      this.collapsedFolders = dirSet; // everything collapsed by default (handy for large repos)
     }
 
     const rootDrop = document.createElement('div');
     rootDrop.className = 'tree-root-drop';
-    rootDrop.textContent = '⬆ перетягніть сюди, щоб перемістити в корінь';
+    rootDrop.textContent = '⬆ drag here to move to the root';
     this.containerEl.appendChild(rootDrop);
     this._wireDropTarget(rootDrop, '');
 
@@ -162,8 +162,8 @@ export class FileTree {
     menu.style.left = `${x}px`;
     menu.style.top = `${y}px`;
     menu.innerHTML = `
-      <button data-action="rename">✏️ Перейменувати</button>
-      <button data-action="delete" class="danger">🗑 Видалити</button>
+      <button data-action="rename">✏️ Rename</button>
+      <button data-action="delete" class="danger">🗑 Delete</button>
     `;
     menu.addEventListener('click', (e) => {
       const btn = e.target.closest('button');

@@ -1,8 +1,8 @@
-// serve.mjs — мінімальний статичний сервер без залежностей.
-// Потрібен тому, що браузери не дозволяють завантажувати ES-модулі (<script type="module">)
-// напряму з file:// — сторінку треба віддавати по http(s). Для реального використання
-// підійде так само GitHub Pages, `npx serve`, VSCode Live Server тощо — цей скрипт лише
-// для швидкого локального запуску без встановлення нічого зайвого.
+// serve.mjs — minimal dependency-free static server.
+// Needed because browsers refuse to load ES modules (<script type="module">)
+// directly from file:// — the page must be served over http(s). For real use
+// GitHub Pages, `npx serve`, VSCode Live Server, etc. work just as well — this script is only
+// for a quick local start without installing anything extra.
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -26,7 +26,7 @@ http.createServer((req, res) => {
   const urlPath = decodeURIComponent(req.url.split('?')[0]);
   let filePath = path.join(ROOT, urlPath === '/' ? 'index.html' : urlPath);
 
-  // захист від виходу за межі теки проєкту
+  // guard against escaping the project folder
   if (!filePath.startsWith(ROOT)) {
     res.writeHead(403).end('Forbidden');
     return;
@@ -43,5 +43,5 @@ http.createServer((req, res) => {
     res.end(data);
   });
 }).listen(PORT, () => {
-  console.log(`MD Editor запущено: http://localhost:${PORT}`);
+  console.log(`MD Editor running: http://localhost:${PORT}`);
 });

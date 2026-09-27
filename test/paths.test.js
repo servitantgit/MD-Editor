@@ -27,7 +27,7 @@ test('isImagePath recognizes common image extensions only', () => {
 });
 
 test('resolveRelativePath resolves ../ correctly for real repo depths', () => {
-  // Файл на 3 рівнях вкладеності, посилання йде на 3 рівні вгору до Asset/
+  // A file 3 levels deep, link goes 3 levels up to Asset/
   const dir = dirnameOf('AI corrected/MICAM/Kalibracja systemu wizyjnego/Kalibracja Geometry.md');
   assert.equal(dir, 'AI corrected/MICAM/Kalibracja systemu wizyjnego');
   const resolved = resolveRelativePath(dir, '../../../Asset/Kalibracja_Geometry_image_0001.jpg');

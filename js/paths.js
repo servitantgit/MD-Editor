@@ -1,6 +1,6 @@
 // paths.js
-// Чисті функції для роботи зі шляхами репозиторію. Жодних звернень до DOM чи мережі —
-// це навмисно, щоб усе тут можна було перевірити юніт-тестами без браузера.
+// Pure helpers for working with repository paths. No DOM or network access —
+// deliberately so, so everything here can be covered by unit tests without a browser.
 
 export const IMAGE_EXT = {
   png: 'image/png',
@@ -13,18 +13,18 @@ export const IMAGE_EXT = {
   ico: 'image/x-icon',
 };
 
-/** Тека файлу за його шляхом у репо ("a/b/c.md" -> "a/b"; "c.md" -> ""). */
+/** Parent folder of a file by its repo path ("a/b/c.md" -> "a/b"; "c.md" -> ""). */
 export function dirnameOf(path) {
   if (!path || !path.includes('/')) return '';
   return path.slice(0, path.lastIndexOf('/'));
 }
 
-/** Ім'я файлу без теки ("a/b/c.md" -> "c.md"). */
+/** File name without the folder ("a/b/c.md" -> "c.md"). */
 export function basenameOf(path) {
   return path.includes('/') ? path.slice(path.lastIndexOf('/') + 1) : path;
 }
 
-/** Розширення файлу в нижньому регістрі, без крапки ("c.MD" -> "md"). */
+/** Lowercase file extension, without the dot ("c.MD" -> "md"). */
 export function extOf(path) {
   const b = basenameOf(path);
   return b.includes('.') ? b.slice(b.lastIndexOf('.') + 1).toLowerCase() : '';
@@ -39,8 +39,8 @@ export function guessMime(path) {
 }
 
 /**
- * Розв'язує відносний шлях (./x.png, ../a/b.png) відносно теки baseDir і повертає
- * абсолютний (від кореня репозиторію) шлях без провідного "/".
+ * Resolves a relative path (./x.png, ../a/b.png) against baseDir and returns
+ * an absolute (repo-rooted) path without a leading "/".
  */
 export function resolveRelativePath(baseDir, relPath) {
   const stack = baseDir ? baseDir.split('/') : [];
@@ -52,7 +52,7 @@ export function resolveRelativePath(baseDir, relPath) {
   return stack.join('/');
 }
 
-/** Обчислює відносний шлях від теки fromDir до файлу toPath (у стилі "../../x/y.png"). */
+/** Computes the relative path from folder fromDir to file toPath (in the "../../x/y.png" style). */
 export function relativePathFromTo(fromDir, toPath) {
   const fromParts = fromDir ? fromDir.split('/') : [];
   const toParts = toPath.split('/');
@@ -74,12 +74,12 @@ export function commonPrefixLen(a, b) {
 }
 
 /**
- * Знаходить теку для нових зображень:
- * 1) найближча (до currentFilePath) тека з "асетною" назвою (Asset/Assets/Images/...);
- * 2) інакше — тека з найбільшою кількістю вже наявних зображень;
- * 3) інакше — фолбек "<тека файлу>/assets".
- * @param {string[]} allPaths  усі шляхи файлів репозиторію
- * @param {string} currentFilePath  шлях файлу, який зараз редагується
+ * Finds the folder for new images:
+ * 1) the closest (to currentFilePath) folder with an "asset-like" name (Asset/Assets/Images/...);
+ * 2) otherwise — the folder with the most existing images;
+ * 3) otherwise — fallback "<file folder>/assets".
+ * @param {string[]} allPaths  all file paths in the repository
+ * @param {string} currentFilePath  path of the file currently being edited
  */
 export function findAssetFolder(allPaths, currentFilePath) {
   const nameRe = /^(assets?|images?|img|attachments?|files|resources?)$/i;
@@ -126,16 +126,16 @@ export function findAssetFolder(allPaths, currentFilePath) {
 }
 
 /**
- * Кодує шлях для GitHub Contents API ПОСЕГМЕНТНО.
- * encodeURIComponent(повного шляху) перетворив би "/" на "%2F", а частина
- * маршрутизації на боці GitHub це не завжди розкодовує — тому запити для файлів
- * у вкладених теках (особливо з пробілами й юнікодом у назвах) просто провалювались би.
+ * Encodes a path for the GitHub Contents API SEGMENT BY SEGMENT.
+ * encodeURIComponent(full path) would turn "/" into "%2F", and part of the
+ * routing on GitHub's side doesn't always decode that — so requests for files
+ * in nested folders (especially with spaces and unicode in names) would simply fail.
  */
 export function encodePathForApi(path) {
   return path.split('/').map(encodeURIComponent).join('/');
 }
 
-/** Кодує шлях для встановлення у markdown-посилання (пробіли, дужки тощо — щоб не ламати синтаксис). */
+/** Encodes a path for embedding in a markdown link (spaces, brackets, etc. — so it doesn't break the syntax). */
 export function encodeLinkPath(path) {
   return path.split('/').map(encodeURIComponent).join('/');
 }
@@ -160,7 +160,7 @@ export function escapeRegExp(str) {
   return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-/** true для зовнішніх схем (http:, onenote:, mailto: ...), якорів (#...) та data: URI. */
+/** true for external schemes (http:, onenote:, mailto: ...), anchors (#...) and data: URIs. */
 export function isExternalOrAnchor(target) {
   return !target || target.startsWith('#') || target.startsWith('data:') || /^[a-z][a-z0-9+.-]*:/i.test(target);
 }

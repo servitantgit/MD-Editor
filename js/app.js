@@ -1,7 +1,7 @@
 // app.js
-// Точка збирання застосунку. Тримає мінімальний стан і підключає модулі один до одного.
-// Уся бізнес-логіка живе в окремих модулях (paths/markdown-tokens/reference-rewriter/
-// file-mover/image-resolver) — тут лише "проводка" й обробники подій DOM.
+// App assembly point. Holds minimal state and wires modules together.
+// All business logic lives in separate modules (paths/markdown-tokens/reference-rewriter/
+// file-mover/image-resolver) — only "wiring" and DOM event handlers here.
 
 import { GitHubClient, utf8ToB64, b64ToUtf8 } from './github-client.js';
 import { ImageResolver } from './image-resolver.js';
@@ -99,25 +99,25 @@ function onLoginClick() {
   const owner = els.inputOwner.value.trim();
   const repo = els.inputRepo.value.trim();
   if (!owner || !repo) {
-    setLoginStatus('Заповніть Owner і Repository', true);
+    setLoginStatus('Fill in Owner and Repository', true);
     return;
   }
 
-  // owner/repo не проходять через GitHub OAuth round-trip — зберігаємо їх
-  // самі, у тій самій вкладці, і забираємо назад після /auth/callback.
+  // owner/repo don't travel through the GitHub OAuth round-trip — we store them
+  // ourselves, in the same tab, and pick them back up after /auth/callback.
   sessionStorage.setItem('gh_pending_owner', owner);
   sessionStorage.setItem('gh_pending_repo', repo);
 
-  setLoginStatus('Перенаправлення на GitHub...', false);
+  setLoginStatus('Redirecting to GitHub...', false);
   location.href = '/auth/login';
 }
 
 /**
- * Якщо ми щойно повернулись із /auth/callback, Worker підклеїв токен у
- * URL fragment (#gh_token=...). Fragment ніколи не йде на сервер, тож це
- * безпечний спосіб передати токен назад у клієнтський JS. Забираємо його,
- * одразу чистимо адресний рядок і завершуємо той самий "логін", що й раніше
- * робив onLoginClick з PAT.
+ * If we just returned from /auth/callback, the Worker appended the token to the
+ * URL fragment (#gh_token=...). A fragment never goes to the server, so this is
+ * a safe way to hand the token back to client-side JS. We pick it up,
+ * immediately clean the address bar, and complete the same "login" that
+ * onLoginClick used to do with a PAT.
  */
 function consumeOAuthRedirect() {
   const hash = location.hash || '';
@@ -133,7 +133,7 @@ function consumeOAuthRedirect() {
   sessionStorage.removeItem('gh_pending_repo');
 
   if (!owner || !repo) {
-    setLoginStatus('Сесію логіну втрачено (owner/repo). Спробуйте ще раз.', true);
+    setLoginStatus('Login session lost (owner/repo). Please try again.', true);
     return;
   }
 
@@ -148,7 +148,7 @@ function restorePendingLoginFields() {
 }
 
 async function finishLogin(token, owner, repo) {
-  setLoginStatus('Перевірка доступу...', false);
+  setLoginStatus('Checking access...', false);
   try {
     const client = new GitHubClient({ token, owner, repo });
     const repoInfo = await client.getRepoInfo();
@@ -164,7 +164,7 @@ async function finishLogin(token, owner, repo) {
     showApp(owner, repo);
     loadTree();
   } catch (e) {
-    setLoginStatus('Помилка: ' + e.message, true);
+    setLoginStatus('Error: ' + e.message, true);
   }
 }
 
@@ -211,13 +211,13 @@ function showApp(owner, repo) {
       onUploaded: () => loadTree(),
     }),
     onImageResolveFailures: (count) =>
-      setSaveStatus(`Прев’ю: не вдалося завантажити ${count} зображення(нь) — деталі показані на місці картинки`, true),
+      setSaveStatus(`Preview: failed to load ${count} image(s) — details shown in place of the image`, true),
   });
 
-  // Ключовий фікс "не скролиться / не редагується": примусово перераховуємо
-  // layout CodeMirror одразу після того, як контейнер став видимим і отримав
-  // реальні розміри (на момент конструювання EasyMDE контейнер міг ще не мати
-  // фінальної висоти через flex-розкладку, що зустрічається сторінки).
+  // Key fix for "doesn't scroll / not editable": force a CodeMirror layout
+  // recalculation right after the container became visible and got its
+  // real size (at EasyMDE construction time the container may not yet have had
+  // its final height due to the flex layout used across the page).
   requestAnimationFrame(() => editorHandle.refreshLayout());
 
   setupImageDropzone(els.editorContainer, els.dropOverlay, {
@@ -260,13 +260,13 @@ function insertMarkdownAtCursor(text) {
 
 // ====================== FILE TREE ======================
 async function loadTree() {
-  els.fileTreeEl.innerHTML = '<div class="tree-loading">Завантаження...</div>';
+  els.fileTreeEl.innerHTML = '<div class="tree-loading">Loading...</div>';
   try {
     const files = await state.client.getTree(state.branch);
     state.allFiles = files;
     fileTree.setFiles(files);
   } catch (e) {
-    els.fileTreeEl.innerHTML = `<div class="tree-error">Помилка: ${escapeHtml(e.message)}</div>`;
+    els.fileTreeEl.innerHTML = `<div class="tree-error">Error: ${escapeHtml(e.message)}</div>`;
   }
 }
 
@@ -284,13 +284,13 @@ function previewImageFile(path) {
     .resolve(path.startsWith('/') ? path : '/' + path, null)
     .then((url) => { overlay.querySelector('img').src = url; })
     .catch((err) => {
-      overlay.querySelector('.image-preview-path').textContent = 'Не вдалося завантажити: ' + err.message;
+      overlay.querySelector('.image-preview-path').textContent = 'Failed to load: ' + err.message;
       console.warn('previewImageFile', path, err);
     });
 }
 
 async function onMoveFile(oldPath, targetFolder) {
-  setSaveStatus(`Переміщення ${oldPath}...`, false);
+  setSaveStatus(`Moving ${oldPath}...`, false);
   try {
     const { newPath, updatedFiles, skipped } = await moveFile(state.client, state.allFiles, oldPath, targetFolder);
     if (skipped) return;
@@ -300,18 +300,18 @@ async function onMoveFile(oldPath, targetFolder) {
       els.currentFileLabel.textContent = newPath;
     }
     if (state.currentPath && updatedFiles.includes(state.currentPath)) {
-      await openFile(state.currentPath); // підтягнути свіжий вміст/sha після автозаміни посилань
+      await openFile(state.currentPath); // pull fresh contents/sha after auto link replacement
     }
 
     imageResolver.invalidate(oldPath);
     await loadTree();
     setSaveStatus(
-      `Переміщено: ${oldPath} → ${newPath}` +
-        (updatedFiles.length ? ` (оновлено посилань у ${updatedFiles.length} файл(ах))` : ''),
+      `Moved: ${oldPath} → ${newPath}` +
+        (updatedFiles.length ? ` (updated links in ${updatedFiles.length} file(s))` : ''),
       false
     );
   } catch (e) {
-    setSaveStatus('Помилка переміщення: ' + e.message, true);
+    setSaveStatus('Move error: ' + e.message, true);
   }
 }
 
@@ -322,7 +322,7 @@ async function openFile(path) {
   els.btnSave.disabled = true;
   els.btnExportPdf.disabled = true;
   els.btnDelete.disabled = true;
-  setSaveStatus('Завантаження...', false);
+  setSaveStatus('Loading...', false);
 
   try {
     const { b64, sha } = await state.client.getFileB64(path);
@@ -335,9 +335,9 @@ async function openFile(path) {
     els.btnSave.disabled = false;
     els.btnExportPdf.disabled = false;
     els.btnDelete.disabled = false;
-    setSaveStatus('Готово', false);
+    setSaveStatus('Ready', false);
   } catch (e) {
-    setSaveStatus('Помилка: ' + e.message, true);
+    setSaveStatus('Error: ' + e.message, true);
   }
 }
 
@@ -346,52 +346,52 @@ async function onSaveFile() {
   const content = editorHandle.easyMDE.value();
 
   els.btnSave.disabled = true;
-  setSaveStatus('Збереження...', false);
+  setSaveStatus('Saving...', false);
   try {
     const data = await state.client.putFile(state.currentPath, utf8ToB64(content), `Update ${state.currentPath}`, state.currentSha);
     state.currentSha = data.content.sha;
-    setSaveStatus('Збережено ✓', false);
+    setSaveStatus('Saved ✓', false);
   } catch (e) {
-    setSaveStatus('Помилка: ' + e.message, true);
+    setSaveStatus('Error: ' + e.message, true);
   } finally {
     els.btnSave.disabled = false;
   }
 }
 
-// Видалення активного файлу. GitHub API вимагає sha того самого blob'а, тож
-// беремо state.currentSha (він завжди відповідає останній відомій версії файлу).
+// Deleting the active file. The GitHub API requires the sha of that same blob, so
+// we take state.currentSha (it always matches the last known version of the file).
 async function onDeleteFile() {
   const path = state.currentPath;
   if (!path) return;
 
-  const confirmed = confirm(`Ви дійсно хочете видалити файл?\n\n${path}\n\nФайл буде видалено з репозиторію, дію не можна скасувати.`);
+  const confirmed = confirm(`Are you sure you want to delete this file?\n\n${path}\n\nThe file will be removed from the repository; this cannot be undone.`);
   if (!confirmed) return;
 
   els.btnDelete.disabled = true;
   els.btnSave.disabled = true;
-  setSaveStatus('Видалення...', false);
+  setSaveStatus('Deleting...', false);
 
   try {
     await state.client.deleteFile(path, state.currentSha, `Delete ${path}`);
     imageResolver.invalidate(path);
     closeCurrentFile();
     await loadTree();
-    setSaveStatus(`Файл видалено: ${path}`, false);
+    setSaveStatus(`File deleted: ${path}`, false);
   } catch (e) {
-    // Файл лишився на місці — повертаємо кнопки в робочий стан, щоб можна було
-    // або повторити спробу, або зберегти решту правок.
+    // The file is still in place — restore the buttons to a working state so you can
+    // either retry or save the remaining edits.
     els.btnSave.disabled = false;
     els.btnDelete.disabled = false;
-    setSaveStatus('Помилка видалення: ' + e.message, true);
+    setSaveStatus('Delete error: ' + e.message, true);
   }
 }
 
-// Після видалення (або коли жоден файл не відкритий) редактор не має тримати
-// вміст видаленого файлу: чистимо текст, знімаємо inline-картинки й блокуємо дії.
+// After deletion (or when no file is open) the editor must not keep
+// the deleted file's contents: clear the text, drop inline images, lock actions.
 function closeCurrentFile() {
   state.currentPath = null;
   state.currentSha = null;
-  els.currentFileLabel.textContent = 'Файл не вибрано';
+  els.currentFileLabel.textContent = 'No file selected';
   fileTree.clearActive();
   editorHandle.easyMDE.value('');
   editorHandle.refreshLayout();
@@ -402,9 +402,9 @@ function closeCurrentFile() {
 }
 
 async function onCreateNewFile() {
-  const path = prompt('Шлях нового файлу (наприклад docs/new.md):');
+  const path = prompt('New file path (e.g. docs/new.md):');
   if (!path || !path.endsWith('.md')) {
-    alert('Шлях має закінчуватися на .md');
+    alert('Path must end with .md');
     return;
   }
   try {
@@ -412,37 +412,37 @@ async function onCreateNewFile() {
     await loadTree();
     openFile(path);
   } catch (e) {
-    alert('Помилка створення: ' + e.message);
+    alert('Create error: ' + e.message);
   }
 }
 
 async function onCreateNewFolder() {
-  const path = prompt('Шлях нової папки (наприклад docs/new-folder):');
+  const path = prompt('New folder path (e.g. docs/new-folder):');
   if (!path) return;
   const clean = path.replace(/^\/+|\/+$/g, '');
   if (!clean) {
-    alert('Шлях не може бути порожнім');
+    alert('Path cannot be empty');
     return;
   }
   try {
-    setSaveStatus(`Створення папки ${clean}...`, false);
+    setSaveStatus(`Creating folder ${clean}...`, false);
     await createFolder(state.client, clean);
     await loadTree();
-    setSaveStatus(`Папку створено: ${clean}`, false);
+    setSaveStatus(`Folder created: ${clean}`, false);
   } catch (e) {
-    setSaveStatus('Помилка: ' + e.message, true);
+    setSaveStatus('Error: ' + e.message, true);
   }
 }
 
 // ====================== FOLDER OPERATIONS ======================
 async function onRenameFolder(folderPath) {
-  const newName = prompt(`Нова назва для папки "${basenameOf(folderPath)}":`);
+  const newName = prompt(`New name for folder "${basenameOf(folderPath)}":`);
   if (!newName || newName.trim() === '') return;
   const newPath = `${dirnameOf(folderPath)}/${newName.trim()}`.replace(/^\/+/, '');
   if (newPath === folderPath) return;
 
   try {
-    setSaveStatus(`Перейменування ${folderPath}...`, false);
+    setSaveStatus(`Renaming ${folderPath}...`, false);
     const { moved, updatedFiles } = await renameFolder(state.client, state.allFiles, folderPath, newPath);
     if (state.currentPath && state.currentPath.startsWith(folderPath + '/')) {
       state.currentPath = newPath + state.currentPath.slice(folderPath.length);
@@ -450,31 +450,31 @@ async function onRenameFolder(folderPath) {
       await openFile(state.currentPath);
     }
     await loadTree();
-    setSaveStatus(`Перейменовано: ${folderPath} → ${newPath} (файлів: ${moved.length})`, false);
+    setSaveStatus(`Renamed: ${folderPath} → ${newPath} (files: ${moved.length})`, false);
   } catch (e) {
-    setSaveStatus('Помилка: ' + e.message, true);
+    setSaveStatus('Error: ' + e.message, true);
   }
 }
 
 async function onDeleteFolder(folderPath) {
   if (!isFolderEmpty(state.allFiles, folderPath)) {
-    const confirmed = confirm(`Папка "${folderPath}" не порожня. Видалити всі файли у ній?\nЦю дію не можна скасувати.`);
+    const confirmed = confirm(`Folder "${folderPath}" is not empty. Delete all files in it?\nThis cannot be undone.`);
     if (!confirmed) return;
   } else {
-    const confirmed = confirm(`Видалити порожню папку "${folderPath}"?`);
+    const confirmed = confirm(`Delete empty folder "${folderPath}"?`);
     if (!confirmed) return;
   }
 
   try {
-    setSaveStatus(`Видалення папки ${folderPath}...`, false);
+    setSaveStatus(`Deleting folder ${folderPath}...`, false);
     await deleteFolder(state.client, state.allFiles, folderPath);
     if (state.currentPath && state.currentPath.startsWith(folderPath + '/')) {
       closeCurrentFile();
     }
     await loadTree();
-    setSaveStatus(`Папку видалено: ${folderPath}`, false);
+    setSaveStatus(`Folder deleted: ${folderPath}`, false);
   } catch (e) {
-    setSaveStatus('Помилка: ' + e.message, true);
+    setSaveStatus('Error: ' + e.message, true);
   }
 }
 

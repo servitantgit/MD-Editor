@@ -1,7 +1,7 @@
 // reference-rewriter.js
-// Чиста логіка перерахунку посилань при переміщенні файлів. Жодних fetch() —
-// приймає текст файлу, повертає новий текст. Мережеву частину (кому саме читати/писати)
-// робить file-mover.js, який використовує ці функції.
+// Pure link-recalculation logic for file moves. No fetch() —
+// takes file text, returns new text. The network part (who to read/write)
+// is done by file-mover.js, which uses these functions.
 
 import {
   dirnameOf,
@@ -14,10 +14,10 @@ import {
 import { REF_TOKEN_RE, classifyRefMatch, rebuildRefToken } from './markdown-tokens.js';
 
 /**
- * Файл САМ переміщується з oldDir у newDir: перераховує його ВЛАСНІ відносні
- * посилання так, щоб вони й далі вказували на ті самі цілі (стиль лишається
- * відносним — так, як уже написані інші нотатки в репозиторії).
- * Кореневі ("/...") і зовнішні посилання не чіпає.
+ * The file ITSELF moves from oldDir to newDir: recalculates its OWN relative
+ * links so they still point at the same targets (style stays
+ * relative — the way other notes in the repo are already written).
+ * Root ("/...") and external links are left untouched.
  */
 export function rewriteOwnRelativeLinks(text, oldDir, newDir) {
   if (oldDir === newDir) return text;
@@ -34,9 +34,9 @@ export function rewriteOwnRelativeLinks(text, oldDir, newDir) {
 }
 
 /**
- * Перевіряє/переписує в тексті ІНШОГО файлу (що лежить у fileDir) усі посилання,
- * які фактично вказують на oldPath — і відносні, і кореневі — на newPath.
- * Повертає {changed, text}.
+ * Checks/rewrites in the text of ANOTHER file (located in fileDir) all links
+ * that actually point at oldPath — both relative and root-relative — to newPath.
+ * Returns {changed, text}.
  */
 export function updateReferencesInFile(text, fileDir, oldPath, newPath) {
   let changed = false;
@@ -59,7 +59,7 @@ export function updateReferencesInFile(text, fileDir, oldPath, newPath) {
   return { changed, text: newText };
 }
 
-/** Зручний хелпер: dirname нового шляху при перейменуванні/переміщенні файлу. */
+/** Convenience helper: dirname of the new path when renaming/moving a file. */
 export function dirOf(path) {
   return dirnameOf(path);
 }

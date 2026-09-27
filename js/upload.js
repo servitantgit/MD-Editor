@@ -1,13 +1,13 @@
 // upload.js
-// Завантаження зображень: drag&drop з ОС у вікно редактора + кнопка в тулбарі.
-// Вставляє ВІДНОСНЕ посилання (стиль, який уже використовує репозиторій) на
-// автоматично визначену спільну теку для зображень.
+// Image uploads: drag&drop from the OS into the editor window + the toolbar button.
+// Inserts a RELATIVE link (the style the repository already uses) to an
+// automatically detected shared images folder.
 
 import { dirnameOf, findAssetFolder, relativePathFromTo, encodeLinkPath, guessMime } from './paths.js';
 
 /**
- * @param {HTMLElement} dropZoneEl  елемент, над яким слухаємо drag&drop файлів з ОС
- * @param {HTMLElement} overlayEl   візуальний оверлей "відпустіть, щоб додати"
+ * @param {HTMLElement} dropZoneEl  element on which we listen for OS file drag&drop
+ * @param {HTMLElement} overlayEl   visual "drop to add" overlay
  * @param {{
  *   client: import('./github-client.js').GitHubClient,
  *   imageResolver: import('./image-resolver.js').ImageResolver,
@@ -46,7 +46,7 @@ export function setupImageDropzone(dropZoneEl, overlayEl, deps) {
     overlayEl.classList.add('hidden');
 
     if (!deps.getCurrentPath()) {
-      deps.onStatus('Спочатку відкрийте .md файл', true);
+      deps.onStatus('Open an .md file first', true);
       return;
     }
     const files = Array.from(e.dataTransfer.files || []).filter((f) => f.type.startsWith('image/'));
@@ -65,11 +65,11 @@ export function pickImageFiles(inputEl, deps) {
 export async function uploadImage(file, deps) {
   const currentPath = deps.getCurrentPath();
   if (!currentPath) {
-    deps.onStatus('Спочатку відкрийте .md файл', true);
+    deps.onStatus('Open an .md file first', true);
     return;
   }
 
-  deps.onStatus('Завантаження картинки...', false);
+  deps.onStatus('Uploading image...', false);
   try {
     const b64 = await fileToBase64(file);
     const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
@@ -78,24 +78,24 @@ export async function uploadImage(file, deps) {
 
     await deps.client.putFile(imgPath, b64, `Add image ${imgPath}`);
 
-    // Кешуємо прев'ю одразу з локального файлу — не чекаємо повторного запиту до API
+    // Cache the preview straight from the local file — don't wait for another API round-trip
     deps.imageResolver.cache.set(imgPath, `data:${file.type || guessMime(imgPath)};base64,${b64}`);
 
     const relLink = encodeLinkPath(relativePathFromTo(dirnameOf(currentPath), imgPath));
     deps.insertText(`![${file.name.replace(/[[\]]/g, '')}](${relLink})`);
 
     deps.onUploaded();
-    deps.onStatus('Картинку додано ✓', false);
+    deps.onStatus('Image added ✓', false);
   } catch (e) {
-    deps.onStatus('Помилка картинки: ' + e.message, true);
+    deps.onStatus('Image error: ' + e.message, true);
   }
 }
 
 function fileToBase64(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
-    reader.onload = () => resolve(reader.result.split(',')[1]); // прибираємо "data:...;base64," префікс
-    reader.onerror = () => reject(new Error('Не вдалося прочитати файл'));
+    reader.onload = () => resolve(reader.result.split(',')[1]); // strip the "data:...;base64," prefix
+    reader.onerror = () => reject(new Error('Failed to read file'));
     reader.readAsDataURL(file);
   });
 }

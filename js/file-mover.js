@@ -1,19 +1,19 @@
 // file-mover.js
-// Оркестрація переміщення файлу між папками: читає/пише через GitHubClient,
-// а саму логіку "що саме змінити в тексті" бере з reference-rewriter.js (чисті функції).
+// Orchestrates moving a file between folders: reads/writes via GitHubClient,
+// and takes the "what exactly to change in the text" logic from reference-rewriter.js (pure functions).
 
 import { basenameOf, dirnameOf, extOf } from './paths.js';
 import { utf8ToB64, b64ToUtf8 } from './github-client.js';
 import { rewriteOwnRelativeLinks, updateReferencesInFile } from './reference-rewriter.js';
 
 /**
- * Переміщує файл oldPath у теку targetFolder (може бути '' — корінь репозиторію).
- * Якщо переміщуваний файл — .md, спершу перераховує його ВЛАСНІ відносні посилання.
- * Потім скановує всі .md файли репозиторію (крім самого переміщеного) і виправляє
- * посилання, що вказували на oldPath.
+ * Moves file oldPath into folder targetFolder (may be '' — the repository root).
+ * If the moved file is .md, first recalculates its OWN relative links.
+ * Then scans all .md files in the repository (except the moved file itself) and fixes
+ * links that pointed at oldPath.
  *
  * @param {import('./github-client.js').GitHubClient} client
- * @param {{path:string, sha:string}[]} allFiles  поточний знімок дерева файлів
+ * @param {{path:string, sha:string}[]} allFiles  current snapshot of the file tree
  * @param {string} oldPath
  * @param {string} targetFolder
  * @returns {Promise<{newPath: string, updatedFiles: string[], skipped: boolean}>}
@@ -32,7 +32,7 @@ export async function moveFile(client, allFiles, oldPath, targetFolder) {
       const fixed = rewriteOwnRelativeLinks(text, dirnameOf(oldPath), dirnameOf(newPath));
       finalB64 = utf8ToB64(fixed);
     } catch (_) {
-      // не текстовий/не-UTF8 вміст під розширенням .md — лишаємо байти як є
+      // non-text/non-UTF8 content under a .md extension — keep the bytes as-is
     }
   }
 
@@ -45,9 +45,9 @@ export async function moveFile(client, allFiles, oldPath, targetFolder) {
 }
 
 /**
- * Проходить по всіх .md файлах (крім newPath — це вже сам переміщений файл) і виправляє
- * посилання, що фактично вказували на oldPath.
- * @returns {Promise<string[]>} шляхи файлів, які були змінені
+ * Walks all .md files (except newPath — that's the moved file itself) and fixes
+ * links that actually pointed at oldPath.
+ * @returns {Promise<string[]>} paths of the files that were changed
  */
 export async function updateReferencesEverywhere(client, allFiles, oldPath, newPath) {
   const updated = [];
@@ -62,7 +62,7 @@ export async function updateReferencesEverywhere(client, allFiles, oldPath, newP
       await client.putFile(f.path, utf8ToB64(newText), `Update links after moving ${oldPath} to ${newPath}`, sha);
       updated.push(f.path);
     } catch (e) {
-      console.warn('Не вдалося оновити посилання у', f.path, e);
+      console.warn('Failed to update links in', f.path, e);
     }
   }
   return updated;

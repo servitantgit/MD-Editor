@@ -1,6 +1,6 @@
 // folder-upload.js
-// Завантаження папок через drag&drop з файлової системи ОС.
-// Використовує File System Access API (webkitGetAsEntry) для отримання структури папки.
+// Folder uploads via drag&drop from the OS file system.
+// Uses the File System Access API (webkitGetAsEntry) to get the folder structure.
 
 import { guessMime } from './paths.js';
 
@@ -59,33 +59,33 @@ export function setupFolderDropzone(dropZoneEl, overlayEl, deps) {
 
     if (!entries.length) return;
 
-    deps.onStatus(`Обробка ${entries.length} елемент(ів)...`, false);
+    deps.onStatus(`Processing ${entries.length} item(s)...`, false);
 
     try {
       const allFiles = await collectFilesFromEntries(entries);
       if (!allFiles.length) {
-        deps.onStatus('Файлів у папці не знайдено', true);
+        deps.onStatus('No files found in the folder', true);
         return;
       }
 
-      deps.onStatus(`Завантаження ${allFiles.length} файлів...`, false);
+      deps.onStatus(`Uploading ${allFiles.length} file(s)...`, false);
       let uploaded = 0;
       for (const { path, file } of allFiles) {
         try {
           const b64 = await fileToBase64(file);
           await deps.client.putFile(path, b64, `Add ${path}`);
           uploaded++;
-          deps.onStatus(`Завантажено ${uploaded}/${allFiles.length}...`, false);
+          deps.onStatus(`Uploaded ${uploaded}/${allFiles.length}...`, false);
         } catch (err) {
-          console.error(`Помилка завантаження ${path}:`, err);
-          deps.onStatus(`Помилка ${path}: ${err.message}`, true);
+          console.error(`Failed to upload ${path}:`, err);
+          deps.onStatus(`Error ${path}: ${err.message}`, true);
         }
       }
 
       deps.onUploaded();
-      deps.onStatus(`Завантажено ${uploaded} файл(ів) ✓`, false);
+      deps.onStatus(`Uploaded ${uploaded} file(s) ✓`, false);
     } catch (err) {
-      deps.onStatus('Помилка: ' + err.message, true);
+      deps.onStatus('Error: ' + err.message, true);
     }
   });
 }
@@ -131,7 +131,7 @@ function fileToBase64(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => resolve(reader.result.split(',')[1]);
-    reader.onerror = () => reject(new Error('Не вдалося прочитати файл'));
+    reader.onerror = () => reject(new Error('Failed to read file'));
     reader.readAsDataURL(file);
   });
 }

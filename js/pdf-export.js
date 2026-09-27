@@ -1,6 +1,6 @@
 // pdf-export.js
-// Експорт активної сторінки в PDF: рендеримо markdown у прихований "паперовий"
-// контейнер, чекаємо реального завантаження всіх зображень, віддаємо html2pdf.js.
+// Export the active page to PDF: render markdown into a hidden "paper"
+// container, wait for all images to actually load, hand it to html2pdf.js.
 
 import { basenameOf } from './paths.js';
 import { markdownToCanonicalHtml } from './markdown-tokens.js';
@@ -19,7 +19,7 @@ export async function exportCurrentPageToPdf(deps) {
   const currentPath = deps.getCurrentPath();
   if (!currentPath) return;
 
-  deps.onStatus('Підготовка PDF...', false);
+  deps.onStatus('Preparing PDF...', false);
   const container = document.createElement('div');
   container.id = 'pdf-export-container';
   document.body.appendChild(container);
@@ -42,9 +42,9 @@ export async function exportCurrentPageToPdf(deps) {
       pagebreak: { mode: ['css', 'legacy'] },
     }).from(container).save();
 
-    deps.onStatus('PDF експортовано ✓', false);
+    deps.onStatus('PDF exported ✓', false);
   } catch (e) {
-    deps.onStatus('Помилка PDF: ' + e.message, true);
+    deps.onStatus('PDF error: ' + e.message, true);
   } finally {
     container.remove();
   }

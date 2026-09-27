@@ -1,9 +1,9 @@
 // editor.js
-// Обгортка над EasyMDE. Найважливіше тут — правильна робота з CodeMirror:
-// * .refresh() після того, як контейнер стає видимим і отримує реальні розміри
-//   (класична причина, чому редактор "не скролиться"/показує 1 рядок — CodeMirror
-//   зміряв висоту контейнера ДО того, як той відобразився/отримав фінальний layout);
-// * previewRender підключений через async-патерн, задокументований самим EasyMDE.
+// Wrapper around EasyMDE. The most important thing here is correct CodeMirror handling:
+// * .refresh() after the container becomes visible and gets its real size
+//   (the classic reason the editor "doesn't scroll"/shows 1 line — CodeMirror
+//   measured the container height BEFORE it was displayed/got its final layout);
+// * previewRender wired via the async pattern documented by EasyMDE itself.
 
 import { markdownToCanonicalHtml } from './markdown-tokens.js';
 import { attachResizeHandles, resolveAllImages } from './image-preview.js';
@@ -22,7 +22,7 @@ export function createEditor(textareaEl, deps) {
     element: textareaEl,
     spellChecker: false,
     autosave: { enabled: false },
-    placeholder: 'Почніть писати markdown...',
+    placeholder: 'Start writing markdown...',
     toolbar: [
       'bold', 'italic', 'heading', '|',
       'quote', 'unordered-list', 'ordered-list', '|',
@@ -31,7 +31,7 @@ export function createEditor(textareaEl, deps) {
         name: 'image',
         action: () => deps.onImageUploadRequest(),
         className: 'fa fa-image',
-        title: 'Додати зображення у репозиторій',
+        title: 'Add an image to the repository',
       }, '|',
       'preview', 'side-by-side', 'fullscreen', '|',
       'guide',
@@ -39,24 +39,24 @@ export function createEditor(textareaEl, deps) {
     status: ['lines', 'words', 'cursor'],
     renderingConfig: { singleLineBreaks: false, codeSyntaxHighlighting: true },
     previewRender(plainText, previewEl) {
-      // ВАЖЛИВО: EasyMDE САМ виконує `previewEl.innerHTML = <те, що ми тут повернемо>`
-      // одразу після виклику цієї функції — і при перемиканні Preview/Side-by-side,
-      // і при easyMDE.value(...). Якщо ми ТУТ синхронно присвоїмо previewEl.innerHTML
-      // самі, а потім (після мережевого резолву картинок) асинхронно захочемо
-      // оновити ці елементи — буде вже пізно: EasyMDE щойно перезапише весь
-      // innerHTML ще раз (тим самим рядком), і наші <img> опиняться у вузлах, які
-      // більше не приєднані до сторінки, — картинка "вантажиться" вічно і невидимо
-      // для користувача, хоча мережевий запит насправді вже давно відпрацював.
-      // Тому previewRender лишається ЧИСТО синхронним і нічого сам не присвоює —
-      // постобробку (ручки масштабування + резолв зображень) плануємо на наступний
-      // тік через setTimeout(0), коли EasyMDE вже точно встановив фінальний DOM.
+      // IMPORTANT: EasyMDE ITSELF runs `previewEl.innerHTML = <what we return here>`
+      // right after this function is called — both when toggling Preview/Side-by-side,
+      // and on easyMDE.value(...). If we synchronously assign previewEl.innerHTML HERE
+      // ourselves, and then (after the network image resolve) asynchronously want to
+      // update these elements — it will be too late: EasyMDE will just overwrite the whole
+      // innerHTML once more (with the same string), and our <img> will end up in nodes that
+      // are no longer attached to the page — the image "loads" forever and invisibly
+      // to the user, even though the network request actually finished long ago.
+      // So previewRender stays PURELY synchronous and assigns nothing itself —
+      // post-processing (scale handles + image resolve) is scheduled on the next
+      // tick via setTimeout(0), when EasyMDE has definitely set the final DOM.
       const myToken = ++previewRenderToken;
       let html;
       try {
         html = markdownToCanonicalHtml(plainText, deps.marked);
       } catch (e) {
-        console.error('Помилка рендерингу прев’ю:', e);
-        return `<div class="render-error"><strong>⚠ Помилка рендерингу прев’ю</strong><br>${escapeHtml(e.message)}</div>`;
+        console.error('Preview render error:', e);
+        return `<div class="render-error"><strong>⚠ Preview render error</strong><br>${escapeHtml(e.message)}</div>`;
       }
       setTimeout(() => finishPreviewRender(previewEl, myToken), 0);
       return html;
@@ -64,7 +64,7 @@ export function createEditor(textareaEl, deps) {
   });
 
   async function finishPreviewRender(previewEl, myToken) {
-    if (myToken !== previewRenderToken) return; // тим часом прийшов новіший рендер
+    if (myToken !== previewRenderToken) return; // a newer render arrived meanwhile
     attachResizeHandles(previewEl, easyMDE.codemirror);
 
     const failCount = await resolveAllImages(previewEl, deps.imageResolver, deps.getCurrentPath(), () => myToken === previewRenderToken);
@@ -74,19 +74,19 @@ export function createEditor(textareaEl, deps) {
   }
 
   /**
-   * CodeMirror інколи міряє висоту контейнера ще до того, як той отримав фінальний
-   * розмір (flex-layout, приховані батьківські елементи тощо), і "застрягає" з
-   * неправильною внутрішньою геометрією — звідси враження, що редактор не скролиться
-   * або показує тільки частину тексту. .refresh() примусово перераховує все.
-   * Викликаємо і одразу, і ще раз на наступному кадрі (для абсолютної надійності).
+   * CodeMirror sometimes measures the container height before it gets its final
+   * size (flex layout, hidden parents, etc.) and gets "stuck" with
+   * wrong internal geometry — hence the impression that the editor doesn't scroll
+   * or shows only part of the text. .refresh() forces a full recalculation.
+   * We call it both immediately and once more on the next frame (for absolute reliability).
    */
   function refreshLayout() {
     easyMDE.codemirror.refresh();
     requestAnimationFrame(() => easyMDE.codemirror.refresh());
   }
 
-  // Вставка зображень із буфера: браузер передає скріншоти/скопійовані картинки
-  // як ClipboardItem/Files. Текстову вставку не перехоплюємо.
+  // Pasting images from the clipboard: the browser passes screenshots/copied pictures
+  // as ClipboardItem/Files. We don't intercept text pasting.
   easyMDE.codemirror.getInputField().addEventListener('paste', (event) => {
     const items = Array.from(event.clipboardData?.items || []);
     const imageItems = items.filter((item) => item.kind === 'file' && item.type.startsWith('image/'));
@@ -99,10 +99,10 @@ export function createEditor(textareaEl, deps) {
     }
   });
 
-  // Реагуємо на зміну розміру вікна/контейнера — той самий клас проблем.
-  // Live Preview прямо в текстовому полі: Markdown-посилання на зображення
-  // залишається в документі, але в CodeMirror візуально замінюється реальною
-  // картинкою. Це не змінює текст, який буде збережено в GitHub.
+  // React to window/container resizing — the same class of problems.
+  // Live Preview right in the text field: the Markdown image link
+  // stays in the document but is visually replaced in CodeMirror by the real
+  // picture. This doesn't change the text that will be saved to GitHub.
   easyMDE.codemirror.on('change', () => scheduleInlineImages());
 
   const resizeObserver = new ResizeObserver(() => refreshLayout());
@@ -172,9 +172,9 @@ export function createEditor(textareaEl, deps) {
         loading.remove();
       } catch (err) {
         if (generation !== inlineImageGeneration || mark.find() == null) return;
-        // Якщо GitHub не віддав файл, не ховаємо Markdown від користувача.
+        // If GitHub didn't return the file, don't hide the Markdown from the user.
         mark.clear();
-        console.warn('Не вдалося показати inline-зображення:', item.src, err);
+        console.warn('Failed to show inline image:', item.src, err);
       }
     }
   }

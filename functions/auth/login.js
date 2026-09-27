@@ -1,20 +1,20 @@
 // functions/auth/login.js
 //
-// Cloudflare Pages Function (не Worker!). Файл у /functions/auth/login.js
-// автоматично стає маршрутом GET /auth/login — Pages сама підхоплює це
-// на кожному Git-деплої, без жодних змін у wrangler.toml чи процесі деплою.
+// Cloudflare Pages Function (not a Worker!). A file at /functions/auth/login.js
+// automatically becomes the GET /auth/login route — Pages picks it up
+// on every Git deploy, with no wrangler.toml or deploy-process changes.
 //
-// Роль цього маршруту: почати GitHub OAuth — згенерувати anti-CSRF `state`,
-// покласти його в HttpOnly-cookie і відправити користувача на GitHub.
+// Role of this route: start GitHub OAuth — generate an anti-CSRF `state`,
+// store it in an HttpOnly cookie, and send the user to GitHub.
 
 const OAUTH_SCOPE = 'repo';
 const STATE_COOKIE = 'oauth_state';
-const STATE_COOKIE_MAX_AGE = 600; // 10 хв на весь вхід через GitHub
+const STATE_COOKIE_MAX_AGE = 600; // 10 min for the whole GitHub login
 
 export async function onRequestGet({ request, env }) {
   if (!env.GITHUB_CLIENT_ID) {
     return new Response(
-      'Сервер не налаштований: у Pages-проєкті відсутня змінна оточення GITHUB_CLIENT_ID.',
+      'Server is not configured: the Pages project is missing the GITHUB_CLIENT_ID environment variable.',
       { status: 500 }
     );
   }

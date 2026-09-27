@@ -57,7 +57,7 @@ test('updateReferencesInFile does not touch unrelated references', () => {
 });
 
 test('updateReferencesInFile fixes a plain markdown link pointing at a moved .md file', () => {
-  const text = 'Дивись [BOBAM ON-OFF](../BOBAM/BOBAM%20ON-OFF.md)\n';
+  const text = 'See [BOBAM ON-OFF](../BOBAM/BOBAM%20ON-OFF.md)\n';
   const { changed, text: out } = updateReferencesInFile(
     text,
     'AI corrected/Other',

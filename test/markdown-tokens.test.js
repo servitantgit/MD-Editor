@@ -43,7 +43,7 @@ test('markdownToCanonicalHtml renders real content via marked and preserves img 
   const sample = [
     '# ATS Housing LOAD/UNLOAD',
     '',
-    '**[ENG]** Instrukcja obsługi',
+    '**[ENG]** Operating instructions',
     '',
     '![image](../../Asset/ATS_Housing_LOAD-UNLOAD_image_0001.jpg)',
     '',
@@ -56,13 +56,13 @@ test('markdownToCanonicalHtml renders real content via marked and preserves img 
     html,
     /data-md-src="\.\.\/\.\.\/Asset\/ATS_Housing_LOAD-UNLOAD_image_0001\.jpg"/
   );
-  // сама картинка не повинна "загубитись" всередині параграфа
+  // the image itself must not get "lost" inside a paragraph
   assert.match(html, /<p>.*<span class="md-img-wrap.*<\/span><\/p>/s);
 });
 
 test('markdownToCanonicalHtml throws a clear error when renderer is missing/invalid', () => {
-  assert.throws(() => markdownToCanonicalHtml('# x', null), /markdown-рендерер/);
-  assert.throws(() => markdownToCanonicalHtml('# x', {}), /markdown-рендерер/);
+  assert.throws(() => markdownToCanonicalHtml('# x', null), /markdown renderer/);
+  assert.throws(() => markdownToCanonicalHtml('# x', {}), /markdown renderer/);
 });
 
 test('setImageAttrsInLine rewrites only the targeted occurrence on the line', () => {

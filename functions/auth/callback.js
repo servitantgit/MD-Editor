@@ -1,13 +1,13 @@
 // functions/auth/callback.js
 //
-// Cloudflare Pages Function для GET /auth/callback. Це той самий крок, який
-// небезпечно робити в браузерному JS: обмін одноразового `code` на
-// `access_token` за допомогою Client Secret. GitHub API для цього викликається
-// звідси (з боку Pages Function), а не з клієнтського коду.
+// Cloudflare Pages Function for GET /auth/callback. This is the step that is
+// unsafe to do in browser JS: exchanging the one-time `code` for an
+// `access_token` with the help of the Client Secret. The GitHub API for this is called
+// from here (from the Pages Function side), not from client code.
 //
-// Токен повертається клієнту через URL fragment (#gh_token=...) — fragment
-// ніколи не потрапляє на жоден сервер/у жоден лог, так само як раніше
-// Personal Access Token жив лише в sessionStorage.
+// The token is returned to the client via a URL fragment (#gh_token=...) — a fragment
+// never reaches any server/log, just like the
+// Personal Access Token previously lived only in sessionStorage.
 
 const STATE_COOKIE = 'oauth_state';
 
@@ -18,23 +18,23 @@ export async function onRequestGet({ request, env }) {
   const oauthError = url.searchParams.get('error');
 
   if (oauthError) {
-    return textResponse(`GitHub повернув помилку: ${oauthError}`, 400);
+    return textResponse(`GitHub returned an error: ${oauthError}`, 400);
   }
   if (!code || !returnedState) {
-    return textResponse('Відсутні code/state у відповіді GitHub.', 400);
+    return textResponse('Missing code/state in the GitHub response.', 400);
   }
 
   const expectedState = readCookie(request, STATE_COOKIE);
   if (!expectedState || expectedState !== returnedState) {
     return textResponse(
-      'Не вдалося перевірити state (CSRF-захист). Спробуйте увійти ще раз з нуля.',
+      'Could not verify state (CSRF protection). Please try signing in again from scratch.',
       400
     );
   }
 
   if (!env.GITHUB_CLIENT_ID || !env.GITHUB_CLIENT_SECRET) {
     return textResponse(
-      'Сервер не налаштований: у Pages-проєкті відсутня GITHUB_CLIENT_ID/GITHUB_CLIENT_SECRET.',
+      'Server is not configured: the Pages project is missing GITHUB_CLIENT_ID/GITHUB_CLIENT_SECRET.',
       500
     );
   }
@@ -56,13 +56,13 @@ export async function onRequestGet({ request, env }) {
   });
 
   if (!tokenRes.ok) {
-    return textResponse(`GitHub token endpoint повернув HTTP ${tokenRes.status}.`, 502);
+    return textResponse(`GitHub token endpoint returned HTTP ${tokenRes.status}.`, 502);
   }
 
   const tokenData = await tokenRes.json();
   if (tokenData.error || !tokenData.access_token) {
     return textResponse(
-      `Обмін коду на токен не вдався: ${tokenData.error_description || tokenData.error || 'невідома помилка'}`,
+      `Code-for-token exchange failed: ${tokenData.error_description || tokenData.error || 'unknown error'}`,
       400
     );
   }

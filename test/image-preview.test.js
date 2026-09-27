@@ -12,7 +12,7 @@ function makeDom(html) {
   return { dom, el };
 }
 
-/** Фейковий resolver із тим самим інтерфейсом, що й ImageResolver. */
+/** Fake resolver with the same interface as ImageResolver. */
 function fakeResolver(behavior) {
   return {
     async resolve(origSrc, currentFilePath) {
@@ -73,11 +73,11 @@ test('resolveAllImages respects stillCurrent() and aborts stale updates (race-co
   const { el } = makeDom(html);
 
   const resolver = fakeResolver(async () => 'data:image/jpeg;base64,OK');
-  // Симулюємо, що поки промис резолвиться, з'явився новіший рендер (stillCurrent -> false)
+  // Simulate that while the promise resolves, a newer render appeared (stillCurrent -> false)
   const failCount = await resolveAllImages(el, resolver, null, () => false);
 
-  assert.equal(failCount, 0); // не рахуємо як провал — просто проігноровано
+  assert.equal(failCount, 0); // not counted as a failure — just ignored
   const img = el.querySelector('img');
-  // src НЕ мав оновитись, бо рендер вже застарілий
+  // src must NOT have updated, because the render is already stale
   assert.match(img.getAttribute('src'), /^data:image\/gif/);
 });

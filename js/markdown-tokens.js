@@ -1,22 +1,22 @@
 // markdown-tokens.js
-// Розпізнавання зображень/посилань у markdown-тексті та побудова "канонічного" HTML
-// для прев'ю. Навмисно без document.createElement — атрибути <img> парсяться регексом,
-// щоб цей модуль можна було юніт-тестувати в Node без jsdom.
+// Recognizing images/links in markdown text and building the "canonical" HTML
+// for the preview. Deliberately without document.createElement — <img> attributes are parsed with regex,
+// so this module can be unit-tested in Node without jsdom.
 
 import { escapeAttr } from './paths.js';
 
-/** Прозорий 1x1 GIF — заглушка, поки реальне джерело зображення ще не підвантажене. */
+/** Transparent 1x1 GIF — placeholder until the real image source is loaded. */
 export const TRANSPARENT_PIXEL =
   'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==';
 
-/** Зображення (markdown ![]() або сирий <img>) чи звичайне markdown-посилання [](). */
+/** Images (markdown ![]() or raw <img>) or plain markdown links [](). */
 export const REF_TOKEN_RE =
   /!\[([^\]]*)\]\(\s*(\S+?)(?:\s+"([^"]*)")?\s*\)|(?<!!)\[([^\]]*)\]\(\s*(\S+?)(?:\s+"([^"]*)")?\s*\)|<img\b[^>]*\/?>/g;
 
-/** Лише зображення (markdown ![]() або сирий <img>) — використовується для прев'ю/PDF. */
+/** Only images (markdown ![]() or raw <img>) — used for preview/PDF. */
 export const IMG_TOKEN_RE = /!\[([^\]]*)\]\(\s*(\S+?)(?:\s+"([^"]*)")?\s*\)|<img\b[^>]*\/?>/g;
 
-/** Витягує src/alt/width із рядка сирого <img ...> тега без DOM. */
+/** Extracts src/alt/width from a raw <img ...> tag string without DOM. */
 export function parseImgTagAttrs(tagHtml) {
   const get = (name) => {
     const m = tagHtml.match(new RegExp(`\\s${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)')`, 'i'));
@@ -25,7 +25,7 @@ export function parseImgTagAttrs(tagHtml) {
   return { src: get('src'), alt: get('alt'), width: get('width') };
 }
 
-/** Класифікує один збіг REF_TOKEN_RE/IMG_TOKEN_RE і повертає {kind, target, extra...}. */
+/** Classifies a single REF_TOKEN_RE/IMG_TOKEN_RE match and returns {kind, target, extra...}. */
 export function classifyRefMatch(full, g1, g2, g3, g4, g5, g6) {
   if (g2 !== undefined) return { kind: 'img-md', target: g2, alt: g1 || '', title: g3 || '' };
   if (g5 !== undefined) return { kind: 'link-md', target: g5, text: g4 || '', title: g6 || '' };
@@ -33,7 +33,7 @@ export function classifyRefMatch(full, g1, g2, g3, g4, g5, g6) {
   return { kind: 'img-html', target: attrs.src, alt: attrs.alt, width: attrs.width };
 }
 
-/** Збирає токен назад у текст із НОВИМ target (той самий вид синтаксису, що й був). */
+/** Rebuilds a token back into text with a NEW target (same syntax kind as before). */
 export function rebuildRefToken(parsed, newTarget, fullOriginal) {
   switch (parsed.kind) {
     case 'img-md':
@@ -51,12 +51,12 @@ export function rebuildRefToken(parsed, newTarget, fullOriginal) {
 }
 
 /**
- * Перетворює markdown-текст, вставляючи замість кожного зображення "канонічний"
- * <img data-md-line=".." data-md-occ=".." data-md-src="ОРИГІНАЛЬНИЙ_ШЛЯХ" src="TRANSPARENT_PIXEL">.
- * Реальне джерело резолвиться асинхронно окремим кроком (image-resolver.js) —
- * ця функція абсолютно синхронна й не звертається в мережу.
+ * Transforms markdown text by replacing every image with a "canonical"
+ * <img data-md-line=".." data-md-occ=".." data-md-src="ORIGINAL_PATH" src="TRANSPARENT_PIXEL">.
+ * The real source is resolved asynchronously in a separate step (image-resolver.js) —
+ * this function is fully synchronous and never touches the network.
  * @param {string} text
- * @returns {string} текст, готовий для передачі в marked.parse(...)
+ * @returns {string} text ready to pass into marked.parse(...)
  */
 export function injectCanonicalImageTags(text) {
   const lineOcc = {};
@@ -86,20 +86,20 @@ export function injectCanonicalImageTags(text) {
 }
 
 /**
- * Повний рендер markdown -> HTML для прев'ю/PDF. `renderer` — об'єкт із методом
- * .parse(text, opts) (переданий іззовні, напр. бібліотека marked) — це dependency
- * injection, щоб цей модуль не тягнув конкретну markdown-бібліотеку напряму
- * і легко підмінявся в тестах.
+ * Full markdown -> HTML render for preview/PDF. `renderer` is an object with a
+ * .parse(text, opts) method (passed from outside, e.g. the marked library) — this is dependency
+ * injection so this module doesn't pull in a specific markdown library directly
+ * and is easy to swap in tests.
  */
 export function markdownToCanonicalHtml(text, renderer) {
   if (!renderer || typeof renderer.parse !== 'function') {
-    throw new Error('Не передано markdown-рендерер (очікується об’єкт з методом .parse)');
+    throw new Error('No markdown renderer provided (expected an object with a .parse method)');
   }
   const withCanonicalImages = injectCanonicalImageTags(text);
   return renderer.parse(withCanonicalImages, { gfm: true, breaks: false });
 }
 
-/** Переписує в РЯДКУ джерела одне зображення за індексом (line+occ) на нову ширину/джерело. */
+/** Rewrites in a LINE a single image by index (line+occ) to a new width/source. */
 export function setImageAttrsInLine(line, occIndex, { src, alt, width }) {
   let count = -1;
   const newLine = line.replace(IMG_TOKEN_RE, (full) => {

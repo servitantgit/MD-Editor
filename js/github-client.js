@@ -1,6 +1,6 @@
 // github-client.js
-// Тонкий клієнт GitHub REST API. Жодної DOM-логіки, жодного стану інтерфейсу —
-// тільки мережеві виклики. Легко підмінити на fetch-мок у тестах вищого рівня.
+// Thin GitHub REST API client. No DOM logic, no UI state —
+// only network calls. Easy to swap for a fetch mock in higher-level tests.
 
 import { encodePathForApi, guessMime } from './paths.js';
 
@@ -33,14 +33,14 @@ export class GitHubClient {
     return res;
   }
 
-  /** Перевіряє токен/доступ і повертає базову інформацію про репозиторій (у т.ч. default_branch). */
+  /** Checks the token/access and returns basic repository info (incl. default_branch). */
   async getRepoInfo() {
     const res = await this.request(`/repos/${this.owner}/${this.repo}`);
     if (!res.ok) throw await this._error(res, '');
     return res.json();
   }
 
-  /** Повне рекурсивне дерево файлів репозиторію на вказаній гілці. */
+  /** Full recursive file tree of the repository on the given branch. */
   async getTree(branch) {
     const ref = branch || 'HEAD';
     const res = await this.request(
@@ -54,8 +54,8 @@ export class GitHubClient {
   }
 
   /**
-   * Вміст файлу як base64-рядок (незалежно від розміру — Contents API обмежений 1MB,
-   * тому для великих файлів автоматично падаємо на Git Blobs API).
+   * File contents as a base64 string (regardless of size — the Contents API is limited to 1MB,
+   * so for large files we automatically fall back to the Git Blobs API).
    */
   async getFileB64(path) {
     const res = await this.request(`/repos/${this.owner}/${this.repo}/contents/${encodePathForApi(path)}`);
@@ -69,7 +69,7 @@ export class GitHubClient {
         b64 = blobData.content;
       }
     }
-    if (!b64) throw new GitHubApiError(`Порожній вміст або файл завеликий (${path})`, res.status);
+    if (!b64) throw new GitHubApiError(`Empty contents or file too large (${path})`, res.status);
     return { b64: b64.replace(/\n/g, ''), sha: data.sha };
   }
 
@@ -103,17 +103,17 @@ export class GitHubClient {
     try {
       const j = await res.json();
       if (j && j.message) msg = j.message;
-    } catch (_) { /* тіло не JSON — лишаємо статус-код */ }
+    } catch (_) { /* body is not JSON — keep the status code */ }
     return new GitHubApiError(path ? `${msg} (${path})` : msg, res.status);
   }
 }
 
-/** utf-8 текст -> base64, коректно для кирилиці/емодзі (на відміну від голого btoa). */
+/** utf-8 text -> base64, correct for Cyrillic/emoji (unlike bare btoa). */
 export function utf8ToB64(text) {
   return btoa(unescape(encodeURIComponent(text)));
 }
 
-/** base64 -> utf-8 текст. */
+/** base64 -> utf-8 text. */
 export function b64ToUtf8(b64) {
   return decodeURIComponent(escape(atob(b64)));
 }

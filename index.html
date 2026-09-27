@@ -1,25 +1,25 @@
 <!DOCTYPE html>
-<html lang="uk">
+<html lang="en">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>MD Editor — GitHub</title>
 
-  <!-- EasyMDE (редактор на базі CodeMirror) -->
+  <!-- EasyMDE (CodeMirror-based editor) -->
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/easymde/dist/easymde.min.css">
   <script src="https://cdn.jsdelivr.net/npm/easymde/dist/easymde.min.js"></script>
-  <!-- Іконки тулбару -->
+  <!-- Toolbar icons -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
   <!-- Markdown -> HTML -->
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-  <!-- Експорт у PDF -->
+  <!-- PDF export -->
   <script src="https://cdn.jsdelivr.net/npm/html2pdf.js@0.10.1/dist/html2pdf.bundle.min.js"></script>
 
-  <!-- Наші стилі йдуть ПІСЛЯ бібліотечних навмисно: і easymde.min.css, і fontawesome
-       визначають правила з такою самою специфічністю (прості класи), тож порядок у
-       каскаді вирішує, хто переможе. Якщо app.css завантажити раніше — easymde.min.css
-       перебʼє наш display:flex на .EasyMDEContainer, і CodeMirror перестане обмежуватись
-       по висоті (звідси "не скролиться, показує весь текст одним блоком"). -->
+  <!-- Our styles go AFTER the library ones on purpose: both easymde.min.css and fontawesome
+       define rules with the same specificity (plain classes), so cascade order decides
+       who wins. If app.css loads earlier — easymde.min.css overrides our display:flex
+       on .EasyMDEContainer, and CodeMirror stops being height-constrained
+       (hence "doesn't scroll, shows all text as one block"). -->
   <link rel="stylesheet" href="./css/app.css" />
 </head>
 <body>
@@ -29,15 +29,15 @@
     <div class="login-box">
       <h2>GitHub MD Editor</h2>
       <p>
-        Увійдіть через GitHub — авторизація і 2FA/Mobile-підтвердження відбуваються
-        на боці GitHub. Токен доступу зберігається лише у вашому браузері
-        (sessionStorage) і не бачить наш сервер, окрім самого обміну коду на токен.
+        Sign in with GitHub — authorization and 2FA/mobile confirmation happen
+        on GitHub's side. The access token is stored only in your browser
+        (sessionStorage) and never touches our server, except for the code-for-token exchange itself.
       </p>
-      <label>Owner (нік або організація)</label>
+      <label>Owner (username or organization)</label>
       <input id="input-owner" placeholder="username" />
       <label>Repository</label>
       <input id="input-repo" placeholder="my-private-repo" />
-      <button id="btn-login"><i class="fa-brands fa-github"></i> Увійти через GitHub</button>
+      <button id="btn-login"><i class="fa-brands fa-github"></i> Sign in with GitHub</button>
       <div id="login-status" class="status" style="margin-top:12px"></div>
     </div>
   </div>
@@ -46,36 +46,36 @@
   <header class="hidden" id="app-header">
     <h1>MD Editor</h1>
     <span id="repo-label" style="color:var(--muted);font-size:13px"></span>
-    <button class="secondary" id="btn-refresh" title="Оновити дерево">↻</button>
-    <button class="secondary" id="btn-logout">Вийти</button>
+    <button class="secondary" id="btn-refresh" title="Refresh tree">↻</button>
+    <button class="secondary" id="btn-logout">Sign out</button>
   </header>
 
   <div class="main hidden" id="app-main">
     <div class="sidebar">
       <div class="sidebar-header">
-        <span>Файли</span>
+        <span>Files</span>
         <div style="display:flex; gap:4px">
-          <button class="secondary" id="btn-new-folder" style="padding:2px 8px;font-size:12px" title="Створити папку">+ папка</button>
-          <button class="secondary" id="btn-new-file" style="padding:2px 8px;font-size:12px">+ файл</button>
+          <button class="secondary" id="btn-new-folder" style="padding:2px 8px;font-size:12px" title="Create folder">+ folder</button>
+          <button class="secondary" id="btn-new-file" style="padding:2px 8px;font-size:12px">+ file</button>
         </div>
       </div>
       <div class="folder-dropzone" id="folder-dropzone">
-        <div id="folder-dropzone-overlay" class="hidden">Відпустіть папку сюди для завантаження</div>
+        <div id="folder-dropzone-overlay" class="hidden">Drop a folder here to upload</div>
       </div>
       <div class="file-tree" id="file-tree"></div>
     </div>
 
     <div class="editor-area">
       <div class="editor-toolbar">
-        <span class="current-file" id="current-file">Файл не вибрано</span>
-        <button id="btn-save" disabled>Зберегти</button>
-        <button class="secondary" id="btn-export-pdf" disabled title="Експорт активної сторінки у PDF">📄 PDF</button>
-        <button class="secondary danger" id="btn-delete" disabled title="Видалити активний файл із репозиторію">🗑 Видалити</button>
+        <span class="current-file" id="current-file">No file selected</span>
+        <button id="btn-save" disabled>Save</button>
+        <button class="secondary" id="btn-export-pdf" disabled title="Export the active page to PDF">📄 PDF</button>
+        <button class="secondary danger" id="btn-delete" disabled title="Delete the active file from the repository">🗑 Delete</button>
         <span id="save-status" class="status"></span>
       </div>
       <div id="editor-container">
         <textarea id="editor"></textarea>
-        <div id="editor-dropzone-overlay" class="hidden">Відпустіть, щоб додати зображення у файл</div>
+        <div id="editor-dropzone-overlay" class="hidden">Drop to add an image to the file</div>
       </div>
     </div>
   </div>
