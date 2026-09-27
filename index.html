@@ -29,16 +29,15 @@
     <div class="login-box">
       <h2>GitHub MD Editor</h2>
       <p>
-        Вставте Personal Access Token з правом <code>repo</code>.<br>
-        Токен зберігається тільки у вашому браузері (sessionStorage).
+        Увійдіть через GitHub — авторизація і 2FA/Mobile-підтвердження відбуваються
+        на боці GitHub. Токен доступу зберігається лише у вашому браузері
+        (sessionStorage) і не бачить наш сервер, окрім самого обміну коду на токен.
       </p>
       <label>Owner (нік або організація)</label>
       <input id="input-owner" placeholder="username" />
       <label>Repository</label>
       <input id="input-repo" placeholder="my-private-repo" />
-      <label>Personal Access Token</label>
-      <input id="input-token" type="password" placeholder="ghp_xxxxxxxxxxxx" />
-      <button id="btn-login">Увійти</button>
+      <button id="btn-login"><i class="fa-brands fa-github"></i> Увійти через GitHub</button>
       <div id="login-status" class="status" style="margin-top:12px"></div>
     </div>
   </div>

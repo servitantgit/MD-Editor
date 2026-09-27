@@ -1,5 +1,13 @@
 name = "md-editor"
 compatibility_date = "2026-09-26"
+main = "worker/index.js"
+
+# GITHUB_CLIENT_ID не секретний — це публічний ідентифікатор OAuth App,
+# він однаково видно в URL авторизації браузера. Секрет (GITHUB_CLIENT_SECRET)
+# сюди НЕ кладемо — він задається окремо через `wrangler secret put`.
+[vars]
+GITHUB_CLIENT_ID = "REPLACE_WITH_YOUR_OAUTH_APP_CLIENT_ID"
 
 [assets]
 directory = "."
+binding = "ASSETS"

@@ -19,7 +19,6 @@ const els = {
   loginStatus: document.getElementById('login-status'),
   inputOwner: document.getElementById('input-owner'),
   inputRepo: document.getElementById('input-repo'),
-  inputToken: document.getElementById('input-token'),
   btnLogin: document.getElementById('btn-login'),
 
   appHeader: document.getElementById('app-header'),
@@ -62,12 +61,16 @@ let editorHandle = null;
 init();
 
 function init() {
+  consumeOAuthRedirect();
+
   const saved = readSession();
   if (saved) {
     state.client = new GitHubClient(saved);
     state.branch = saved.branch;
     showApp(saved.owner, saved.repo);
     loadTree();
+  } else {
+    restorePendingLoginFields();
   }
 
   els.btnLogin.onclick = onLoginClick;
@@ -92,16 +95,60 @@ function readSession() {
   return { token, owner, repo, branch };
 }
 
-async function onLoginClick() {
+function onLoginClick() {
   const owner = els.inputOwner.value.trim();
   const repo = els.inputRepo.value.trim();
-  const token = els.inputToken.value.trim();
-  if (!owner || !repo || !token) {
-    setLoginStatus('Заповніть усі поля', true);
+  if (!owner || !repo) {
+    setLoginStatus('Заповніть Owner і Repository', true);
     return;
   }
 
-  setLoginStatus('Перевірка...', false);
+  // owner/repo не проходять через GitHub OAuth round-trip — зберігаємо їх
+  // самі, у тій самій вкладці, і забираємо назад після /auth/callback.
+  sessionStorage.setItem('gh_pending_owner', owner);
+  sessionStorage.setItem('gh_pending_repo', repo);
+
+  setLoginStatus('Перенаправлення на GitHub...', false);
+  location.href = '/auth/login';
+}
+
+/**
+ * Якщо ми щойно повернулись із /auth/callback, Worker підклеїв токен у
+ * URL fragment (#gh_token=...). Fragment ніколи не йде на сервер, тож це
+ * безпечний спосіб передати токен назад у клієнтський JS. Забираємо його,
+ * одразу чистимо адресний рядок і завершуємо той самий "логін", що й раніше
+ * робив onLoginClick з PAT.
+ */
+function consumeOAuthRedirect() {
+  const hash = location.hash || '';
+  const match = hash.match(/(?:^#|&)gh_token=([^&]+)/);
+  if (!match) return;
+
+  const token = decodeURIComponent(match[1]);
+  history.replaceState(null, '', location.pathname + location.search);
+
+  const owner = sessionStorage.getItem('gh_pending_owner');
+  const repo = sessionStorage.getItem('gh_pending_repo');
+  sessionStorage.removeItem('gh_pending_owner');
+  sessionStorage.removeItem('gh_pending_repo');
+
+  if (!owner || !repo) {
+    setLoginStatus('Сесію логіну втрачено (owner/repo). Спробуйте ще раз.', true);
+    return;
+  }
+
+  finishLogin(token, owner, repo);
+}
+
+function restorePendingLoginFields() {
+  const owner = sessionStorage.getItem('gh_pending_owner');
+  const repo = sessionStorage.getItem('gh_pending_repo');
+  if (owner) els.inputOwner.value = owner;
+  if (repo) els.inputRepo.value = repo;
+}
+
+async function finishLogin(token, owner, repo) {
+  setLoginStatus('Перевірка доступу...', false);
   try {
     const client = new GitHubClient({ token, owner, repo });
     const repoInfo = await client.getRepoInfo();
