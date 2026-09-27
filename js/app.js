@@ -13,6 +13,7 @@ import { exportCurrentPageToPdf } from './pdf-export.js';
 import { moveFile } from './file-mover.js';
 import { createFolder, renameFolder, deleteFolder, getFolders, isFolderEmpty } from './folder-manager.js';
 import { basenameOf, dirnameOf } from './paths.js';
+import { looksLikeGitHubUrl, parseGitHubOwnerRepo } from './github-repo-url.js';
 
 const els = {
   loginScreen: document.getElementById('login-screen'),
@@ -96,8 +97,23 @@ function readSession() {
 }
 
 function onLoginClick() {
-  const owner = els.inputOwner.value.trim();
-  const repo = els.inputRepo.value.trim();
+  let owner = els.inputOwner.value.trim();
+  let repo = els.inputRepo.value.trim();
+
+  // Guard against pasting the full https://github.com/owner/repo link (e.g. from
+  // the address bar) into either field — split it back into owner + repo, so the
+  // API URL /repos/{owner}/{repo} stays valid.
+  const parsed = parseGitHubOwnerRepo(owner) || parseGitHubOwnerRepo(repo);
+  if (parsed) {
+    owner = parsed.owner;
+    repo = parsed.repo;
+    els.inputOwner.value = owner; // write back so the user sees what will be used
+    els.inputRepo.value = repo;
+  } else if (looksLikeGitHubUrl(owner) || looksLikeGitHubUrl(repo)) {
+    setLoginStatus('That looks like a GitHub link, but no repository in it. Enter just the names: owner and repository.', true);
+    return;
+  }
+
   if (!owner || !repo) {
     setLoginStatus('Fill in Owner and Repository', true);
     return;
