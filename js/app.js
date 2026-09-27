@@ -31,6 +31,7 @@ const els = {
   fileTreeEl: document.getElementById('file-tree'),
   folderDropzone: document.getElementById('folder-dropzone'),
   folderDropOverlay: document.getElementById('folder-dropzone-overlay'),
+  btnNewFolder: document.getElementById('btn-new-folder'),
   btnNewFile: document.getElementById('btn-new-file'),
 
   currentFileLabel: document.getElementById('current-file'),
