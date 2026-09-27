@@ -2,144 +2,152 @@
 
 [![Tests](../../actions/workflows/test.yml/badge.svg)](../../actions/workflows/test.yml)
 
-Легкий браузерний редактор `.md` файлів для GitHub-репозиторію. Редактор
-підключається до GitHub REST API після входу через **"Увійти через GitHub"**
-(OAuth) — токен доступу видається GitHub-ом і зберігається лише в
-`sessionStorage`, наш сервер бачить лише сам обмін одноразового коду на токен
-(деталі та налаштування — у [README-CLOUDFLARE.md](./README-CLOUDFLARE.md)).
+A lightweight browser editor for `.md` files in a GitHub repository. The
+editor talks to the GitHub REST API after signing in with **"Sign in with
+GitHub"** (OAuth) — the access token is issued by GitHub and lives only in
+`sessionStorage`; our server only ever sees the one-time code-for-token
+exchange (details and setup in [README-CLOUDFLARE.md](./README-CLOUDFLARE.md)).
 
-Працює без бекенду та без білд-кроку: показує й редагує Markdown, підставляє
-зображення у прев'ю, підтримує drag&drop файлів і зображень, **роботу з папками**
-та експортує активну сторінку в PDF.
+Works with no backend and no build step: renders and edits Markdown, resolves
+images in the preview, supports drag & drop for files and images,
+**folder management**, and exports the active page to PDF.
 
-## Архітектура
+## Architecture
 
-Плейн JavaScript (ES-модулі), без TypeScript і без збірки — відкривається
-браузером як є. Код розбитий по відповідальності:
+Plain JavaScript (ES modules), no TypeScript, no bundler — opens directly in
+the browser. Code is split by responsibility:
 
 ```
-index.html              HTML-каркас, підключає CDN-бібліотеки та js/app.js
-css/app.css              усі стилі
+index.html              HTML shell, loads CDN libraries and js/app.js
+css/app.css              all styles
 functions/auth/
-  login.js                Cloudflare Pages Function: GET /auth/login — старт OAuth
-  callback.js              Cloudflare Pages Function: GET /auth/callback — обмін
-                            code -> access_token, передає токен клієнту
+  login.js                Cloudflare Pages Function: GET /auth/login — starts OAuth
+  callback.js              Cloudflare Pages Function: GET /auth/callback — exchanges
+                            code -> access_token, hands the token to the client
 js/
-  paths.js                чисті функції для роботи зі шляхами (без DOM/мережі)
-  markdown-tokens.js       розпізнавання зображень/посилань у markdown, побудова
-                            "канонічного" HTML для прев'ю (без DOM/мережі)
-  reference-rewriter.js    логіка перерахунку посилань при переміщенні файлів
-                            (чисті функції, без мережі)
-  github-client.js         тонкий клієнт GitHub REST API (auth, contents, trees)
-  image-resolver.js        шлях у markdown -> data: URL через GitHub API, з кешем
-  file-mover.js            оркестрація переміщення файлу (читає/пише через
-                            github-client, використовує reference-rewriter)
-  folder-manager.js        створення/перейменування/видалення папок (через файли)
-  image-preview.js         DOM-частина прев'ю: підстановка src, ручка resize
-  editor.js                обгортка над EasyMDE (створення, preview-рендер,
-                            коректний CodeMirror.refresh())
-  file-tree.js             дерево файлів + drag&drop файлів і папок (контекстне меню)
-  upload.js                завантаження зображень (drag&drop з ОС + тулбар)
-  folder-upload.js         завантаження папок через drag&drop (webkitGetAsEntry)
-  pdf-export.js            експорт активної сторінки в PDF
-  app.js                   точка збирання: логін (у т.ч. OAuth-редірект), стан,
-                            підключення модулів
-test/                      юніт-тести (node:test) для чистої логіки
-e2e_smoke_test.py          наскрізний браузерний тест (Playwright)
-serve.mjs                  мінімальний локальний сервер для розробки/тестів
+  paths.js                pure path-handling functions (no DOM/network)
+  markdown-tokens.js       detects images/links in markdown, builds a
+                            "canonical" preview HTML (no DOM/network)
+  reference-rewriter.js    logic for rewriting links when files move
+                            (pure functions, no network)
+  github-client.js         thin GitHub REST API client (auth, contents, trees)
+  image-resolver.js        markdown path -> data: URL via the GitHub API, cached
+  file-mover.js            orchestrates moving a file (reads/writes through
+                            github-client, uses reference-rewriter)
+  folder-manager.js        create/rename/delete folders (via file operations)
+  image-preview.js         DOM side of the preview: src substitution, resize handle
+  editor.js                wrapper around EasyMDE (setup, preview rendering,
+                            correct CodeMirror.refresh())
+  file-tree.js             file tree + drag & drop for files and folders (context menu)
+  upload.js                image uploads (OS drag & drop + toolbar button)
+  folder-upload.js         folder upload via drag & drop (webkitGetAsEntry)
+  pdf-export.js            exports the active page to PDF
+  app.js                   assembly point: login (incl. the OAuth redirect),
+                            state, wiring up the modules
+test/                      unit tests (node:test) for the pure logic
+e2e_smoke_test.py          end-to-end browser test (Playwright)
+serve.mjs                  minimal local server for development/testing
 ```
 
-Чому саме так: `paths.js`, `markdown-tokens.js` і `reference-rewriter.js` не
-мають ЖОДНОЇ залежності від DOM чи мережі — це і є вся "небезпечна" логіка
-(парсинг посилань, перерахунок відносних шляхів), яку можна й потрібно
-перевіряти ізольовано. Саме там ховались реальні баги в попередніх версіях.
+Why it's structured this way: `paths.js`, `markdown-tokens.js` and
+`reference-rewriter.js` have ZERO dependency on the DOM or the network — this
+is all the "dangerous" logic (link parsing, relative-path rewriting), which
+can and should be tested in isolation. That's exactly where real bugs hid in
+earlier versions.
 
-## Запуск
+## Running it
 
-Браузери не дозволяють `<script type="module">` завантажуватись із `file://`
-— сторінку треба віддавати по http(s). Варіанти:
+Browsers won't load `<script type="module">` from `file://` — the page needs
+to be served over http(s). Options:
 
-- **Cloudflare Pages** — поточний варіант для реального використання (Git-інтеграція,
-  автодеплой на push). Це **єдиний** варіант, на якому працює вхід через GitHub OAuth —
-  він реалізований як Cloudflare Pages Functions (`functions/auth/*`), яких немає ні
-  в GitHub Pages, ні в голому статичному хостингу. Налаштування — у
-  [README-CLOUDFLARE.md](./README-CLOUDFLARE.md).
-- **Локально для розробки**: `node serve.mjs` (нічого встановлювати не треба,
-  Node.js вбудований `http` модуль) → http://localhost:8080. Це голий статичний
-  сервер — він **не** виконує `/functions`, тому кнопка "Увійти через GitHub"
-  тут не працюватиме (буде 404/fallback). Щоб локально перевірити саму
-  OAuth-логіку, піднімайте через `npx wrangler pages dev .` — він емулює і
-  статику, і Pages Functions.
-- Будь-який інший статичний хостинг (GitHub Pages, `npx serve` тощо) підійде для
-  перегляду й розробки UI, але без OAuth-логіну — GitHub API там просто нічим
-  буде авторизувати.
+- **Cloudflare Pages** — the current option for real-world use (Git
+  integration, auto-deploy on push). This is the **only** option on which
+  GitHub OAuth login works — it's implemented as Cloudflare Pages Functions
+  (`functions/auth/*`), which neither GitHub Pages nor plain static hosting
+  have. Setup instructions in [README-CLOUDFLARE.md](./README-CLOUDFLARE.md).
+- **Local development**: `node serve.mjs` (nothing to install, uses Node's
+  built-in `http` module) → http://localhost:8080. This is a bare static
+  server — it does **not** run `/functions`, so the "Sign in with GitHub"
+  button won't work here (you'll get a 404/fallback). To exercise the OAuth
+  logic itself locally, run `npx wrangler pages dev .` instead — it emulates
+  both the static assets and the Pages Functions.
+- Any other static host (GitHub Pages, `npx serve`, etc.) works fine for
+  viewing and developing the UI, but without OAuth login — there's simply
+  nothing there to authorize GitHub API calls with.
 
-## Тестування
+## Testing
 
-### Статус
+### Status
 
-| Перевірка | Статус | Що перевіряє |
+| Check | Status | What it covers |
 |---|---|---|
-| Unit tests | 🧪 **34 тести** | paths, markdown-tokens, reference-rewriter, file-mover, image-preview через jsdom |
-| Browser smoke test | 🧪 **CI** | реальний Chromium: редагування, прокрутка документа та прев'ю зображень |
-| GitHub Actions | 🔄 **автоматично** | запускає обидві перевірки для `push` і `pull_request` |
+| Unit tests | 🧪 **34 tests** | paths, markdown-tokens, reference-rewriter, file-mover, image-preview via jsdom |
+| Browser smoke test | 🧪 **CI** | real Chromium: editing, document/preview scrolling, image previews |
+| GitHub Actions | 🔄 **automatic** | runs both checks on `push` and `pull_request` |
 
-Поточний статус CI відображається бейджем **Tests** на початку README. Червоний
-бейдж означає, що хоча б одна перевірка workflow не пройшла.
+Current CI status is shown by the **Tests** badge at the top of this README.
+A red badge means at least one workflow check failed.
 
-Локальний запуск unit-тестів:
+Running unit tests locally:
 
 ```bash
 npm ci
 npm test
 ```
 
-Наскрізний браузерний тест (справжній Chromium, GitHub API підмінений мок-відповідями). У CI він запускається автоматично:
+End-to-end browser test (real Chromium, GitHub API replaced with mocked
+responses). Runs automatically in CI:
 
 ```bash
 pip install playwright && playwright install chromium
-node serve.mjs &                  # підняти застосунок на :8080
-python3 e2e_smoke_test.py         # перевіряє редагування, прокрутку, прев'ю зображень
+node serve.mjs &                  # start the app on :8080
+python3 e2e_smoke_test.py         # checks editing, scrolling, image previews
 ```
 
-## Що вміє
+## Features
 
-- **Вхід через GitHub (OAuth)** — без ручного створення Personal Access Token;
-  авторизація і 2FA/Mobile-підтвердження відбуваються на боці GitHub, токен
-  доступу застосунок отримує вже готовим і тримає лише в `sessionStorage`.
-- **Показ зображень у прев'ю** — резолвляться через GitHub API (працює і з
-  приватними репозиторіями), а не як прямі посилання. Це саме прев'ю редактора,
-  а не окремий статичний GitHub Preview.
-- **Масштабування зображень** — тягніть за ручку в правому нижньому куті
-  картинки в прев'ю; ширина записується прямо в markdown (`<img ... width="...">`).
-- **Вставка зображень із буфера** — скопійоване зображення/скріншот із буфера вставляється як файл у репозиторій і одразу додається в markdown.
-- **Drag & drop зображень** — перетягніть файл у вікно редактора, або кнопка
-  завантаження в тулбарі. Автоматично визначає спільну теку для зображень
-  (шукає теку на кшталт `Asset/`/`Images/`, або з найбільшою кількістю
-  наявних картинок) і вставляє **відносне** посилання — той самий стиль, що
-  вже використовує решта нотаток.
-- **Drag & drop папок** — перетягніть папку з файлової системи в зону "Відпустіть папку сюди для завантаження" у бічній панелі. Рекурсивно завантажує всі файли з збереженням структури.
-- **Drag & drop файлів між папками** — перетягніть будь-який файл на іншу
-  теку в дереві зліва. Автоматично перераховує власні посилання файлу, що
-  рухається, і виправляє посилання в усіх інших нотатках репозиторію, що на
-  нього вказують (і відносні, і кореневі `/шлях`, і зображення, і звичайні
-  `[текст](шлях)` посилання).
-- **Управління папками** — кнопка "+ папка" створює нову папку (через `.gitkeep`);
-  правий клік на папці в дереві → "Перейменувати" / "Видалити". При перейменуванні
-  оновлюються посилання в `.md` файлах.
-- **Експорт у PDF** — кнопка "📄 PDF" рендерить активну сторінку з
-  підставленими зображеннями.
+- **Sign in with GitHub (OAuth)** — no manual Personal Access Token; the
+  authorization and any 2FA/mobile confirmation happen on GitHub's side, and
+  the app receives a ready-made access token that it keeps only in
+  `sessionStorage`.
+- **Image previews** — resolved through the GitHub API (works with private
+  repos too), not as direct links. This is the editor's own preview, not a
+  separate static GitHub Preview.
+- **Image resizing** — drag the handle in the bottom-right corner of an image
+  in the preview; the width is written straight into the markdown
+  (`<img ... width="...">`).
+- **Paste images from the clipboard** — a copied image/screenshot from the
+  clipboard is uploaded to the repo as a file and immediately inserted into
+  the markdown.
+- **Drag & drop images** — drop a file into the editor window, or use the
+  toolbar upload button. Automatically detects a shared images folder (looks
+  for something like `Asset/`/`Images/`, or the folder with the most existing
+  images) and inserts a **relative** link, matching the style the rest of the
+  notes already use.
+- **Drag & drop folders** — drop a folder from your file system onto the
+  "Drop a folder here to upload" zone in the sidebar. Recursively uploads all
+  files, preserving the folder structure.
+- **Drag & drop files between folders** — drag any file onto another folder
+  in the tree on the left. Automatically rewrites the moved file's own links
+  and fixes links in every other note in the repo that points to it (relative
+  links, root-relative `/path` links, images, and plain
+  `[text](path)` links alike).
+- **Folder management** — the "+ folder" button creates a new folder (via a
+  `.gitkeep` file); right-click a folder in the tree → "Rename" / "Delete".
+  Renaming updates references in `.md` files.
+- **PDF export** — the "📄 PDF" button renders the active page with images
+  resolved in place.
 
-## Відомі обмеження
+## Known limitations
 
-- **Немає refresh-token для OAuth-сесії** — якщо в GitHub OAuth App увімкнено
-  "Expire user access tokens", токен помирає приблизно через 8 годин і
-  користувача просто розлогінить (треба заново тиснути "Увійти через GitHub").
-  За замовчуванням цю опцію тримаємо вимкненою — див. `README-CLOUDFLARE.md`.
-- Іконки тулбару (Font Awesome) підключені з CDN — якщо мережа недоступна,
-  зникають тільки візуальні іконки, функціональність не страждає.
-- Автозаміна посилань обробляє markdown-зображення, markdown-посилання й
-  сирі `<img>` теги; посилання виду `onenote:...` та інші зовнішні схеми
-  свідомо не чіпаються.
-- PDF-експорт залежить від `html2pdf.js` (html2canvas) — дуже великі
-  зображення можуть уповільнити генерацію.
+- **No refresh-token for the OAuth session** — if "Expire user access tokens"
+  is enabled on the GitHub OAuth App, the token dies after roughly 8 hours and
+  the user is simply logged out (they need to click "Sign in with GitHub"
+  again). This option is kept off by default — see `README-CLOUDFLARE.md`.
+- Toolbar icons (Font Awesome) load from a CDN — if the network is
+  unavailable, only the icon glyphs disappear; functionality is unaffected.
+- Reference rewriting handles markdown images, markdown links, and raw
+  `<img>` tags; links like `onenote:...` and other external schemes are
+  deliberately left untouched.
+- PDF export depends on `html2pdf.js` (html2canvas) — very large images can
+  slow generation down.

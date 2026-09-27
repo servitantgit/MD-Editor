@@ -8,21 +8,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [2.2.0] - 2026-09-27
 
 ### Added
-- **GitHub OAuth login** замінює ручне вставляння Personal Access Token — кнопка "Увійти через GitHub" на стартовому екрані (`index.html`, `js/app.js`)
-- `functions/auth/login.js`, `functions/auth/callback.js` — Cloudflare Pages Functions, що реалізують Authorization Code flow: anti-CSRF `state` у HttpOnly-cookie, обмін `code` на `access_token` на сервері (Client Secret туди й не заходить), токен передається клієнту через URL fragment (`#gh_token=...`), який ніколи не потрапляє на сервер
-- `AGENTS.md` — граблі, знайдені під час впровадження OAuth, щоб їх не наступати повторно
+- **GitHub OAuth login** replaces manually pasting a Personal Access Token — a "Sign in with GitHub" button on the start screen (`index.html`, `js/app.js`)
+- `functions/auth/login.js`, `functions/auth/callback.js` — Cloudflare Pages Functions implementing the Authorization Code flow: anti-CSRF `state` in an HttpOnly cookie, server-side exchange of `code` for `access_token` (the Client Secret never leaves the server), the token is handed to the client via a URL fragment (`#gh_token=...`), which never reaches a server
+- `AGENTS.md` — pitfalls found while building the OAuth flow, so they aren't rediscovered
 
 ### Changed
-- Стартовий екран більше не має поля токена — тільки Owner/Repository і кнопка GitHub
-- `js/app.js`: логін переписаний навколо `consumeOAuthRedirect()` / `finishLogin()` замість одного синхронного сабміту форми з токеном
-- `e2e_smoke_test.py`: реальний GitHub OAuth неможливо прогнати в CI, тому смоук-тест тепер напряму кладе токен/owner/repo в `sessionStorage` (ті самі ключі, які читає `readSession()`) замість заповнення старої форми з токеном
-- Перегенеровано `package-lock.json` — містив неповні stub-записи транзитивних `"*"`-залежностей (`@types/tern`, `typo-js`) і взагалі бракувало `@types/estree`; `npm install` це терпів, `npm ci` у CI — ні
+- The start screen no longer has a token field — just Owner/Repository and the GitHub button
+- `js/app.js`: login reworked around `consumeOAuthRedirect()` / `finishLogin()` instead of a single synchronous form submit with a token
+- `e2e_smoke_test.py`: real GitHub OAuth can't run in CI, so the smoke test now seeds `sessionStorage` directly with a token/owner/repo (the same keys `readSession()` reads) instead of filling the old token form
+- Regenerated `package-lock.json` — it had incomplete stub entries for transitive `"*"` dependencies (`@types/tern`, `typo-js`) and was fully missing `@types/estree`; `npm install` tolerated this, `npm ci` in CI did not
 
 ### Removed
-- `worker/index.js` і пов'язані правки `wrangler.toml` (`main`, `[assets] binding`) з проміжної ітерації — проєкт деплоїться через Git-інтеграцію Cloudflare Pages, яка Workers `main`-скрипт узагалі не виконує; `wrangler.toml` для поточного способу деплою фактично не використовується
+- `worker/index.js` and the related `wrangler.toml` changes (`main`, `[assets] binding`) from an intermediate iteration — the project deploys via Cloudflare Pages' Git integration, which never executes a Workers `main` script; `wrangler.toml` is effectively unused for the current deployment method
 
 ### Docs
-- `README-CLOUDFLARE.md` переписаний під реальний деплой (Pages + Pages Functions, змінні оточення в дашборді) замість Workers-флоу через `wrangler deploy`, який не відповідав тому, як проєкт насправді хоститься
+- `README-CLOUDFLARE.md` rewritten around the actual deployment (Pages + Pages Functions, dashboard environment variables) instead of a Workers `wrangler deploy` flow that didn't match how the project is actually hosted
 
 ## [2.1.0] - 2026-09-27
 
