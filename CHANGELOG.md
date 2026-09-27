@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.2.0] - 2026-09-27
+
+### Added
+- **GitHub OAuth login** замінює ручне вставляння Personal Access Token — кнопка "Увійти через GitHub" на стартовому екрані (`index.html`, `js/app.js`)
+- `functions/auth/login.js`, `functions/auth/callback.js` — Cloudflare Pages Functions, що реалізують Authorization Code flow: anti-CSRF `state` у HttpOnly-cookie, обмін `code` на `access_token` на сервері (Client Secret туди й не заходить), токен передається клієнту через URL fragment (`#gh_token=...`), який ніколи не потрапляє на сервер
+- `AGENTS.md` — граблі, знайдені під час впровадження OAuth, щоб їх не наступати повторно
+
+### Changed
+- Стартовий екран більше не має поля токена — тільки Owner/Repository і кнопка GitHub
+- `js/app.js`: логін переписаний навколо `consumeOAuthRedirect()` / `finishLogin()` замість одного синхронного сабміту форми з токеном
+- `e2e_smoke_test.py`: реальний GitHub OAuth неможливо прогнати в CI, тому смоук-тест тепер напряму кладе токен/owner/repo в `sessionStorage` (ті самі ключі, які читає `readSession()`) замість заповнення старої форми з токеном
+- Перегенеровано `package-lock.json` — містив неповні stub-записи транзитивних `"*"`-залежностей (`@types/tern`, `typo-js`) і взагалі бракувало `@types/estree`; `npm install` це терпів, `npm ci` у CI — ні
+
+### Removed
+- `worker/index.js` і пов'язані правки `wrangler.toml` (`main`, `[assets] binding`) з проміжної ітерації — проєкт деплоїться через Git-інтеграцію Cloudflare Pages, яка Workers `main`-скрипт узагалі не виконує; `wrangler.toml` для поточного способу деплою фактично не використовується
+
+### Docs
+- `README-CLOUDFLARE.md` переписаний під реальний деплой (Pages + Pages Functions, змінні оточення в дашборді) замість Workers-флоу через `wrangler deploy`, який не відповідав тому, як проєкт насправді хоститься
+
 ## [2.1.0] - 2026-09-27
 
 ### Added
@@ -56,5 +75,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Basic markdown editing
 - Simple file listing
 
+[2.2.0]: https://github.com/USER/MD-Editor/compare/v2.1.0...v2.2.0
 [2.1.0]: https://github.com/USER/MD-Editor/compare/v2.0.0...v2.1.0
 [2.0.0]: https://github.com/USER/MD-Editor/releases/tag/v2.0.0
