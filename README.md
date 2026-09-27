@@ -1,6 +1,9 @@
 # GitHub MD Editor
 
 [![Tests](../../actions/workflows/test.yml/badge.svg)](../../actions/workflows/test.yml)
+![Deployed on Cloudflare Pages](https://img.shields.io/badge/deployed%20on-Cloudflare%20Pages-F38020?logo=cloudflarepages&logoColor=white)
+![No build step](https://img.shields.io/badge/build-none-brightgreen)
+![Vanilla JS](https://img.shields.io/badge/vanilla-JS-f7df1e?logo=javascript&logoColor=black)
 
 A lightweight browser editor for `.md` files in a GitHub repository. The
 editor talks to the GitHub REST API after signing in with **"Sign in with
