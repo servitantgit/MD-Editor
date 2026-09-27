@@ -83,10 +83,22 @@ with sync_playwright() as p:
 
     page.goto("http://localhost:8080/", wait_until="networkidle")
 
-    page.fill("#input-owner", "test-owner")
-    page.fill("#input-repo", "test-repo")
-    page.fill("#input-token", "ghp_faketoken")
-    page.click("#btn-login")
+    # Форма логіну більше не приймає PAT напряму (замінено на "Увійти через
+    # GitHub" + Cloudflare Worker OAuth) — це недоступно в ізольованому
+    # e2e-середовищі без справжнього GitHub OAuth App. Тому імітуємо вже
+    # завершений логін так само, як це робить сам застосунок після
+    # /auth/callback: кладемо токен/owner/repo у sessionStorage і
+    # перезавантажуємось — readSession() у app.js підхопить це й одразу
+    # покаже застосунок, минаючи екран логіну.
+    page.evaluate(
+        """() => {
+            sessionStorage.setItem('gh_token', 'ghp_faketoken');
+            sessionStorage.setItem('gh_owner', 'test-owner');
+            sessionStorage.setItem('gh_repo', 'test-repo');
+            sessionStorage.setItem('gh_branch', 'main');
+        }"""
+    )
+    page.reload(wait_until="networkidle")
 
     page.wait_for_selector("#app-main:not(.hidden)", timeout=5000)
     page.wait_for_selector(".file-item", timeout=5000)
