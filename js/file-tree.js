@@ -88,12 +88,12 @@ export class FileTree {
       el.style.paddingLeft = `${12 + depth * 14}px`;
       el.dataset.path = folder.path;
       el.innerHTML = `<span class="folder-toggle">${collapsed ? '▸' : '▾'}</span><span class="icon">📁</span><span class="name">${escapeAttr(name)}</span>`;
-      el.onclick = (e) => {
+      el.addEventListener('click', (e) => {
         if (e.target.closest('.folder-toggle')) return;
         if (this.collapsedFolders.has(folder.path)) this.collapsedFolders.delete(folder.path);
         else this.collapsedFolders.add(folder.path);
         this.render();
-      };
+      });
       el.addEventListener('contextmenu', (e) => {
         e.preventDefault();
         this._showFolderContextMenu(e.clientX, e.clientY, folder.path);
@@ -117,8 +117,11 @@ export class FileTree {
       el.title = file.path;
       el.innerHTML = `<span class="icon">${icon}</span><span class="name">${escapeAttr(name)}</span>`;
 
-      if (isMd) el.onclick = () => this.handlers.onOpenFile(file.path);
-      else if (isImg) el.onclick = () => this.handlers.onPreviewImage(file.path);
+      if (isMd && this.handlers.onOpenFile) {
+        el.addEventListener('click', () => this.handlers.onOpenFile(file.path));
+      } else if (isImg && this.handlers.onPreviewImage) {
+        el.addEventListener('click', () => this.handlers.onPreviewImage(file.path));
+      }
 
       el.draggable = true;
       el.addEventListener('dragstart', (e) => {
@@ -146,7 +149,7 @@ export class FileTree {
       el.classList.remove('drop-target');
       const srcPath = e.dataTransfer.getData('text/plain');
       if (!srcPath) return;
-      await this.handlers.onMoveFile(srcPath, folderPath);
+      if (this.handlers?.onMoveFile) await this.handlers.onMoveFile(srcPath, folderPath);
     });
   }
 
@@ -167,8 +170,8 @@ export class FileTree {
       if (!btn) return;
       const action = btn.dataset.action;
       menu.remove();
-      if (action === 'rename' && this.handlers.onRenameFolder) this.handlers.onRenameFolder(folderPath);
-      if (action === 'delete' && this.handlers.onDeleteFolder) this.handlers.onDeleteFolder(folderPath);
+      if (action === 'rename' && this.handlers?.onRenameFolder) this.handlers.onRenameFolder(folderPath);
+      if (action === 'delete' && this.handlers?.onDeleteFolder) this.handlers.onDeleteFolder(folderPath);
     });
     document.body.appendChild(menu);
 
