@@ -31,6 +31,8 @@ export class FileTree {
    *   onPreviewImage: (path: string) => void,
    *   onMoveFile: (oldPath: string, targetFolder: string) => Promise<void>,
    *   getActivePath: () => string|null,
+   *   onRenameFolder: (path: string) => void,
+   *   onDeleteFolder: (path: string) => void,
    * }} handlers
    */
   constructor(containerEl, handlers) {
@@ -86,11 +88,16 @@ export class FileTree {
       el.style.paddingLeft = `${12 + depth * 14}px`;
       el.dataset.path = folder.path;
       el.innerHTML = `<span class="folder-toggle">${collapsed ? '▸' : '▾'}</span><span class="icon">📁</span><span class="name">${escapeAttr(name)}</span>`;
-      el.onclick = () => {
+      el.onclick = (e) => {
+        if (e.target.closest('.folder-toggle')) return;
         if (this.collapsedFolders.has(folder.path)) this.collapsedFolders.delete(folder.path);
         else this.collapsedFolders.add(folder.path);
         this.render();
       };
+      el.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        this._showFolderContextMenu(e.clientX, e.clientY, folder.path);
+      });
       this._wireDropTarget(el, folder.path);
       container.appendChild(el);
 
@@ -141,6 +148,33 @@ export class FileTree {
       if (!srcPath) return;
       await this.handlers.onMoveFile(srcPath, folderPath);
     });
+  }
+
+  _showFolderContextMenu(x, y, folderPath) {
+    const existing = document.querySelector('.folder-context-menu');
+    if (existing) existing.remove();
+
+    const menu = document.createElement('div');
+    menu.className = 'folder-context-menu';
+    menu.style.left = `${x}px`;
+    menu.style.top = `${y}px`;
+    menu.innerHTML = `
+      <button data-action="rename">✏️ Перейменувати</button>
+      <button data-action="delete" class="danger">🗑 Видалити</button>
+    `;
+    menu.addEventListener('click', (e) => {
+      const btn = e.target.closest('button');
+      if (!btn) return;
+      const action = btn.dataset.action;
+      menu.remove();
+      if (action === 'rename' && this.handlers.onRenameFolder) this.handlers.onRenameFolder(folderPath);
+      if (action === 'delete' && this.handlers.onDeleteFolder) this.handlers.onDeleteFolder(folderPath);
+    });
+    document.body.appendChild(menu);
+
+    const closeMenu = () => menu.remove();
+    document.addEventListener('click', closeMenu, { once: true });
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeMenu(); }, { once: true });
   }
 
   clearActive() {

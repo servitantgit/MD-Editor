@@ -8,8 +8,11 @@ import { ImageResolver } from './image-resolver.js';
 import { createEditor } from './editor.js';
 import { FileTree } from './file-tree.js';
 import { setupImageDropzone, pickImageFiles, uploadImage } from './upload.js';
+import { setupFolderDropzone } from './folder-upload.js';
 import { exportCurrentPageToPdf } from './pdf-export.js';
 import { moveFile } from './file-mover.js';
+import { createFolder, renameFolder, deleteFolder, getFolders, isFolderEmpty } from './folder-manager.js';
+import { basenameOf, dirnameOf } from './paths.js';
 
 const els = {
   loginScreen: document.getElementById('login-screen'),
@@ -26,6 +29,8 @@ const els = {
   btnLogout: document.getElementById('btn-logout'),
 
   fileTreeEl: document.getElementById('file-tree'),
+  folderDropzone: document.getElementById('folder-dropzone'),
+  folderDropOverlay: document.getElementById('folder-dropzone-overlay'),
   btnNewFile: document.getElementById('btn-new-file'),
 
   currentFileLabel: document.getElementById('current-file'),
@@ -71,6 +76,7 @@ function init() {
   };
   els.btnRefresh.onclick = () => loadTree();
   els.btnNewFile.onclick = onCreateNewFile;
+  els.btnNewFolder.onclick = onCreateNewFolder;
   els.btnSave.onclick = onSaveFile;
   els.btnExportPdf.onclick = onExportPdf;
   els.btnDelete.onclick = onDeleteFile;
@@ -138,6 +144,8 @@ function showApp(owner, repo) {
     onPreviewImage: previewImageFile,
     onMoveFile: onMoveFile,
     getActivePath: () => state.currentPath,
+    onRenameFolder: onRenameFolder,
+    onDeleteFolder: onDeleteFolder,
   });
 
   editorHandle = createEditor(els.editorTextarea, {
@@ -180,6 +188,13 @@ function showApp(owner, repo) {
     getCurrentPath: () => state.currentPath,
     getAllFiles: () => state.allFiles,
     insertText: insertMarkdownAtCursor,
+    onStatus: setSaveStatus,
+    onUploaded: () => loadTree(),
+  });
+
+  setupFolderDropzone(els.folderDropzone, els.folderDropOverlay, {
+    client: state.client,
+    getAllFiles: () => state.allFiles,
     onStatus: setSaveStatus,
     onUploaded: () => loadTree(),
   });
@@ -350,6 +365,68 @@ async function onCreateNewFile() {
     openFile(path);
   } catch (e) {
     alert('Помилка створення: ' + e.message);
+  }
+}
+
+async function onCreateNewFolder() {
+  const path = prompt('Шлях нової папки (наприклад docs/new-folder):');
+  if (!path) return;
+  const clean = path.replace(/^\/+|\/+$/g, '');
+  if (!clean) {
+    alert('Шлях не може бути порожнім');
+    return;
+  }
+  try {
+    setSaveStatus(`Створення папки ${clean}...`, false);
+    await createFolder(state.client, clean);
+    await loadTree();
+    setSaveStatus(`Папку створено: ${clean}`, false);
+  } catch (e) {
+    setSaveStatus('Помилка: ' + e.message, true);
+  }
+}
+
+// ====================== FOLDER OPERATIONS ======================
+async function onRenameFolder(folderPath) {
+  const newName = prompt(`Нова назва для папки "${basenameOf(folderPath)}":`);
+  if (!newName || newName.trim() === '') return;
+  const newPath = `${dirnameOf(folderPath)}/${newName.trim()}`.replace(/^\/+/, '');
+  if (newPath === folderPath) return;
+
+  try {
+    setSaveStatus(`Перейменування ${folderPath}...`, false);
+    const { moved, updatedFiles } = await renameFolder(state.client, state.allFiles, folderPath, newPath);
+    if (state.currentPath && state.currentPath.startsWith(folderPath + '/')) {
+      state.currentPath = newPath + state.currentPath.slice(folderPath.length);
+      els.currentFileLabel.textContent = state.currentPath;
+      await openFile(state.currentPath);
+    }
+    await loadTree();
+    setSaveStatus(`Перейменовано: ${folderPath} → ${newPath} (файлів: ${moved.length})`, false);
+  } catch (e) {
+    setSaveStatus('Помилка: ' + e.message, true);
+  }
+}
+
+async function onDeleteFolder(folderPath) {
+  if (!isFolderEmpty(state.allFiles, folderPath)) {
+    const confirmed = confirm(`Папка "${folderPath}" не порожня. Видалити всі файли у ній?\nЦю дію не можна скасувати.`);
+    if (!confirmed) return;
+  } else {
+    const confirmed = confirm(`Видалити порожню папку "${folderPath}"?`);
+    if (!confirmed) return;
+  }
+
+  try {
+    setSaveStatus(`Видалення папки ${folderPath}...`, false);
+    await deleteFolder(state.client, state.allFiles, folderPath);
+    if (state.currentPath && state.currentPath.startsWith(folderPath + '/')) {
+      closeCurrentFile();
+    }
+    await loadTree();
+    setSaveStatus(`Папку видалено: ${folderPath}`, false);
+  } catch (e) {
+    setSaveStatus('Помилка: ' + e.message, true);
   }
 }
 

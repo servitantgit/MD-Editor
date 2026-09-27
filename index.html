@@ -55,7 +55,13 @@
     <div class="sidebar">
       <div class="sidebar-header">
         <span>Файли</span>
-        <button class="secondary" id="btn-new-file" style="padding:2px 8px;font-size:12px">+ файл</button>
+        <div style="display:flex; gap:4px">
+          <button class="secondary" id="btn-new-folder" style="padding:2px 8px;font-size:12px" title="Створити папку">+ папка</button>
+          <button class="secondary" id="btn-new-file" style="padding:2px 8px;font-size:12px">+ файл</button>
+        </div>
+      </div>
+      <div class="folder-dropzone" id="folder-dropzone">
+        <div id="folder-dropzone-overlay" class="hidden">Відпустіть папку сюди для завантаження</div>
       </div>
       <div class="file-tree" id="file-tree"></div>
     </div>
