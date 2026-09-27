@@ -6,7 +6,7 @@ main = "worker/index.js"
 # він однаково видно в URL авторизації браузера. Секрет (GITHUB_CLIENT_SECRET)
 # сюди НЕ кладемо — він задається окремо через `wrangler secret put`.
 [vars]
-GITHUB_CLIENT_ID = "REPLACE_WITH_YOUR_OAUTH_APP_CLIENT_ID"
+GITHUB_CLIENT_ID = "Ov23liSoQ61VfhPCDEb3"
 
 [assets]
 directory = "."
