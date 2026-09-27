@@ -1,5 +1,0 @@
-name = "md-editor"
-compatibility_date = "2026-09-26"
-
-[assets]
-directory = "."
