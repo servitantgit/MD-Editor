@@ -4,6 +4,11 @@
 ![Deployed on Cloudflare Pages](https://img.shields.io/badge/deployed%20on-Cloudflare%20Pages-F38020?logo=cloudflarepages&logoColor=white)
 ![No build step](https://img.shields.io/badge/build-none-brightgreen)
 ![Vanilla JS](https://img.shields.io/badge/vanilla-JS-f7df1e?logo=javascript&logoColor=black)
+![Last commit](https://img.shields.io/github/last-commit/servitantgit/MD-Editor)
+![Code size](https://img.shields.io/github/languages/code-size/servitantgit/MD-Editor)
+![Top language](https://img.shields.io/github/languages/top/servitantgit/MD-Editor)
+![Open issues](https://img.shields.io/github/issues/servitantgit/MD-Editor)
+![License](https://img.shields.io/github/license/servitantgit/MD-Editor)
 
 A lightweight browser editor for `.md` files in a GitHub repository. The
 editor talks to the GitHub REST API after signing in with **"Sign in with
