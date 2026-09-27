@@ -2,7 +2,6 @@ node_modules/
 .git/
 .github/
 test/
-worker/
 e2e_smoke_test.py
 serve.mjs
 package.json
