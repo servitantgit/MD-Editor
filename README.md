@@ -1,3 +1,4 @@
+<img width="1919" height="1012" alt="Screenshot_1" src="https://github.com/user-attachments/assets/35d080c5-fa2a-4eac-a2fe-ebe234863e16" />
 # GitHub MD Editor
 
 [![Tests](../../actions/workflows/test.yml/badge.svg)](../../actions/workflows/test.yml)
@@ -23,7 +24,7 @@ images in the preview, supports drag & drop for files and images,
 ## Screenshots
 
 <p align="center">
-  <img src="https://github.com/user-attachments/assets/d86d4d1d-4472-40e0-b778-76da0290da4c" alt="GitHub MD Editor — sign-in screen" width="460"><br>
+  <img width="1919" height="1012" alt="Screenshot_1" src="https://github.com/user-attachments/assets/c55044e0-c2bb-45d8-96de-b42ca02e274b" /><br>
   <sub><b>Sign in with GitHub</b> — OAuth login, no manual token to create or paste.</sub>
 </p>
 
