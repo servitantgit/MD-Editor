@@ -80,6 +80,17 @@ with sync_playwright() as p:
 
     page.goto("http://localhost:8080/", wait_until="networkidle")
 
+    # --- 0. The start screen ("homepage") must explain what the app is and link
+    # to the source. Checked before the simulated login, while it is still visible.
+    page.wait_for_selector("#login-screen .login-tagline", timeout=5000)
+    tagline = page.inner_text("#login-screen .login-tagline")
+    assert "GitHub repo" in tagline, f"unexpected start-screen tagline: {tagline!r}"
+    assert page.locator("#login-screen .login-features li").count() >= 4, \
+        "feature list is missing on the start screen"
+    assert page.locator('#login-screen a[href="https://github.com/servitantgit/MD-Editor"]').count() == 1, \
+        "link to the GitHub repository is missing on the start screen"
+    print("✓ start screen shows project info + repository link")
+
     # The login form no longer accepts a PAT directly (replaced with "Sign in
     # with GitHub" + Cloudflare Worker OAuth) — that's unavailable in the isolated
     # e2e environment without a real GitHub OAuth App. So we simulate an already
@@ -128,6 +139,11 @@ with sync_playwright() as p:
     assert delete_btn.count() == 1, "delete toolbar button is missing"
     assert delete_btn.is_enabled(), "delete button must be enabled once a file is open"
     print("✓ delete button available for the opened file")
+
+    # The header carries a link to the repository (source/issues) next to "Sign out".
+    assert page.locator('#app-header a[href="https://github.com/servitantgit/MD-Editor"]').count() == 1, \
+        "repository link is missing from the header"
+    print("✓ header repository link present")
 
     # --- 2. Scrolling a long document ---
     scroll_info = page.evaluate("""() => {

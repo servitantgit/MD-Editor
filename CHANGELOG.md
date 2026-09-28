@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Project info on the homepage** — the start screen is now a landing card: what the app is ("Browser-based Markdown editor for any GitHub repo"), a feature list (OAuth login without manual tokens, full file/folder CRUD with automatic link rewriting on move, inline image previews via the GitHub API, PDF export, no local clone / no build step) and a link to the repository + author (`index.html`, `css/app.css`)
+- A GitHub icon link to the repository in the app header, next to "Sign out"
+
 ### Fixed
 - Pasting a full GitHub link (e.g. `https://github.com/owner/repo.git` from the address bar) into the Owner/Repository field no longer produces a broken `/repos/{owner}/https://github.com/...` API URL (surfaced by the browser as a "CORS policy" error): `onLoginClick()` now detects such a paste in either field and auto-splits it into owner + repo (`js/github-repo-url.js`, covered by `test/github-repo-url.test.js`)
 
