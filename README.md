@@ -1,4 +1,3 @@
-<img width="1919" height="1012" alt="Screenshot_1" src="https://github.com/user-attachments/assets/35d080c5-fa2a-4eac-a2fe-ebe234863e16" />
 # GitHub MD Editor
 
 [![Tests](../../actions/workflows/test.yml/badge.svg)](../../actions/workflows/test.yml)
