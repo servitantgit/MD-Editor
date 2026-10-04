@@ -16,9 +16,15 @@ class FakeClient {
     if (!f) { const e = new Error(`Not Found (${path})`); e.status = 404; throw e; }
     return { b64: utf8ToB64(f.text), sha: f.sha };
   }
-  async putFile(path, b64, message) {
+  async putFile(path, b64, message, sha) {
+    // Mirrors the real Contents API: updating an existing file without its sha is a 422.
+    if (this.files.has(path) && !sha) {
+      const e = new Error('Invalid request. "sha" wasn\'t supplied.');
+      e.status = 422;
+      throw e;
+    }
     this.files.set(path, { text: b64ToUtf8(b64), sha: 'sha-' + path });
-    this.puts.push({ path, message });
+    this.puts.push({ path, message, sha });
     return { content: { sha: 'sha-' + path } };
   }
   async deleteFile(path) {
@@ -82,4 +88,43 @@ test('moveFile does not choke when one referencing file fails to update (keeps g
 
   const result = await moveFile(client, allFiles, 'Asset/pic.jpg', 'Asset/new');
   assert.deepEqual(result.updatedFiles, ['AI corrected/A/ref.md']);
+});
+
+test('moveFile refuses to silently replace an existing file at the destination (this used to surface a raw GitHub 422 "sha" wasn\'t supplied)', async () => {
+  const client = new FakeClient({
+    'A/note.md': '# from A',
+    'B/note.md': '# from B',
+  });
+  const allFiles = [{ path: 'A/note.md', sha: 'sha-A/note.md' }, { path: 'B/note.md', sha: 'sha-B/note.md' }];
+
+  await assert.rejects(
+    () => moveFile(client, allFiles, 'A/note.md', 'B'),
+    (e) => e.code === 'target-exists' && e.targetPath === 'B/note.md'
+  );
+  assert.equal(client.files.get('B/note.md').text, '# from B', 'destination must stay untouched');
+  assert.equal(client.files.has('A/note.md'), true, 'source must stay in place');
+});
+
+test('moveFile with overwrite replaces the destination, passing its sha to the API', async () => {
+  const client = new FakeClient({
+    'A/note.md': '# from A',
+    'B/note.md': '# from B',
+  });
+  const allFiles = [{ path: 'A/note.md', sha: 'sha-A/note.md' }, { path: 'B/note.md', sha: 'sha-B/note.md' }];
+
+  const result = await moveFile(client, allFiles, 'A/note.md', 'B', { overwrite: true });
+  assert.equal(result.overwritten, true);
+  assert.equal(result.newPath, 'B/note.md');
+  assert.equal(client.files.get('B/note.md').text, '# from A');
+  assert.equal(client.files.has('A/note.md'), false);
+  assert.equal(client.puts[0].sha, 'sha-B/note.md', 'the destination sha must be sent to GitHub');
+});
+
+test('moveFile reports overwritten=false for a normal move into a free folder', async () => {
+  const client = new FakeClient({ 'A/note.md': '# hi' });
+  const allFiles = [{ path: 'A/note.md', sha: 'sha-A/note.md' }];
+
+  const result = await moveFile(client, allFiles, 'A/note.md', 'B');
+  assert.equal(result.overwritten, false);
+  assert.equal(client.puts[0].sha, undefined, 'a brand-new file must be created without a sha');
 });

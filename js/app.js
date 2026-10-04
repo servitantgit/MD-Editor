@@ -308,8 +308,28 @@ function previewImageFile(path) {
 async function onMoveFile(oldPath, targetFolder) {
   setSaveStatus(`Moving ${oldPath}...`, false);
   try {
-    const { newPath, updatedFiles, skipped } = await moveFile(state.client, state.allFiles, oldPath, targetFolder);
-    if (skipped) return;
+    let result;
+    try {
+      result = await moveFile(state.client, state.allFiles, oldPath, targetFolder);
+    } catch (e) {
+      // A file with the same name is already in the target folder — replacing it is
+      // destructive, so ask first instead of failing with a raw GitHub API error.
+      if (e.code !== 'target-exists') throw e;
+      const confirmed = confirm(
+        `"${e.targetPath}" already exists.\n\nReplace it with "${oldPath}"? This cannot be undone.`
+      );
+      if (!confirmed) {
+        setSaveStatus('Move cancelled', false);
+        return;
+      }
+      result = await moveFile(state.client, state.allFiles, oldPath, targetFolder, { overwrite: true });
+    }
+
+    const { newPath, updatedFiles, skipped, overwritten } = result;
+    if (skipped) {
+      setSaveStatus(`${oldPath} is already in that folder`, false);
+      return;
+    }
 
     if (state.currentPath === oldPath) {
       state.currentPath = newPath;
@@ -323,6 +343,7 @@ async function onMoveFile(oldPath, targetFolder) {
     await loadTree();
     setSaveStatus(
       `Moved: ${oldPath} → ${newPath}` +
+        (overwritten ? ' (replaced the existing file)' : '') +
         (updatedFiles.length ? ` (updated links in ${updatedFiles.length} file(s))` : ''),
       false
     );

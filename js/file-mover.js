@@ -16,12 +16,23 @@ import { rewriteOwnRelativeLinks, updateReferencesInFile } from './reference-rew
  * @param {{path:string, sha:string}[]} allFiles  current snapshot of the file tree
  * @param {string} oldPath
  * @param {string} targetFolder
- * @returns {Promise<{newPath: string, updatedFiles: string[], skipped: boolean}>}
+ * @param {{overwrite?: boolean}} [options] overwrite = true allows replacing a file
+ *   that already exists at the destination (GitHub requires its `sha` for updates,
+ *   and answers 422 "sha" wasn't supplied" without it).
+ * @returns {Promise<{newPath: string, updatedFiles: string[], skipped: boolean, overwritten: boolean}>}
  */
-export async function moveFile(client, allFiles, oldPath, targetFolder) {
+export async function moveFile(client, allFiles, oldPath, targetFolder, options = {}) {
   const filename = basenameOf(oldPath);
   const newPath = targetFolder ? `${targetFolder}/${filename}` : filename;
-  if (newPath === oldPath) return { newPath, updatedFiles: [], skipped: true };
+  if (newPath === oldPath) return { newPath, updatedFiles: [], skipped: true, overwritten: false };
+
+  const clash = allFiles.find((f) => f.path === newPath);
+  if (clash && !options.overwrite) {
+    const err = new Error(`"${newPath}" already exists — pass { overwrite: true } to replace it`);
+    err.code = 'target-exists';
+    err.targetPath = newPath;
+    throw err;
+  }
 
   const { b64, sha } = await client.getFileB64(oldPath);
   let finalB64 = b64;
@@ -36,12 +47,20 @@ export async function moveFile(client, allFiles, oldPath, targetFolder) {
     }
   }
 
-  await client.putFile(newPath, finalB64, `Move ${oldPath} to ${newPath}`);
+  // Updating an existing file requires the CURRENT sha of that file — the one from the
+  // tree snapshot may be stale if the repo changed in the meantime, hence the 409 retry.
+  try {
+    await client.putFile(newPath, finalB64, `Move ${oldPath} to ${newPath}`, clash && clash.sha);
+  } catch (e) {
+    if (!clash || e.status !== 409) throw e;
+    const fresh = await client.getFileB64(newPath);
+    await client.putFile(newPath, finalB64, `Move ${oldPath} to ${newPath}`, fresh.sha);
+  }
   await client.deleteFile(oldPath, sha, `Remove ${oldPath} (moved to ${newPath})`);
 
   const updatedFiles = await updateReferencesEverywhere(client, allFiles, oldPath, newPath);
 
-  return { newPath, updatedFiles, skipped: false };
+  return { newPath, updatedFiles, skipped: false, overwritten: Boolean(clash) };
 }
 
 /**

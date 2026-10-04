@@ -37,6 +37,15 @@ export async function renameFolder(client, allFiles, oldFolderPath, newFolderPat
   const filesInFolder = allFiles.filter((f) => f.path.startsWith(oldClean + '/'));
   if (!filesInFolder.length) throw new Error('Folder is empty or does not exist');
 
+  // Detect collisions BEFORE moving anything: GitHub needs the sha of an existing file
+  // to overwrite it, and failing halfway through would leave the rename half-done.
+  for (const file of filesInFolder) {
+    const newPath = `${newClean}/${file.path.slice(oldClean.length + 1)}`;
+    if (allFiles.some((other) => other.path === newPath)) {
+      throw new Error(`Folder "${newClean}" already contains "${basenameOf(file.path)}" — rename would overwrite it`);
+    }
+  }
+
   const moved = [];
   const allUpdated = [];
 
