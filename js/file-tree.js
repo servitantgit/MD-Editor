@@ -191,9 +191,13 @@ export class FileTree {
 
   /**
  * Shows a context menu at (x, y). `items` = [{action, label, className}].
- * Returns the action of the clicked button to the caller, or null.
- */
-  _showContextMenu(x, y, items) {
+   * `onPick(action)` fires synchronously from the click handler itself.
+   *
+   * Do NOT defer that call with setTimeout: the menu stays open for as long as the
+   * user takes to decide, so a timer started here runs long before they click and
+   * reads `null` — the chosen action is silently dropped. (That bug shipped once.)
+   */
+  _showContextMenu(x, y, items, onPick) {
     const existing = document.querySelector('.folder-context-menu');
     if (existing) existing.remove();
 
@@ -205,12 +209,11 @@ export class FileTree {
       .map((it) => `<button data-action="${escapeAttr(it.action)}"${it.className ? ` class="${it.className}"` : ''}>${escapeAttr(it.label)}</button>`)
       .join('');
 
-    let picked = null;
     menu.addEventListener('click', (e) => {
       const btn = e.target.closest('button');
       if (!btn) return;
-      picked = btn.dataset.action;
       menu.remove();
+      onPick(btn.dataset.action);
     });
 
     const closeMenu = () => menu.remove();
@@ -223,42 +226,34 @@ export class FileTree {
     const rect = menu.getBoundingClientRect();
     if (rect.bottom > window.innerHeight) menu.style.top = `${Math.max(0, y - rect.height)}px`;
     if (rect.right > window.innerWidth) menu.style.left = `${Math.max(0, x - rect.width)}px`;
-
-    return () => picked;
   }
 
   _showFolderContextMenu(x, y, folderPath) {
-    const getPicked = this._showContextMenu(x, y, [
+    this._showContextMenu(x, y, [
       { action: 'new-file', label: '📄 New file here' },
       { action: 'new-folder', label: '📁 New folder here' },
       { action: 'rename', label: '✏️ Rename' },
       { action: 'delete', label: '🗑 Delete', className: 'danger' },
-    ]);
-    // The click that picks an item bubbles to document and closes the menu — read
-    // the result on the next tick, once that listener has run.
-    setTimeout(() => {
-      const action = getPicked();
+    ], (action) => {
       if (action === 'new-file' && this.handlers?.onCreateFileIn) this.handlers.onCreateFileIn(folderPath);
       if (action === 'new-folder' && this.handlers?.onCreateFolderIn) this.handlers.onCreateFolderIn(folderPath);
       if (action === 'rename' && this.handlers?.onRenameFolder) this.handlers.onRenameFolder(folderPath);
       if (action === 'delete' && this.handlers?.onDeleteFolder) this.handlers.onDeleteFolder(folderPath);
-    }, 0);
+    });
   }
 
   _showFileContextMenu(x, y, filePath) {
-    const getPicked = this._showContextMenu(x, y, [
+    this._showContextMenu(x, y, [
       { action: 'new-file-here', label: '📄 New file in this folder' },
       { action: 'rename', label: '✏️ Rename' },
       { action: 'delete', label: '🗑 Delete', className: 'danger' },
-    ]);
-    setTimeout(() => {
-      const action = getPicked();
+    ], (action) => {
       if (action === 'new-file-here' && this.handlers?.onCreateFileIn) {
         this.handlers.onCreateFileIn(dirnameOf(filePath));
       }
       if (action === 'rename' && this.handlers?.onRenameFile) this.handlers.onRenameFile(filePath);
       if (action === 'delete' && this.handlers?.onDeleteFileAt) this.handlers.onDeleteFileAt(filePath);
-    }, 0);
+    });
   }
 
   clearActive() {

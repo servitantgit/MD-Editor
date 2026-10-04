@@ -180,6 +180,19 @@ with sync_playwright() as p:
     print(f"✓ folder context menu can create ({folder_actions})")
     page.keyboard.press("Escape")
 
+    # Merely finding the items is not enough — the earlier version of this test did
+    # exactly that and missed that clicking one did nothing (the action dispatch ran
+    # before the click happened). Actually pick "delete" and require the confirmation.
+    seen_dialogs = []
+    page.on("dialog", lambda d: (seen_dialogs.append(d.message), d.accept()))
+    page.click(".file-item:not(.folder)", button="right")
+    page.wait_for_selector(".folder-context-menu", timeout=5000)
+    page.click(".folder-context-menu button[data-action='delete']")
+    page.wait_for_timeout(500)
+    assert seen_dialogs and "delete this file" in seen_dialogs[-1].lower(), \
+        f"clicking Delete showed no confirmation: {seen_dialogs}"
+    print("✓ file context menu delete is wired up (confirmation shown)")
+
     # --- 3. Scrolling a long document ---
     scroll_info = page.evaluate("""() => {
         const el = document.querySelector('.CodeMirror-scroll');
