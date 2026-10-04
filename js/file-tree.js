@@ -58,6 +58,15 @@ export class FileTree {
 
   setFiles(files) {
     this.files = files;
+    // The "create here" target must still exist. Deleting or renaming that folder
+    // reloads the tree, but nothing here used to notice that the stored path is
+    // gone — and the next "new file" would then PUT into it, silently
+    // resurrecting a folder the user just deleted. Git has no real folders (they
+    // exist only as path prefixes), so a prefix match is the whole definition of
+    // "still there". Root is always valid and is left alone.
+    if (this.activeFolder && !this.files.some((f) => f.path.startsWith(this.activeFolder + '/'))) {
+      this.activeFolder = '';
+    }
     this.render();
   }
 

@@ -74,4 +74,34 @@ test('clicking the folder name/icon toggles the folder too', () => {
   } finally {
     restore();
   }
+test('the active folder falls back to the root once it is gone from the tree', () => {
+  const { container, tree, restore } = mountTree([
+    { path: 'Notes/deep/a.md' },
+    { path: 'Other/b.md' },
+  ]);
+  try {
+    tree.setActiveFolder('Notes/deep');
+    assert.equal(tree.getActiveFolder(), 'Notes/deep');
+
+    // Deleting that folder reloads the tree, and renaming it does the same.
+    tree.setFiles([{ path: 'Other/b.md' }]);
+    assert.equal(tree.getActiveFolder(), '', 'a deleted folder must not stay the create target');
+
+    // A folder that still exists keeps the target — the check must not fire on
+    // every reload, or "new file" would silently fall back to the root.
+    tree.setActiveFolder('Other');
+    tree.setFiles([{ path: 'Other/c.md' }, { path: 'Other/sub/d.md' }]);
+    assert.equal(tree.getActiveFolder(), 'Other');
+
+    // Renaming it away invalidates it just as deletion does.
+    tree.setFiles([{ path: 'Renamed/c.md' }]);
+    assert.equal(tree.getActiveFolder(), '');
+
+    // Root is always valid and must be left alone.
+    tree.setFiles([{ path: 'only.md' }]);
+    assert.equal(tree.getActiveFolder(), '');
+  } finally {
+    restore();
+  }
+});
 });
