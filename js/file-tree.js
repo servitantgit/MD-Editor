@@ -75,6 +75,13 @@ export class FileTree {
     this._renderLevel(root, this.containerEl, 0);
   }
 
+  /** Flips the collapsed state of a folder and re-renders the tree. */
+  _toggleFolder(folderPath) {
+    if (this.collapsedFolders.has(folderPath)) this.collapsedFolders.delete(folderPath);
+    else this.collapsedFolders.add(folderPath);
+    this.render();
+  }
+
   _renderLevel(node, container, depth) {
     const folderNames = Object.keys(node.children).filter((k) => node.children[k].type === 'folder').sort();
     const fileNames = Object.keys(node.children).filter((k) => node.children[k].type === 'file').sort();
@@ -87,12 +94,13 @@ export class FileTree {
       el.className = 'file-item folder';
       el.style.paddingLeft = `${12 + depth * 14}px`;
       el.dataset.path = folder.path;
-      el.innerHTML = `<span class="folder-toggle">${collapsed ? '▸' : '▾'}</span><span class="icon">📁</span><span class="name">${escapeAttr(name)}</span>`;
-      el.addEventListener('click', (e) => {
-        if (e.target.closest('.folder-toggle')) return;
-        if (this.collapsedFolders.has(folder.path)) this.collapsedFolders.delete(folder.path);
-        else this.collapsedFolders.add(folder.path);
-        this.render();
+      el.innerHTML = `<span class="folder-toggle" role="button" tabindex="0" title="Expand/collapse">${collapsed ? '▸' : '▾'}</span><span class="icon">📁</span><span class="name">${escapeAttr(name)}</span>`;
+      // Any click on the row (arrow, icon or name) toggles the folder.
+      el.addEventListener('click', () => this._toggleFolder(folder.path));
+      el.addEventListener('keydown', (e) => {
+        if (e.key !== 'Enter' && e.key !== ' ') return;
+        e.preventDefault();
+        this._toggleFolder(folder.path);
       });
       el.addEventListener('contextmenu', (e) => {
         e.preventDefault();

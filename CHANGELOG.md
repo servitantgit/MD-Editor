@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A GitHub icon link to the repository in the app header, next to "Sign out"
 
 ### Fixed
+- The expand/collapse arrows next to folders in the file tree did nothing when clicked: the folder row's click handler explicitly bailed out on clicks inside `.folder-toggle`, so the arrow — the most obvious thing to click — was inert (only the folder name/icon worked). Now a click anywhere on the row toggles the folder, and the arrow additionally reacts to Enter/Space (`js/file-tree.js`, `css/app.css`, regression test in `test/file-tree.test.js`)
 - Pasting a full GitHub link (e.g. `https://github.com/owner/repo.git` from the address bar) into the Owner/Repository field no longer produces a broken `/repos/{owner}/https://github.com/...` API URL (surfaced by the browser as a "CORS policy" error): `onLoginClick()` now detects such a paste in either field and auto-splits it into owner + repo (`js/github-repo-url.js`, covered by `test/github-repo-url.test.js`)
 
 ## [2.2.0] - 2026-09-27
