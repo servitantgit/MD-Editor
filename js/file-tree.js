@@ -23,6 +23,23 @@ export function buildTreeStructure(files) {
   return root;
 }
 
+/**
+ * Every folder path implied by a flat file list. Git has no real folders — they
+ * exist only as path prefixes — so this is the whole client-side notion of
+ * "which folders exist right now".
+ */
+function collectFolderPaths(files) {
+  const dirs = new Set();
+  for (const f of files) {
+    let d = dirnameOf(f.path);
+    while (d) {
+      dirs.add(d);
+      d = dirnameOf(d);
+    }
+  }
+  return dirs;
+}
+
 export class FileTree {
   /**
    * @param {HTMLElement} containerEl
@@ -58,15 +75,21 @@ export class FileTree {
 
   setFiles(files) {
     this.files = files;
+    const existing = collectFolderPaths(files);
+
     // The "create here" target must still exist. Deleting or renaming that folder
     // reloads the tree, but nothing here used to notice that the stored path is
     // gone — and the next "new file" would then PUT into it, silently
-    // resurrecting a folder the user just deleted. Git has no real folders (they
-    // exist only as path prefixes), so a prefix match is the whole definition of
-    // "still there". Root is always valid and is left alone.
-    if (this.activeFolder && !this.files.some((f) => f.path.startsWith(this.activeFolder + '/'))) {
-      this.activeFolder = '';
+    // resurrecting a folder the user just deleted. Root ('') is always valid.
+    if (this.activeFolder && !existing.has(this.activeFolder)) this.activeFolder = '';
+
+    // Same for collapsed state: an entry left behind by a deleted folder is not
+    // inert, because it becomes live again the moment a folder with that name is
+    // recreated — and it would then start collapsed for no visible reason.
+    for (const path of this.collapsedFolders) {
+      if (!existing.has(path)) this.collapsedFolders.delete(path);
     }
+
     this.render();
   }
 
@@ -76,15 +99,9 @@ export class FileTree {
 
     if (!this.treeInitialized) {
       this.treeInitialized = true;
-      const dirSet = new Set();
-      files.forEach((f) => {
-        let d = dirnameOf(f.path);
-        while (d) {
-          dirSet.add(d);
-          d = dirnameOf(d);
-        }
-      });
-      this.collapsedFolders = dirSet; // everything collapsed by default (handy for large repos)
+      // Everything collapsed on the first render (handy for large repos). Runs once
+      // only, which is also why a folder created later starts expanded.
+      this.collapsedFolders = collectFolderPaths(files);
     }
 
     const rootDrop = document.createElement('div');

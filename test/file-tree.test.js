@@ -106,3 +106,43 @@ test('the active folder falls back to the root once it is gone from the tree', (
     restore();
   }
 });
+
+test('a folder recreated under a name that was deleted starts expanded', () => {
+  const { container, tree, restore } = mountTree([{ path: 'Notes/a.md' }]);
+  try {
+    // Everything starts collapsed on the first render.
+    assert.equal(tree.collapsedFolders.has('Notes'), true);
+
+    // Delete the folder: its files are gone from the tree, the row disappears.
+    tree.setFiles([{ path: 'Other/b.md' }]);
+    assert.equal(container.querySelector('.file-item.folder[data-path="Notes"]'), null);
+
+    // Recreate the SAME name. It must not inherit collapsed state left behind by
+    // a folder that no longer exists — that is surprising for the user.
+    tree.setFiles([{ path: 'Notes/c.md' }]);
+    const row = container.querySelector('.file-item.folder[data-path="Notes"]');
+    assert.ok(row, 'the recreated folder must be rendered');
+    assert.equal(
+      row.querySelector('.folder-toggle').textContent,
+      '▾',
+      'a recreated folder must start expanded, not inherit stale collapsed state'
+    );
+  } finally {
+    restore();
+  }
+});
+
+test('collapsedFolders keeps entries for folders that still exist', () => {
+  const { tree, restore } = mountTree([{ path: 'Notes/a.md' }, { path: 'Other/b.md' }]);
+  try {
+    assert.equal(tree.collapsedFolders.has('Notes'), true);
+    assert.equal(tree.collapsedFolders.has('Other'), true);
+
+    // Reloading the tree with one folder gone must not drop the other's state.
+    tree.setFiles([{ path: 'Notes/a.md' }]);
+    assert.equal(tree.collapsedFolders.has('Notes'), true, 'an existing folder keeps its state');
+    assert.equal(tree.collapsedFolders.has('Other'), false, 'the deleted one is pruned');
+  } finally {
+    restore();
+  }
+});

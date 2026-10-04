@@ -253,24 +253,25 @@ to only assign `files` and re-render — nothing noticed the stored path was gon
 The next `onCreateNewFile()` then PUT into it and silently resurrected a folder
 the user had just deleted.
 
-`setFiles()` now drops the target to the repository root when no file path
-starts with it. Git has no real folders — they exist only as path prefixes — so
-a prefix match is the entire definition of "still there". This one check covers
-`onDeleteFolder` *and* `onRenameFolder`, because both end in `loadTree()`.
+`setFiles()` now drops the target to the repository root when the folder is no
+longer in the tree, and prunes `collapsedFolders` at the same time. Both come
+from one `collectFolderPaths(files)` helper, because Git has no real folders —
+they exist only as path prefixes, so the set of folder paths implied by the
+file list *is* the definition of "which folders exist". One check therefore
+covers `onDeleteFolder` *and* `onRenameFolder`, since both end in `loadTree()`.
 
-Two things make it safe to put the check there rather than in the delete handler:
+The `collapsedFolders` half used to be dismissed as harmless, and that was
+wrong: a stale entry is not inert, it becomes live again the moment a folder of
+that name is recreated, and the new folder then starts collapsed for no visible
+reason. Note this also means a folder *created* after the first render starts
+expanded — `render()`'s "collapse everything" block runs once only, guarded by
+`treeInitialized`. That is intended, not a bug.
 
-- `setActiveFolder()` is only ever called with a **folder** path, and always
-  *after* `loadTree()` (app.js: show the just-created file/folder). A validation
-  running earlier in the same flow therefore never has a chance to reject it.
-- A folder that still exists keeps the target, so this must be a prefix check
-  and not a blanket reset — otherwise every reload would silently push "new file"
-  back to the root. `test/file-tree.test.js` covers delete, rename, the
-  still-exists case, and the root-is-always-valid case; verified to fail without
-  the fix (`actual: 'Notes/deep'`).
-
-`collapsedFolders` can hold stale paths too, but that is harmless: rendering only
-consults it for folders present in the tree.
+`setActiveFolder()` is only ever called with a folder path and always *after*
+`loadTree()`, so a folder that was just created is never caught by the pruning.
+`test/file-tree.test.js` covers delete, rename, the still-exists case, the
+root-is-always-valid case, and the recreate-after-delete case; verified to fail
+without the fix (`actual: 'Notes/deep'`, and `▸` where `▾` was expected).
 
 ## The context menu dismisses on an outside click — register synchronously
 
