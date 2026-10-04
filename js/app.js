@@ -189,9 +189,25 @@ function setLoginStatus(msg, isError) {
   els.loginStatus.className = 'status ' + (isError ? 'err' : 'ok');
 }
 
+// Informational statuses ("Moved: ...", "Saved ✓") must not stay on screen forever —
+// otherwise the last message lingers until the page is reloaded. Errors are exempt:
+// they need to stay visible until the next action replaces them.
+const STATUS_CLEAR_MS = 4000;
+let statusClearTimer = null;
+
 function setSaveStatus(msg, isError) {
   els.saveStatus.textContent = msg;
   els.saveStatus.className = 'status ' + (isError ? 'err' : 'ok');
+
+  clearTimeout(statusClearTimer);
+  if (!isError) {
+    statusClearTimer = setTimeout(() => {
+      // Guard: a newer status may have arrived in the meantime — never wipe it.
+      if (els.saveStatus.textContent !== msg) return;
+      els.saveStatus.textContent = '';
+      els.saveStatus.className = 'status';
+    }, STATUS_CLEAR_MS);
+  }
 }
 
 // ====================== APP SHELL ======================

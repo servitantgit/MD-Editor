@@ -116,6 +116,17 @@ with sync_playwright() as p:
     page.wait_for_function("document.getElementById('btn-save').disabled === false", timeout=5000)
     print("✓ file opened")
 
+    # --- 1b. Informational statuses must clear themselves. Without this the last
+    # message ("Ready", "Moved: ...", "Saved ✓") stays on screen until a reload.
+    page.click("#btn-save")
+    page.wait_for_function(
+        "document.getElementById('save-status').textContent.startsWith('Saved')", timeout=5000
+    )
+    page.wait_for_function(
+        "document.getElementById('save-status').textContent === ''", timeout=10000
+    )
+    print("✓ status message clears itself")
+
     # --- 1. Editing ---
     page.click(".CodeMirror")
     page.keyboard.type("EDITED_MARKER")
