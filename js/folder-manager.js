@@ -49,10 +49,26 @@ export async function renameFolder(client, allFiles, oldFolderPath, newFolderPat
   const moved = [];
   const allUpdated = [];
 
+  // `moveFile` only READS allFiles, so the snapshot the caller handed us goes
+  // stale after the very first move: its entries still name files under oldClean
+  // that by then live under newClean. updateReferencesEverywhere() scans that
+  // list, so on the second iteration it looks for "Notes/a.md", 404s, and skips
+  // it — leaving root-absolute links in an already-moved file pointing at a
+  // folder that no longer exists. Keep a private copy in step with the moves.
+  //
+  // Shallow copies on purpose: the caller still owns allFiles and may reuse it,
+  // and filesInFolder below must keep yielding the original paths as we iterate.
+  const snapshot = allFiles.map((f) => ({ ...f }));
+
   for (const file of filesInFolder) {
     const relPath = file.path.slice(oldClean.length + 1);
     const newPath = `${newClean}/${relPath}`;
-    const result = await moveFile(client, allFiles, file.path, dirnameOf(newPath));
+    const result = await moveFile(client, snapshot, file.path, dirnameOf(newPath));
+    const entry = snapshot.find((f) => f.path === file.path);
+    if (entry) entry.path = newPath;
+    // `sha` is deliberately left stale: updateReferencesEverywhere() re-fetches
+    // it per file, and a clash sha is only read under { overwrite: true }, which
+    // a folder rename never passes.
     moved.push(result.newPath);
     allUpdated.push(...result.updatedFiles);
   }
