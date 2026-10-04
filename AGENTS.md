@@ -214,6 +214,198 @@ resulting `/contents/...` request URL contains no `object`/`PointerEvent` **and*
 points at the tree's active folder. That second assertion is what makes the
 check meaningful: verified to fail if the file lands in the root instead.
 
+## renameFolder: the file snapshot must track the moves it makes
+
+`moveFile`/`moveToPath` only ever READ `allFiles` — they never update it. So a
+loop that moves several files through the same snapshot (only `renameFolder`
+does) is walking a list that goes stale under it. After the first move the
+entries still name files under the **old** folder while the files themselves now
+live under the new one.
+
+`updateReferencesEverywhere()` scans that list, so on the second iteration it
+asks for `Notes/a.md`, gets a 404, hits its `catch`, and skips the file — the
+root-absolute links inside that already-moved file keep pointing at a folder
+that no longer exists. Verified in `test/folder-manager.test.js`, which fails
+without the fix: `Docs/a.md` kept `[b](/Notes/b.md)` instead of `[b](/Docs/b.md)`.
+
+The failure is easy to miss because it only shows up for **root-absolute**
+links (`/Notes/b.md`). Relative links between files of the same folder survive
+on their own — they keep pointing at the same relative position once the whole
+folder travels together — so a fixture built only from relative links passes
+either way and proves nothing.
+
+Keep a **private** copy (`allFiles.map((f) => ({ ...f }))`) and repoint the
+entry after each move. Two reasons it must be a copy, not an in-place edit:
+
+- the caller still owns `allFiles` and reuses it for the tree refresh afterwards;
+- `filesInFolder` holds references to the same objects, so mutating them in
+  place would corrupt the loop's own iteration source.
+
+The `sha` is deliberately left stale there: `updateReferencesEverywhere()`
+re-fetches it per file, and a clash sha is only read under `{ overwrite: true }`,
+which a folder rename never passes.
+
+## The active folder must be re-validated on every tree load
+
+`FileTree.activeFolder` is the "create here" target, and it outlives the folder it
+names. Deleting or renaming that folder reloads the tree, but `setFiles()` used
+to only assign `files` and re-render — nothing noticed the stored path was gone.
+The next `onCreateNewFile()` then PUT into it and silently resurrected a folder
+the user had just deleted.
+
+`setFiles()` now drops the target to the repository root when no file path
+starts with it. Git has no real folders — they exist only as path prefixes — so
+a prefix match is the entire definition of "still there". This one check covers
+`onDeleteFolder` *and* `onRenameFolder`, because both end in `loadTree()`.
+
+Two things make it safe to put the check there rather than in the delete handler:
+
+- `setActiveFolder()` is only ever called with a **folder** path, and always
+  *after* `loadTree()` (app.js: show the just-created file/folder). A validation
+  running earlier in the same flow therefore never has a chance to reject it.
+- A folder that still exists keeps the target, so this must be a prefix check
+  and not a blanket reset — otherwise every reload would silently push "new file"
+  back to the root. `test/file-tree.test.js` covers delete, rename, the
+  still-exists case, and the root-is-always-valid case; verified to fail without
+  the fix (`actual: 'Notes/deep'`).
+
+`collapsedFolders` can hold stale paths too, but that is harmless: rendering only
+consults it for folders present in the tree.
+
+## The context menu dismisses on an outside click — register synchronously
+
+The obvious way to make the menu survive a click on its own buttons is to defer
+the dismiss listener with `setTimeout(…, 0)`. **Do not.** It leaves a window in
+which the menu is on screen but not yet armed, and a click landing in that
+window does nothing at all. That was not theoretical: it made the e2e dismissal
+check flaky (roughly 1 run in 3), because `wait_for_selector` returns as soon as
+the menu is attached — possibly before the timer fired — and the test's next
+click then landed in the gap.
+
+The listeners are registered synchronously and the document handler ignores
+clicks inside the menu (`menu.contains(e.target)`). That removes the race and
+makes the code correct even if the menu is ever opened from a plain left click
+(a "⋯" button), where the opening click would otherwise still be bubbling and
+would close the menu before anyone could pick from it. `closeMenu()` removes
+both listeners instead of relying on `{ once: true }`, because a click inside
+the menu must NOT consume the dismiss handler.
+
+`e2e_smoke_test.py` asserts the menu really detaches on Escape and on an
+outside click. It failed with the `setTimeout` version; 6/6 consecutive runs
+pass with the synchronous one.
+
+## b64ToUtf8 must keep `fatal: true`
+
+`escape`/`unescape` are Annex B (deprecated since 1999); `github-client.js` now
+uses `TextEncoder`/`TextDecoder`. The subtle part is the decoder's `fatal`
+flag, and it is easy to remove by accident:
+
+```js
+new TextDecoder('utf-8', { fatal: true }).decode(bytes)
+```
+
+`moveToPath()` only rewrites the text of `.md` files, and it uses a thrown
+error as the signal to leave the original bytes alone (see its `catch` in
+`file-mover.js`). The **default** `TextDecoder` never throws — it substitutes
+U+FFFD — so a binary blob sitting under a `.md` extension would be decoded into
+replacement characters and PUT straight back to GitHub. `updateReferencesEverywhere()`
+relies on the same throw.
+
+`test/base64-utf8.test.js` pins both halves against `Buffer` as an independent
+UTF-8 reference, and `test/file-mover.test.js` pins the end-to-end consequence:
+verified to fail without `fatal`, with the mangled payload visible
+(`'aO+/vWk='` instead of `'aIBp'`).
+
+One deliberate behaviour change: `utf8ToB64` used to throw a `URIError` on a
+lone surrogate (`encodeURIComponent` did); `TextEncoder` substitutes U+FFFD
+instead. Strings arriving from a textarea are well-formed, so this should not
+be reachable in practice.
+
+## inlineImageMarks: the generation guard is what stops orphaned marks
+
+A stale-mark leak here is easy to *claim* and hard to *believe*, so read
+`renderInlineImages()` before changing it. The invariant is not the generation
+guard on its own — it is the combination of three things:
+
+- `markText()` and `inlineImageMarks.push(mark)` (editor.js) run **synchronously**
+  in the same turn, *before* the `await` that resolves the image;
+- every run clears the registry at its top, so a newer run always clears the
+  marks an older one already pushed;
+- both the pre-creation guard and the post-await guard `return` when
+  `generation !== inlineImageGeneration`.
+
+Consequence: a superseded run can never push a mark after a newer run reset the
+array, because the only way to reach the next loop iteration is to survive the
+post-await guard. That is why a fixture using only one image per file proves
+nothing — it cannot tell "the guard fired" from "the loop had ended anyway".
+
+`test/editor.test.js` ("switching files mid-render…") drives this with two
+parked resolvers and a two-image file, so the superseded run *would* create a
+second mark if the guard were gone. Verified to fail without the guard
+(`actual: 3` — the old file's second mark survives).
+
+**Removing only ONE of the two guards does not fail the test**, and that is
+expected, not a gap: they are redundant with each other for this scenario.
+Removing both produces the orphan (`resolve#3 … marks=3`). So keep them both —
+they cost nothing and each covers a path the other does not: the pre-creation
+guard avoids building DOM that would be discarded, the post-await guard also
+covers the `catch` branch, and `mark.find() == null` additionally covers a mark
+dropped by `img.onerror`.
+
+## createEditor() owns global resources and now has to be destroyed
+
+`createEditor()` attaches a `ResizeObserver`, a `paste` handler on CodeMirror's
+input field and a `change` handler on CodeMirror — none of them reachable from
+outside, so there used to be no way to release them. It returns `destroy()`,
+which disconnects the observer, clears the pending inline-image timer, removes
+both handlers and calls `easyMDE.toTextArea()`. That last one matters: the
+`<textarea>` in `index.html` is a stable element, and re-wrapping an
+already-wrapped one stacks a second editor on top of the first. Teardown is
+idempotent and must never throw.
+
+`showApp()` calls `destroy()` on the previous handle before building a new one.
+
+**Logout cannot leak it.** `btnLogout` does `sessionStorage.clear()` +
+`location.reload()` (app.js), which tears down the whole JS realm — observers and
+all. There is no surviving editor after that. Don't "fix" logout by rebuilding
+the UI in place; that would be the only way to create the leak.
+
+The path that *did* build the app twice is `init()` racing itself:
+
+```js
+consumeOAuthRedirect();      // NOT awaited — finishLogin() awaits the network
+const saved = readSession(); // runs while the token check is still in flight
+if (saved) showApp(...);     // path A
+```
+
+`finishLogin()` calls `showApp()` itself. So when an OAuth callback landed on a
+tab that still had a session (re-entering `/auth/login`, say), path A built the
+app, the network call resolved, and `showApp()` ran a second time — two editors,
+two observers, two paste handlers, with the first unreachable. `init()` is now
+`async`, awaits `consumeOAuthRedirect()`, and returns early when it reports that
+it completed the login.
+
+Two caveats worth keeping in mind:
+
+- `consumeOAuthRedirect()` returns `false` (so `init()` falls through to the
+  normal session path) both when there is no `#gh_token` at all **and** when the
+  `owner`/`repo` pair is missing. The second case used to leave the user on the
+  login screen; now it also renders that message underneath the app when a stale
+  session is present. Fixing that would mean deciding what "log in again" means,
+  so it was left alone deliberately.
+- `init()` is still invoked un-awaited at module top level, so with no hash the
+  app now appears one microtask later than before. Nothing depends on it being
+  synchronous (all callers are event handlers), but a `wait_for_selector`-style
+  test would notice.
+
+**`e2e_smoke_test.py` does not cover either of these paths.** It fakes a session
+by writing the four `sessionStorage` keys and reloading — so it exercises the
+`readSession()` branch with no hash, and can never reach `consumeOAuthRedirect()`,
+`finishLogin()` or `showApp()`-twice. The `destroy()` contract is covered by
+`test/editor.test.js` (verified to fail if the observer is not disconnected); the
+`init()` race is **not** covered by any test, and per the OAuth notes above it
+cannot be verified locally without `wrangler pages dev` and a test OAuth app.
+
 ## General rule before considering a task done
 
 Here CI broke twice in a row right after merge (first `npm ci`, then a
