@@ -523,11 +523,13 @@ button.secondary:hover { background: #21262d; }
 
 .hidden { display: none !important; }
 
-/* ===== Styles for the container that goes into the PDF (always a light "paper" theme) ===== */
+/* ===== Styles for the container that goes into the PDF (always a light "paper" theme) =====
+
+   NOTE: the container must NOT be positioned itself. html2canvas (inside html2pdf.js)
+   renders the element where it sits, so `position: fixed` + `left: -99999px` produced a
+   blank single-page PDF — 3 KB of nothing. js/pdf-export.js wraps this in an off-screen
+   transparent holder instead and leaves the container a plain, neutral block. */
 #pdf-export-container {
-  position: fixed;
-  left: -99999px;
-  top: 0;
   width: 780px;
   background: #ffffff;
   color: #111111;

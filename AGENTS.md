@@ -147,6 +147,25 @@ really verify the OAuth round-trip itself — that's a separate scenario with `w
 pages dev` and a test GitHub OAuth App (or a mocked `github.com`); such
 a thing doesn't exist here yet.
 
+## PDF export: never position #pdf-export-container itself
+
+This regressed twice, so the rule is worth writing down. html2canvas (inside
+html2pdf.js) renders the element **where it actually sits**. As long as
+`#pdf-export-container` had `position: fixed; left: -99999px` in `app.css`, the
+document rendered outside the captured area and `html2pdf().from(container)` saved
+a ~3 KB, one-empty-page PDF — no error, just a blank file. It was fixed once
+(`d3f3017`, an off-screen transparent holder) and silently reverted by `acbf466`
+when the positioning moved into CSS.
+
+So: the container is a **neutral block** (width/background/padding only), and
+`js/pdf-export.js` wraps it in a throwaway `position: fixed; opacity: 0;
+z-index: -9999` holder that is removed in `finally`. Don't "simplify" the holder
+back into a CSS rule on the container.
+
+`e2e_smoke_test.py` guards it two ways: it records the container's computed
+`position` while exporting (must be `static`) and asserts the downloaded PDF is
+larger than 50 KB. A blank export is ~3 KB, a real one is hundreds of KB.
+
 ## General rule before considering a task done
 
 Here CI broke twice in a row right after merge (first `npm ci`, then a

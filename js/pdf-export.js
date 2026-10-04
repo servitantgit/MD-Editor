@@ -20,9 +20,21 @@ export async function exportCurrentPageToPdf(deps) {
   if (!currentPath) return;
 
   deps.onStatus('Preparing PDF...', false);
+
+  // html2canvas renders the element where it actually sits. Positioning the container
+  // itself (`position: fixed; left: -99999px` in app.css) made html2pdf.js capture a
+  // blank canvas — a 3 KB, one empty page PDF. So the container stays a neutral block
+  // and the off-screen part lives on this throwaway wrapper instead.
+  const holder = document.createElement('div');
+  holder.setAttribute('aria-hidden', 'true');
+  holder.style.cssText =
+    'position:fixed;left:0;top:0;width:1000px;height:1000px;overflow:hidden;' +
+    'opacity:0;pointer-events:none;z-index:-9999;';
+  document.body.appendChild(holder);
+
   const container = document.createElement('div');
   container.id = 'pdf-export-container';
-  document.body.appendChild(container);
+  holder.appendChild(container);
 
   try {
     const text = deps.getMarkdownText();
@@ -46,6 +58,6 @@ export async function exportCurrentPageToPdf(deps) {
   } catch (e) {
     deps.onStatus('PDF error: ' + e.message, true);
   } finally {
-    container.remove();
+    holder.remove();
   }
 }

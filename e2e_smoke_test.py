@@ -69,7 +69,7 @@ page_errors = []
 
 with sync_playwright() as p:
     browser = p.chromium.launch()
-    page = browser.new_page(viewport={"width": 1400, "height": 900})
+    page = browser.new_page(viewport={"width": 1400, "height": 900}, accept_downloads=True)
     page.on("pageerror", lambda exc: page_errors.append(str(exc)))
     page.route(re.compile(r"https://api\.github\.com/.*"), handle_github_api)
     for cdn_url in CDN_MOCKS:
@@ -193,7 +193,37 @@ with sync_playwright() as p:
         f"clicking Delete showed no confirmation: {seen_dialogs}"
     print("✓ file context menu delete is wired up (confirmation shown)")
 
-    # --- 3. Scrolling a long document ---
+    # --- 4. PDF export must render the document, not a blank page ---
+    # html2canvas captures the element exactly where it sits, so putting
+    # `position: fixed; left: -99999px` on #pdf-export-container (as app.css once
+    # did) yields a ~3 KB, one-empty-page PDF. Watch the container as it is created
+    # and record its computed position; it must stay a neutral block.
+    page.evaluate("""() => {
+        window.__pdfPos = null;
+        new MutationObserver((muts, obs) => {
+            const el = document.getElementById('pdf-export-container');
+            if (el) {
+                window.__pdfPos = getComputedStyle(el).position;
+                obs.disconnect();
+            }
+        }).observe(document.body, {childList: true, subtree: true});
+    }""")
+
+    with page.expect_download(timeout=90000) as dl:
+        page.click("#btn-export-pdf")
+    pdf_path = BASE / "_e2e_export.pdf"
+    dl.value.save_as(pdf_path)
+    pdf_bytes = pdf_path.stat().st_size
+    pdf_path.unlink()
+
+    container_pos = page.evaluate("window.__pdfPos")
+    assert container_pos == "static", \
+        f"#pdf-export-container must not be positioned (got {container_pos!r}) — that makes html2canvas capture a blank page"
+    # A real render of the long test document is hundreds of KB; the blank one was ~3 KB.
+    assert pdf_bytes > 50_000, f"exported PDF is suspiciously small: {pdf_bytes} bytes"
+    print(f"✓ PDF export renders content ({pdf_bytes} bytes, container position: {container_pos})")
+
+    # --- 5. Scrolling a long document ---
     scroll_info = page.evaluate("""() => {
         const el = document.querySelector('.CodeMirror-scroll');
         return {scrollHeight: el.scrollHeight, clientHeight: el.clientHeight};
