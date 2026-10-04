@@ -1,8 +1,9 @@
 # AGENTS.md
 
-Short version: if you're about to touch deployment, login, or tests in this project —
-read this first. Everything below documents real pitfalls already hit while
-implementing GitHub OAuth (September 2026) — don't repeat them.
+Short version: if you're about to touch deployment, login, tests or GitHub
+API calls in this project — read this first. Everything below documents real
+pitfalls already hit while implementing GitHub OAuth (September 2026) and the
+GitHub API client — don't repeat them.
 
 ## How this project is actually deployed
 
@@ -100,6 +101,40 @@ npm ci      # must pass without EUSAGE
 npm test
 ```
 
+## GitHub API calls from the browser — CORS safelist and response caching
+
+Two things bit us here and both are invisible to the e2e test (see below):
+
+- **Never add a custom request header to `GitHubClient`.** The CORS-safelisted
+  request headers are only `Accept`, `Accept-Language`, `Content-Language`,
+  `Content-Type`, `Range` — anything else turns a simple `GET` into a preflight
+  (`OPTIONS`). GitHub answers preflight with `Access-Control-Allow-Headers:
+  authorization, x-github-api-version`, so e.g. `Cache-Control: no-cache` kills
+  **every** API call with:
+  `Request header field cache-control is not allowed by Access-Control-Allow-Headers
+  in preflight response` — the app can't even load the repo. The `Authorization`
+  header is itself non-safelisted and only works because GitHub allows it
+  explicitly, so "we already send one custom header" is not a precedent.
+- **GitHub caches GET responses**, including `git/trees`. Fetch the tree right
+  after a write and you can get the pre-write tree back, which looks exactly like
+  "create/delete doesn't show up until you reload the page". `getTree()` appends a
+  unique cache-busting **query parameter** (`?cb=<timestamp>-<random>`) — a unique
+  URL is a different cache key and, unlike a header, needs no preflight. Don't
+  "optimize" that back into a `Cache-Control` header.
+- Guard both with `test/github-client.test.js`: it asserts `getTree()` sends no
+  header outside the safelist + GitHub's allowed list, and that two consecutive
+  tree loads don't share a cache key.
+
+## e2e_smoke_test.py mocks api.github.com, so it cannot catch CORS problems
+
+`handle_github_api()` fulfils every `https://api.github.com/*` request via
+Playwright's `page.route`, so those requests never hit the real CORS machinery of
+the browser — no preflight, no `Access-Control-Allow-Headers` check. The
+`Cache-Control` header above passed the entire e2e suite locally and in CI and
+only failed in production. That's the same class of blind spot as the OAuth one
+below: anything enforced by the real network or by GitHub itself is untested
+locally, so cover such rules with a plain unit test instead.
+
 ## e2e_smoke_test.py does not test the real OAuth
 
 The test can't go through real GitHub OAuth — there are no live credentials in
@@ -124,3 +159,8 @@ insignificant relative to the main task. Before push:
    `python3 e2e_smoke_test.py`), not just relying on CI.
 3. If the deploy infrastructure was changed — first check which Cloudflare product
    actually serves the live domain, and only then write code for it.
+4. Remember what the local checks *cannot* see: `e2e_smoke_test.py` mocks
+   `api.github.com` and never performs real OAuth, so CORS/preflight and live
+   GitHub behaviour are untested locally. If you touched `js/github-client.js`,
+   make sure the new rule is covered by `npm test` instead of assuming the green
+   e2e run proves anything about the real API.
