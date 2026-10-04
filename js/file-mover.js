@@ -21,9 +21,33 @@ import { rewriteOwnRelativeLinks, updateReferencesInFile } from './reference-rew
  *   and answers 422 "sha" wasn't supplied" without it).
  * @returns {Promise<{newPath: string, updatedFiles: string[], skipped: boolean, overwritten: boolean}>}
  */
-export async function moveFile(client, allFiles, oldPath, targetFolder, options = {}) {
-  const filename = basenameOf(oldPath);
-  const newPath = targetFolder ? `${targetFolder}/${filename}` : filename;
+/**
+ * Validates a single path segment (a file/folder NAME, not a path).
+ * Returns the trimmed name, or throws with a message meant for the user.
+ */
+function validateName(name) {
+  const clean = String(name == null ? '' : name).trim();
+  if (!clean) throw new Error('Name cannot be empty');
+  if (clean.includes('/')) throw new Error('Name cannot contain "/" — it is created inside the selected folder');
+  if (clean === '.' || clean === '..') throw new Error(`"${clean}" is not a valid name`);
+  return clean;
+}
+
+/**
+ * Moves file oldPath to an EXPLICIT newPath, wherever that is (same folder under a
+ * new name, or a different folder). All the real work lives here; moveFile() and
+ * renameFile() are thin wrappers computing newPath for their case.
+ *
+ * @param {import('./github-client.js').GitHubClient} client
+ * @param {{path:string, sha:string}[]} allFiles  current snapshot of the file tree
+ * @param {string} oldPath
+ * @param {string} newPath
+ * @param {{overwrite?: boolean}} [options] overwrite = true allows replacing a file
+ *   that already exists at the destination (GitHub requires its `sha` for updates,
+ *   and answers 422 "sha" wasn't supplied" without it).
+ * @returns {Promise<{newPath: string, updatedFiles: string[], skipped: boolean, overwritten: boolean}>}
+ */
+export async function moveToPath(client, allFiles, oldPath, newPath, options = {}) {
   if (newPath === oldPath) return { newPath, updatedFiles: [], skipped: true, overwritten: false };
 
   const clash = allFiles.find((f) => f.path === newPath);
@@ -61,6 +85,28 @@ export async function moveFile(client, allFiles, oldPath, targetFolder, options 
   const updatedFiles = await updateReferencesEverywhere(client, allFiles, oldPath, newPath);
 
   return { newPath, updatedFiles, skipped: false, overwritten: Boolean(clash) };
+}
+
+/**
+ * Moves file oldPath into folder targetFolder (may be '' — the repository root).
+ * The file keeps its name; see moveToPath() for the options and the return value.
+ */
+export async function moveFile(client, allFiles, oldPath, targetFolder, options = {}) {
+  const filename = basenameOf(oldPath);
+  const newPath = targetFolder ? `${targetFolder}/${filename}` : filename;
+  return moveToPath(client, allFiles, oldPath, newPath, options);
+}
+
+/**
+ * Renames a file, keeping it in the SAME folder. References to it across the repo
+ * are rewritten exactly as they are for a move (see updateReferencesEverywhere).
+ * @param {string} newName  just the file name, no slashes
+ */
+export async function renameFile(client, allFiles, oldPath, newName, options = {}) {
+  const dir = dirnameOf(oldPath);
+  const name = validateName(newName);
+  const newPath = dir ? `${dir}/${name}` : name;
+  return moveToPath(client, allFiles, oldPath, newPath, options);
 }
 
 /**

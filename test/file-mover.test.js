@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { moveFile } from '../js/file-mover.js';
+import { moveFile, renameFile } from '../js/file-mover.js';
 import { utf8ToB64, b64ToUtf8 } from '../js/github-client.js';
 
 /** Minimal fake client with the same interface as GitHubClient, backed by an in-memory Map. */
@@ -127,4 +127,45 @@ test('moveFile reports overwritten=false for a normal move into a free folder', 
   const result = await moveFile(client, allFiles, 'A/note.md', 'B');
   assert.equal(result.overwritten, false);
   assert.equal(client.puts[0].sha, undefined, 'a brand-new file must be created without a sha');
+});
+test('renameFile keeps the file in its folder, rewrites its own links and all references to it', async () => {
+  // Spaces in markdown link targets are percent-encoded, exactly as encodeLinkPath writes them.
+  const client = new FakeClient({
+    'AI corrected/BOBAM/Laser sensor.md': '![sensor](../../Asset/pic.jpg)\n',
+    'AI corrected/Other/refA.md': '![p](../../AI%20corrected/BOBAM/Laser%20sensor.md)\n',
+  });
+  const allFiles = [
+    { path: 'AI corrected/BOBAM/Laser sensor.md' },
+    { path: 'AI corrected/Other/refA.md' },
+  ];
+
+  const result = await renameFile(client, allFiles, 'AI corrected/BOBAM/Laser sensor.md', 'Sensor v2.md');
+  assert.equal(result.newPath, 'AI corrected/BOBAM/Sensor v2.md');
+  assert.equal(client.files.has('AI corrected/BOBAM/Laser sensor.md'), false);
+  // its own relative link still points at the same target after the rename
+  assert.equal(client.files.get('AI corrected/BOBAM/Sensor v2.md').text, '![sensor](../../Asset/pic.jpg)\n');
+  // references in other notes follow the rename
+  assert.deepEqual(result.updatedFiles, ['AI corrected/Other/refA.md']);
+  // The shortest relative path from "AI corrected/Other" to the new name.
+  assert.equal(
+    client.files.get('AI corrected/Other/refA.md').text,
+    '![p](../BOBAM/Sensor%20v2.md)\n'
+  );
+});
+
+test('renameFile rejects a name containing a slash (it must stay in the same folder)', async () => {
+  const client = new FakeClient({ 'A/note.md': '# hi' });
+  const allFiles = [{ path: 'A/note.md', sha: 'sha-A/note.md' }];
+
+  await assert.rejects(() => renameFile(client, allFiles, 'A/note.md', 'sub/nested.md'), /cannot contain/);
+  await assert.rejects(() => renameFile(client, allFiles, 'A/note.md', '  '), /cannot be empty/);
+  assert.equal(client.files.has('A/note.md'), true, 'the file must stay untouched');
+});
+
+test('renameFile refuses to silently overwrite an existing file in the same folder', async () => {
+  const client = new FakeClient({ 'A/note.md': '# one', 'A/other.md': '# two' });
+  const allFiles = [{ path: 'A/note.md', sha: 'sha-A/note.md' }, { path: 'A/other.md', sha: 'sha-A/other.md' }];
+
+  await assert.rejects(() => renameFile(client, allFiles, 'A/note.md', 'other.md'), /already exists/);
+  assert.equal(client.files.get('A/other.md').text, '# two');
 });

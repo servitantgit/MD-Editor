@@ -156,7 +156,31 @@ with sync_playwright() as p:
         "repository link is missing from the header"
     print("✓ header repository link present")
 
-    # --- 2. Scrolling a long document ---
+    # --- 2. Tree interactions: right-clicking a FILE must open a context menu
+    # (rename/delete), and a folder menu must be able to create inside it.
+    # NOTE: "Notes" is already expanded by the click above — do NOT click it again,
+    # that would collapse it and hide the file row again.
+    page.click(".file-item:not(.folder)", button="right")
+    page.wait_for_selector(".folder-context-menu", timeout=5000)
+    menu_actions = page.eval_on_selector_all(
+        ".folder-context-menu button", "els => els.map(e => e.dataset.action)"
+    )
+    assert "rename" in menu_actions, f"file context menu has no rename: {menu_actions}"
+    assert "delete" in menu_actions, f"file context menu has no delete: {menu_actions}"
+    print(f"✓ file context menu present ({menu_actions})")
+    page.keyboard.press("Escape")
+
+    page.click(".file-item.folder:has-text('Notes')", button="right")
+    page.wait_for_selector(".folder-context-menu", timeout=5000)
+    folder_actions = page.eval_on_selector_all(
+        ".folder-context-menu button", "els => els.map(e => e.dataset.action)"
+    )
+    assert "new-file" in folder_actions, f"folder menu cannot create a file: {folder_actions}"
+    assert "new-folder" in folder_actions, f"folder menu cannot create a folder: {folder_actions}"
+    print(f"✓ folder context menu can create ({folder_actions})")
+    page.keyboard.press("Escape")
+
+    # --- 3. Scrolling a long document ---
     scroll_info = page.evaluate("""() => {
         const el = document.querySelector('.CodeMirror-scroll');
         return {scrollHeight: el.scrollHeight, clientHeight: el.clientHeight};

@@ -11,7 +11,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Project info on the homepage** — the start screen is now a landing card: what the app is ("Browser-based Markdown editor for any GitHub repo"), a feature list (OAuth login without manual tokens, full file/folder CRUD with automatic link rewriting on move, inline image previews via the GitHub API, PDF export, no local clone / no build step) and a link to the repository + author (`index.html`, `css/app.css`)
 - A GitHub icon link to the repository in the app header, next to "Sign out"
 
+### Added
+- **Files got a context menu** — right-clicking a file in the tree now offers "New file in this folder" / "Rename" / "Delete", the same way folders already did. Renaming a file rewrites every link to it across the repo exactly like a move does (`renameFile()` in `js/file-mover.js`)
+- Folders' context menu also gained "New file here" / "New folder here", and both menus now stay on screen when right-clicking near the window edge (`js/file-tree.js`)
+
+### Changed
+- "New file" / "New folder" are created in the **folder selected in the tree** instead of always at the repository root — the folder you last opened or expanded becomes the target, and the sidebar buttons' tooltips say so. The prompt shows where the item will land, and names containing `/` still work and are resolved from the root (`onCreateNewFile()` / `onCreateNewFolder()` in `js/app.js`)
+
 ### Fixed
+- Creating or deleting a folder/file did not appear in the tree until the page was reloaded: GitHub caches GET responses (git/trees included), so the tree fetched right after a write could still be the pre-write one. `getTree()` now sends `Cache-Control: no-cache`, and the newly created folder is expanded so the result is visible immediately (`js/github-client.js`, `js/app.js`)
 - Status messages ("Moved: ...", "Saved ✓", "Folder created: ...") stayed on screen forever — `setSaveStatus()` only ever wrote text and nothing ever cleared it, so the last message was still there after a page reload of the workflow. Informational statuses now clear themselves after 4s (a newer status is never wiped), while **errors stay visible** until the next action (`js/app.js`, covered by a new check in `e2e_smoke_test.py`)
 - Dragging a file into a folder that already contains a file with the same name failed with the raw GitHub API error `Invalid request. "sha" wasn't supplied.` — the Contents API requires the current `sha` of a file to update it, and `moveFile()` never sent one. Now the collision is detected up front from the file tree, `moveFile()` refuses to replace anything silently and accepts an explicit `{ overwrite: true }` (passing the destination's sha, with a retry on a stale sha), the UI asks for confirmation via `confirm()` and reports the replacement, and `renameFolder()` checks for collisions before moving the first file instead of failing halfway through (`js/file-mover.js`, `js/folder-manager.js`, `js/app.js`, regression tests in `test/file-mover.test.js`)
 - Dropping a file into the folder it is already in now says so in the status bar instead of silently doing nothing

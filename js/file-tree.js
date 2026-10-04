@@ -41,6 +41,19 @@ export class FileTree {
     this.collapsedFolders = new Set();
     this.treeInitialized = false;
     this.files = [];
+    // The folder new files/folders are created in — follows the last folder the user
+    // interacted with (opened or expanded). '' means the repository root.
+    this.activeFolder = '';
+  }
+
+  getActiveFolder() {
+    return this.activeFolder;
+  }
+
+  /** Sets the "create here" folder; an already-known folder is expanded so the user sees the result. */
+  setActiveFolder(folderPath, { expand = false } = {}) {
+    this.activeFolder = folderPath;
+    if (expand && folderPath && this.collapsedFolders.delete(folderPath)) this.render();
   }
 
   setFiles(files) {
@@ -95,8 +108,12 @@ export class FileTree {
       el.style.paddingLeft = `${12 + depth * 14}px`;
       el.dataset.path = folder.path;
       el.innerHTML = `<span class="folder-toggle" role="button" tabindex="0" title="Expand/collapse">${collapsed ? '▸' : '▾'}</span><span class="icon">📁</span><span class="name">${escapeAttr(name)}</span>`;
-      // Any click on the row (arrow, icon or name) toggles the folder.
-      el.addEventListener('click', () => this._toggleFolder(folder.path));
+      // Any click on the row (arrow, icon or name) toggles the folder and makes it
+      // the target for "new file"/"new folder".
+      el.addEventListener('click', () => {
+        this.activeFolder = folder.path;
+        this._toggleFolder(folder.path);
+      });
       el.addEventListener('keydown', (e) => {
         if (e.key !== 'Enter' && e.key !== ' ') return;
         e.preventDefault();
@@ -126,10 +143,21 @@ export class FileTree {
       el.innerHTML = `<span class="icon">${icon}</span><span class="name">${escapeAttr(name)}</span>`;
 
       if (isMd && this.handlers.onOpenFile) {
-        el.addEventListener('click', () => this.handlers.onOpenFile(file.path));
+        el.addEventListener('click', () => {
+          // Opening a file also makes ITS folder the target for new files/folders.
+          this.activeFolder = dirnameOf(file.path);
+          this.handlers.onOpenFile(file.path);
+        });
       } else if (isImg && this.handlers.onPreviewImage) {
-        el.addEventListener('click', () => this.handlers.onPreviewImage(file.path));
+        el.addEventListener('click', () => {
+          this.activeFolder = dirnameOf(file.path);
+          this.handlers.onPreviewImage(file.path);
+        });
       }
+      el.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        this._showFileContextMenu(e.clientX, e.clientY, file.path);
+      });
 
       el.draggable = true;
       el.addEventListener('dragstart', (e) => {
@@ -161,7 +189,11 @@ export class FileTree {
     });
   }
 
-  _showFolderContextMenu(x, y, folderPath) {
+  /**
+ * Shows a context menu at (x, y). `items` = [{action, label, className}].
+ * Returns the action of the clicked button to the caller, or null.
+ */
+  _showContextMenu(x, y, items) {
     const existing = document.querySelector('.folder-context-menu');
     if (existing) existing.remove();
 
@@ -169,23 +201,64 @@ export class FileTree {
     menu.className = 'folder-context-menu';
     menu.style.left = `${x}px`;
     menu.style.top = `${y}px`;
-    menu.innerHTML = `
-      <button data-action="rename">✏️ Rename</button>
-      <button data-action="delete" class="danger">🗑 Delete</button>
-    `;
+    menu.innerHTML = items
+      .map((it) => `<button data-action="${escapeAttr(it.action)}"${it.className ? ` class="${it.className}"` : ''}>${escapeAttr(it.label)}</button>`)
+      .join('');
+
+    let picked = null;
     menu.addEventListener('click', (e) => {
       const btn = e.target.closest('button');
       if (!btn) return;
-      const action = btn.dataset.action;
+      picked = btn.dataset.action;
       menu.remove();
-      if (action === 'rename' && this.handlers?.onRenameFolder) this.handlers.onRenameFolder(folderPath);
-      if (action === 'delete' && this.handlers?.onDeleteFolder) this.handlers.onDeleteFolder(folderPath);
     });
-    document.body.appendChild(menu);
 
     const closeMenu = () => menu.remove();
     document.addEventListener('click', closeMenu, { once: true });
     document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeMenu(); }, { once: true });
+
+    document.body.appendChild(menu);
+
+    // Keep the menu on screen when right-clicking near the bottom/right edge.
+    const rect = menu.getBoundingClientRect();
+    if (rect.bottom > window.innerHeight) menu.style.top = `${Math.max(0, y - rect.height)}px`;
+    if (rect.right > window.innerWidth) menu.style.left = `${Math.max(0, x - rect.width)}px`;
+
+    return () => picked;
+  }
+
+  _showFolderContextMenu(x, y, folderPath) {
+    const getPicked = this._showContextMenu(x, y, [
+      { action: 'new-file', label: '📄 New file here' },
+      { action: 'new-folder', label: '📁 New folder here' },
+      { action: 'rename', label: '✏️ Rename' },
+      { action: 'delete', label: '🗑 Delete', className: 'danger' },
+    ]);
+    // The click that picks an item bubbles to document and closes the menu — read
+    // the result on the next tick, once that listener has run.
+    setTimeout(() => {
+      const action = getPicked();
+      if (action === 'new-file' && this.handlers?.onCreateFileIn) this.handlers.onCreateFileIn(folderPath);
+      if (action === 'new-folder' && this.handlers?.onCreateFolderIn) this.handlers.onCreateFolderIn(folderPath);
+      if (action === 'rename' && this.handlers?.onRenameFolder) this.handlers.onRenameFolder(folderPath);
+      if (action === 'delete' && this.handlers?.onDeleteFolder) this.handlers.onDeleteFolder(folderPath);
+    }, 0);
+  }
+
+  _showFileContextMenu(x, y, filePath) {
+    const getPicked = this._showContextMenu(x, y, [
+      { action: 'new-file-here', label: '📄 New file in this folder' },
+      { action: 'rename', label: '✏️ Rename' },
+      { action: 'delete', label: '🗑 Delete', className: 'danger' },
+    ]);
+    setTimeout(() => {
+      const action = getPicked();
+      if (action === 'new-file-here' && this.handlers?.onCreateFileIn) {
+        this.handlers.onCreateFileIn(dirnameOf(filePath));
+      }
+      if (action === 'rename' && this.handlers?.onRenameFile) this.handlers.onRenameFile(filePath);
+      if (action === 'delete' && this.handlers?.onDeleteFileAt) this.handlers.onDeleteFileAt(filePath);
+    }, 0);
   }
 
   clearActive() {

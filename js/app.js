@@ -10,7 +10,7 @@ import { FileTree } from './file-tree.js';
 import { setupImageDropzone, pickImageFiles, uploadImage } from './upload.js';
 import { setupFolderDropzone } from './folder-upload.js';
 import { exportCurrentPageToPdf } from './pdf-export.js';
-import { moveFile } from './file-mover.js';
+import { moveFile, renameFile } from './file-mover.js';
 import { createFolder, renameFolder, deleteFolder, getFolders, isFolderEmpty } from './folder-manager.js';
 import { basenameOf, dirnameOf } from './paths.js';
 import { looksLikeGitHubUrl, parseGitHubOwnerRepo } from './github-repo-url.js';
@@ -226,6 +226,10 @@ function showApp(owner, repo) {
     getActivePath: () => state.currentPath,
     onRenameFolder: onRenameFolder,
     onDeleteFolder: onDeleteFolder,
+    onCreateFileIn,
+    onCreateFolderIn,
+    onRenameFile: onRenameFile,
+    onDeleteFileAt: onDeleteFileAt,
   });
 
   editorHandle = createEditor(els.editorTextarea, {
@@ -454,36 +458,137 @@ function closeCurrentFile() {
   els.btnDelete.disabled = true;
 }
 
-async function onCreateNewFile() {
-  const path = prompt('New file path (e.g. docs/new.md):');
-  if (!path || !path.endsWith('.md')) {
-    alert('Path must end with .md');
+/** Resolves a user-entered NAME into a full repo path inside folderPath ('' = root). */
+function resolvePathIn(folderPath, name) {
+  const clean = String(name == null ? '' : name).trim();
+  if (!clean) throw new Error('Name cannot be empty');
+  if (clean === '.' || clean === '..') throw new Error(`"${clean}" is not a valid name`);
+  // A name with slashes is accepted for backwards compatibility with the old
+  // "type the full path" prompt, but it is always resolved from the repository root.
+  const full = clean.includes('/') ? clean.replace(/^\/+|\/+$/g, '') : clean;
+  return folderPath ? `${folderPath}/${full}` : full;
+}
+
+function targetFolderLabel(folderPath) {
+  return folderPath ? `"${folderPath}"` : 'the repository root';
+}
+
+/**
+ * Creates a new .md file. folderPath defaults to the tree's active folder — the last
+ * folder the user opened/expanded — so the file lands where they are looking.
+ */
+async function onCreateNewFile(folderPath = fileTree.getActiveFolder()) {
+  const name = prompt(`New file name (created in ${targetFolderLabel(folderPath)}):`, 'untitled.md');
+  if (!name) return;
+
+  let path;
+  try {
+    path = resolvePathIn(folderPath, name);
+    if (!path.toLowerCase().endsWith('.md')) throw new Error('Path must end with .md');
+    if (state.allFiles.some((f) => f.path === path)) throw new Error(`"${path}" already exists`);
+  } catch (e) {
+    alert(e.message);
     return;
   }
+
   try {
+    setSaveStatus(`Creating ${path}...`, false);
     await state.client.putFile(path, utf8ToB64('# New file\n'), `Create ${path}`);
     await loadTree();
-    openFile(path);
+    fileTree.setActiveFolder(folderPath, { expand: true }); // reveal the new file
+    await openFile(path);
+    setSaveStatus(`File created: ${path}`, false);
   } catch (e) {
-    alert('Create error: ' + e.message);
+    setSaveStatus('Create error: ' + e.message, true);
   }
 }
 
-async function onCreateNewFolder() {
-  const path = prompt('New folder path (e.g. docs/new-folder):');
-  if (!path) return;
-  const clean = path.replace(/^\/+|\/+$/g, '');
-  if (!clean) {
-    alert('Path cannot be empty');
+/** Creates a new folder (via .gitkeep) inside the active folder. */
+async function onCreateNewFolder(folderPath = fileTree.getActiveFolder()) {
+  const name = prompt(`New folder name (created in ${targetFolderLabel(folderPath)}):`);
+  if (!name) return;
+
+  let path;
+  try {
+    path = resolvePathIn(folderPath, name);
+    if (getFolders(state.allFiles).includes(path)) throw new Error(`Folder "${path}" already exists`);
+  } catch (e) {
+    alert(e.message);
     return;
   }
+
   try {
-    setSaveStatus(`Creating folder ${clean}...`, false);
-    await createFolder(state.client, clean);
+    setSaveStatus(`Creating folder ${path}...`, false);
+    await createFolder(state.client, path);
     await loadTree();
-    setSaveStatus(`Folder created: ${clean}`, false);
+    fileTree.setActiveFolder(path, { expand: true }); // show the folder that was just created
+    setSaveStatus(`Folder created: ${path}`, false);
   } catch (e) {
-    setSaveStatus('Error: ' + e.message, true);
+    setSaveStatus('Create error: ' + e.message, true);
+  }
+}
+
+// Context-menu entry points: always target the folder the user right-clicked.
+function onCreateFileIn(folderPath) {
+  return onCreateNewFile(folderPath);
+}
+
+function onCreateFolderIn(folderPath) {
+  return onCreateNewFolder(folderPath);
+}
+
+/** Renames a file from the tree context menu; keeps it in the same folder. */
+async function onRenameFile(path) {
+  const newName = prompt(`New name for "${basenameOf(path)}":`, basenameOf(path));
+  if (!newName) return;
+  const trimmed = newName.trim();
+  if (trimmed === basenameOf(path)) return;
+
+  try {
+    setSaveStatus(`Renaming ${path}...`, false);
+    const { newPath, updatedFiles, skipped } = await renameFile(state.client, state.allFiles, path, trimmed);
+    if (skipped) return;
+
+    if (state.currentPath === path) {
+      state.currentPath = newPath;
+      els.currentFileLabel.textContent = newPath;
+      await openFile(newPath); // refresh the editor + sha under the new path
+    } else if (state.currentPath && updatedFiles.includes(state.currentPath)) {
+      await openFile(state.currentPath);
+    }
+
+    imageResolver.invalidate(path);
+    await loadTree();
+    setSaveStatus(
+      `Renamed: ${path} → ${newPath}` +
+        (updatedFiles.length ? ` (updated links in ${updatedFiles.length} file(s))` : ''),
+      false
+    );
+  } catch (e) {
+    setSaveStatus('Rename error: ' + e.message, true);
+  }
+}
+
+/** Deletes a file from the tree context menu (works for any file, not just the open one). */
+async function onDeleteFileAt(path) {
+  const confirmed = confirm(
+    `Are you sure you want to delete this file?\n\n${path}\n\nThe file will be removed from the repository; this cannot be undone.`
+  );
+  if (!confirmed) return;
+
+  try {
+    setSaveStatus(`Deleting ${path}...`, false);
+    const entry = state.allFiles.find((f) => f.path === path);
+    const sha = state.currentPath === path ? state.currentSha : entry && entry.sha;
+    if (!sha) throw new Error(`No sha known for ${path} — refresh the tree and try again`);
+
+    await state.client.deleteFile(path, sha, `Delete ${path}`);
+    imageResolver.invalidate(path);
+    if (state.currentPath === path) closeCurrentFile();
+    await loadTree();
+    setSaveStatus(`File deleted: ${path}`, false);
+  } catch (e) {
+    setSaveStatus('Delete error: ' + e.message, true);
   }
 }
 

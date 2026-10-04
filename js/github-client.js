@@ -43,8 +43,12 @@ export class GitHubClient {
   /** Full recursive file tree of the repository on the given branch. */
   async getTree(branch) {
     const ref = branch || 'HEAD';
+    // GitHub caches GET responses (git/trees included), so without this a folder or
+    // file created a moment ago is missing from the tree and the user has to reload
+    // the page to see it. no-cache forces a fresh request.
     const res = await this.request(
-      `/repos/${this.owner}/${this.repo}/git/trees/${encodePathForApi(ref)}?recursive=1`
+      `/repos/${this.owner}/${this.repo}/git/trees/${encodePathForApi(ref)}?recursive=1`,
+      { headers: { 'Cache-Control': 'no-cache', Pragma: 'no-cache' } }
     );
     if (!res.ok) throw await this._error(res, '');
     const data = await res.json();
