@@ -210,7 +210,8 @@ with sync_playwright() as p:
 
     # The caret must be visible on the dark background.
     cursor_border = page.evaluate("""() => getComputedStyle(document.querySelector('.CodeMirror-cursor')).borderLeftColor""")
-    assert cursor_border not in ("rgb(0, 0, 0)", "rgba(0, 0, 0, 0)", "transparent"),         f"cursor is effectively invisible: {cursor_border}"
+    assert cursor_border not in ("rgb(0, 0, 0)", "rgba(0, 0, 0, 0)", "transparent"), \
+        f"cursor is effectively invisible: {cursor_border}"
     print(f"✓ caret visible ({cursor_border})")
 
     # The image button must open a file picker, not insert an empty URL.
@@ -243,6 +244,7 @@ with sync_playwright() as p:
     assert "delete" in menu_actions, f"file context menu has no delete: {menu_actions}"
     print(f"✓ file context menu present ({menu_actions})")
     page.keyboard.press("Escape")
+    page.wait_for_selector(".folder-context-menu", state="detached", timeout=5000)
 
     page.click(".file-item.folder:has-text('Notes')", button="right")
     page.wait_for_selector(".folder-context-menu", timeout=5000)
@@ -253,18 +255,45 @@ with sync_playwright() as p:
     assert "new-folder" in folder_actions, f"folder menu cannot create a folder: {folder_actions}"
     print(f"✓ folder context menu can create ({folder_actions})")
     page.keyboard.press("Escape")
+    page.wait_for_selector(".folder-context-menu", state="detached", timeout=5000)
+
+    # Both dismiss paths must actually remove the menu. Nothing used to assert
+    # this, and it is exactly what a `setTimeout` around the dismiss-listener
+    # registration could silently break: the menu would survive a stray click,
+    # stay in the DOM, and every later `wait_for_selector` would happily match
+    # that stale menu instead of proving the new one opened. Clicking away lands
+    # on the inert header, not on a tree row (which would open a second menu).
+    page.click(".file-item:not(.folder)", button="right")
+    page.wait_for_selector(".folder-context-menu", timeout=5000)
+    page.click("#app-header", position={"x": 5, "y": 5})
+    page.wait_for_selector(".folder-context-menu", state="detached", timeout=5000)
+    print("✓ context menu really closes on Escape and on an outside click")
 
     # --- 4. The toolbar buttons must not leak the click event into the path ---
     # `onclick = onCreateNewFile` passed the PointerEvent as `folderPath`, so the
     # file was created at "[object PointerEvent]/name.md". It reached the GitHub
     # API as such, so watching the request URL proves it without any real write.
-    # Must run BEFORE the dialog handler below is registered: that one accepts
-    # with an empty string, which would cancel these prompts.
+    #
+    # One dialog handler for the whole test: Playwright dispatches a dialog to
+    # *every* registered listener, and a second accept() on the same dialog raises
+    # "Cannot accept dialog which is already handled!". Prompts are answered with
+    # a file name, the delete confirmation with the default (OK).
+    create_prompts = []
+    seen_dialogs = []
+
+    def handle_dialog(d):
+        msg = d.message
+        if "new file name" in msg.lower() or "new folder name" in msg.lower():
+            create_prompts.append(msg)
+            d.accept("root-new.md")
+        else:
+            seen_dialogs.append(msg)
+            d.accept()
+
+    page.on("dialog", handle_dialog)
     write_urls = []
     page.route(re.compile(r"https://api\.github\.com/.*/contents/.*"),
                lambda route, request: (write_urls.append(request.url), route.abort()))
-    create_prompts = []
-    page.on("dialog", lambda d: (create_prompts.append(d.message), d.accept("root-new.md")))
 
     page.click("#btn-new-file")
     page.wait_for_timeout(1000)
@@ -290,8 +319,6 @@ with sync_playwright() as p:
     # Merely finding the items is not enough — the earlier version of this test did
     # exactly that and missed that clicking one did nothing (the action dispatch ran
     # before the click happened). Actually pick "delete" and require the confirmation.
-    seen_dialogs = []
-    page.on("dialog", lambda d: (seen_dialogs.append(d.message), d.accept()))
     page.click(".file-item:not(.folder)", button="right")
     page.wait_for_selector(".folder-context-menu", timeout=5000)
     page.click(".folder-context-menu button[data-action='delete']")

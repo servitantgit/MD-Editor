@@ -475,14 +475,16 @@ function targetFolderLabel(folderPath) {
   return folderPath ? `"${folderPath}"` : 'the repository root';
 }
 
-/** Turns whatever was passed into a folder path, or '' for the repo root.
+/** Coerces a "create here" target into a real folder path.
  *
- * The toolbar wires these handlers straight to `onclick`, so a stray
- * MouseEvent/PointerEvent can arrive here as `folderPath`. Coercing it keeps a
- * typo in one place from producing a path like "[object PointerEvent]/x.md"
- * all the way down to the GitHub API. */
+ * The toolbar wires these handlers through `onclick`, and a click event can
+ * reach here as `folderPath`. Returning '' (the repo root) for that would
+ * silently drop the user's intent — the active folder is what they are looking
+ * at, so fall back to it, exactly like the default parameter does for
+ * `undefined`. Only an explicit empty string means the repo root. */
 function toFolderPath(value) {
-  return typeof value === 'string' ? value : '';
+  if (typeof value === 'string') return value;
+  return fileTree ? fileTree.getActiveFolder() : '';
 }
 
 /**

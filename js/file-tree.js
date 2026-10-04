@@ -217,8 +217,21 @@ export class FileTree {
     });
 
     const closeMenu = () => menu.remove();
-    document.addEventListener('click', closeMenu, { once: true });
-    document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeMenu(); }, { once: true });
+
+    // Register the dismiss listeners in a later task, not synchronously. This is
+    // safe today only because the menu opens from `contextmenu`, and a right-click
+    // does not produce a `click` event — so no click is in flight to close it.
+    // Registering synchronously would break the moment the menu is opened from a
+    // left click (a "⋯" button, say): that very click would still be bubbling and
+    // would reach `document` and remove the menu before anyone could pick from it.
+    //
+    // Note this defers *registration only*. `onPick` above stays synchronous on
+    // purpose — see the "Do NOT defer that call" note at the top of this method.
+    const armDismiss = () => {
+      document.addEventListener('click', closeMenu, { once: true });
+      document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeMenu(); }, { once: true });
+    };
+    setTimeout(armDismiss, 0);
 
     document.body.appendChild(menu);
 

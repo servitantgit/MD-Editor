@@ -199,12 +199,20 @@ fire on `undefined`), and the app asked GitHub for
 
 Only `onCreateNewFile` / `onCreateNewFolder` take an argument — every other
 `onclick` assignment in `js/app.js` points at a zero-arg handler, which is why
-only these two broke. Two rules follow from it: wrap such handlers in
-`() => fn()`, and make the function itself defensive with
-`toFolderPath(value)` (returns `''` = repo root for anything non-string).
+only these two broke. Two rules follow from it:
+
+1. Wrap such handlers in `() => fn()`.
+2. Make the function itself defensive, and fall back to the **active folder**,
+   not to the repo root: `toFolderPath(value)` returns `value` when it is a
+   string, otherwise `fileTree.getActiveFolder()`. Returning `''` for an event
+   would be "safe" (no `[object PointerEvent]` in the path) yet silently drop
+   the user's intent — the file would land in the root while they were looking
+   at a folder. Only an *explicit* empty string should mean the repo root.
 
 `e2e_smoke_test.py` clicks both buttons, answers the prompt, and asserts the
-resulting `/contents/...` request URL contains no `object`/`PointerEvent`.
+resulting `/contents/...` request URL contains no `object`/`PointerEvent` **and**
+points at the tree's active folder. That second assertion is what makes the
+check meaningful: verified to fail if the file lands in the root instead.
 
 ## General rule before considering a task done
 
