@@ -74,6 +74,8 @@ test('clicking the folder name/icon toggles the folder too', () => {
   } finally {
     restore();
   }
+});
+
 test('the active folder falls back to the root once it is gone from the tree', () => {
   const { container, tree, restore } = mountTree([
     { path: 'Notes/deep/a.md' },
@@ -103,5 +105,4 @@ test('the active folder falls back to the root once it is gone from the tree', (
   } finally {
     restore();
   }
-});
 });
