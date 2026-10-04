@@ -87,7 +87,8 @@ export function createEditor(textareaEl, deps) {
 
   // Pasting images from the clipboard: the browser passes screenshots/copied pictures
   // as ClipboardItem/Files. We don't intercept text pasting.
-  easyMDE.codemirror.getInputField().addEventListener('paste', (event) => {
+  const inputField = easyMDE.codemirror.getInputField();
+  const onPaste = (event) => {
     const items = Array.from(event.clipboardData?.items || []);
     const imageItems = items.filter((item) => item.kind === 'file' && item.type.startsWith('image/'));
     if (!imageItems.length) return;
@@ -97,13 +98,15 @@ export function createEditor(textareaEl, deps) {
       const file = item.getAsFile();
       if (file) deps.onImagePaste(file);
     }
-  });
+  };
+  inputField.addEventListener('paste', onPaste);
 
   // React to window/container resizing — the same class of problems.
   // Live Preview right in the text field: the Markdown image link
   // stays in the document but is visually replaced in CodeMirror by the real
   // picture. This doesn't change the text that will be saved to GitHub.
-  easyMDE.codemirror.on('change', () => scheduleInlineImages());
+  const onChange = () => scheduleInlineImages();
+  easyMDE.codemirror.on('change', onChange);
 
   const resizeObserver = new ResizeObserver(() => refreshLayout());
   resizeObserver.observe(textareaEl.closest('.editor-area') || document.body);
@@ -187,7 +190,32 @@ export function createEditor(textareaEl, deps) {
 
   refreshInlineImages();
 
-  return { easyMDE, refreshLayout, refreshInlineImages };
+  /**
+   * Releases everything createEditor() attached. Without it there is no way to
+   * get rid of this instance: the ResizeObserver keeps observing, the paste and
+   * 'change' handlers keep running, and `new EasyMDE({element: textareaEl})` on
+   * an already-wrapped textarea would stack a second editor on top of the first.
+   *
+   * Idempotent, and safe to call without a matching createEditor having ever
+   * run — teardown code should never be the thing that throws.
+   */
+  function destroy() {
+    resizeObserver.disconnect();
+    clearTimeout(inlineImageTimer);
+    inlineImageTimer = null;
+    inputField.removeEventListener('paste', onPaste);
+    easyMDE.codemirror.off('change', onChange);
+    for (const mark of inlineImageMarks) mark.clear();
+    inlineImageMarks = [];
+    // Hand the plain textarea back so a fresh createEditor() can wrap it cleanly.
+    try {
+      easyMDE.toTextArea();
+    } catch (_) {
+      // EasyMDE already tore itself down — nothing left to restore.
+    }
+  }
+
+  return { easyMDE, refreshLayout, refreshInlineImages, destroy };
 }
 
 function escapeHtml(s) {

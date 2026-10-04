@@ -61,8 +61,13 @@ let editorHandle = null;
 // ====================== LOGIN ======================
 init();
 
-function init() {
-  consumeOAuthRedirect();
+async function init() {
+  // Must be awaited, and must be allowed to end init() on its own: finishLogin()
+  // calls showApp() itself. Reading the session while the token check is still
+  // in flight would build the app TWICE when an OAuth callback lands on a tab
+  // that still holds a session — two editors, two ResizeObservers, two paste
+  // handlers, with the first one nobody can reach to tear down.
+  if (await consumeOAuthRedirect()) return;
 
   const saved = readSession();
   if (saved) {
@@ -136,11 +141,13 @@ function onLoginClick() {
  * a safe way to hand the token back to client-side JS. We pick it up,
  * immediately clean the address bar, and complete the same "login" that
  * onLoginClick used to do with a PAT.
+ * @returns {Promise<boolean>} true when this callback finished the login itself
+ *   (the app has been shown, so the caller must not build it a second time).
  */
-function consumeOAuthRedirect() {
+async function consumeOAuthRedirect() {
   const hash = location.hash || '';
   const match = hash.match(/(?:^#|&)gh_token=([^&]+)/);
-  if (!match) return;
+  if (!match) return false;
 
   const token = decodeURIComponent(match[1]);
   history.replaceState(null, '', location.pathname + location.search);
@@ -152,10 +159,11 @@ function consumeOAuthRedirect() {
 
   if (!owner || !repo) {
     setLoginStatus('Login session lost (owner/repo). Please try again.', true);
-    return;
+    return false;
   }
 
-  finishLogin(token, owner, repo);
+  await finishLogin(token, owner, repo);
+  return true;
 }
 
 function restorePendingLoginFields() {
@@ -214,6 +222,15 @@ function setSaveStatus(msg, isError) {
 
 // ====================== APP SHELL ======================
 function showApp(owner, repo) {
+  // Defensive: createEditor() owns a ResizeObserver, a paste handler and a
+  // CodeMirror 'change' handler, and re-wrapping an already-wrapped textarea
+  // stacks a second editor. Tear the previous one down before building again.
+  if (editorHandle) {
+    editorHandle.destroy();
+    editorHandle = null;
+  }
+  if (fileTree) fileTree = null;
+
   els.loginScreen.classList.add('hidden');
   els.appHeader.classList.remove('hidden');
   els.appMain.classList.remove('hidden');
