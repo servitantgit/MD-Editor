@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { moveFile, renameFile } from '../js/file-mover.js';
+import { moveFile, renameFile, moveToPath } from '../js/file-mover.js';
 import { utf8ToB64, b64ToUtf8 } from '../js/github-client.js';
 
 /** Minimal fake client with the same interface as GitHubClient, backed by an in-memory Map. */
@@ -168,4 +168,22 @@ test('renameFile refuses to silently overwrite an existing file in the same fold
 
   await assert.rejects(() => renameFile(client, allFiles, 'A/note.md', 'other.md'), /already exists/);
   assert.equal(client.files.get('A/other.md').text, '# two');
+});
+test('moveToPath leaves a .md file that is not valid UTF-8 byte-for-byte untouched', async () => {
+  // "h" + a stray continuation byte + "i": not decodable as UTF-8. moveToPath()
+  // only rewrites the text for .md files, and it must skip that step entirely
+  // rather than decode it into replacement characters and PUT the result —
+  // that would corrupt the user's file in the repository.
+  const notUtf8 = Buffer.from([0x68, 0x80, 0x69]).toString('base64');
+  const writes = [];
+  const client = {
+    async getFileB64() { return { b64: notUtf8, sha: 'sha-1' }; },
+    async putFile(path, b64) { writes.push({ path, b64 }); },
+    async deleteFile() {},
+  };
+
+  await moveToPath(client, [], 'note.md', 'sub/note.md');
+
+  assert.equal(writes.length, 1, 'the move itself must still happen');
+  assert.equal(writes[0].b64, notUtf8, 'content must be written back unchanged');
 });

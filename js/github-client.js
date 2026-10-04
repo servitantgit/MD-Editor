@@ -118,10 +118,29 @@ export class GitHubClient {
 
 /** utf-8 text -> base64, correct for Cyrillic/emoji (unlike bare btoa). */
 export function utf8ToB64(text) {
-  return btoa(unescape(encodeURIComponent(text)));
+  const bytes = new TextEncoder().encode(text);
+  // Build the binary string in chunks: String.fromCharCode(...bytes) blows the
+  // argument limit on a large document (and markdown files are not small).
+  let binary = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  }
+  return btoa(binary);
 }
 
-/** base64 -> utf-8 text. */
+/**
+ * base64 -> utf-8 text.
+ *
+ * `fatal: true` is load-bearing, do not "fix" it away: callers rely on this
+ * THROWING when the content is not valid UTF-8 (a binary blob that happens to
+ * sit under a .md extension, say) so they can leave the original bytes alone.
+ * The default TextDecoder would instead substitute U+FFFD silently, and
+ * moveToPath() would then PUT that mangled text back — real corruption in the
+ * repository, not a cosmetic glitch.
+ */
 export function b64ToUtf8(b64) {
-  return decodeURIComponent(escape(atob(b64)));
+  const binary = atob(b64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
 }
