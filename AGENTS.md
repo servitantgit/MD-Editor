@@ -166,6 +166,27 @@ back into a CSS rule on the container.
 `position` while exporting (must be `static`) and asserts the downloaded PDF is
 larger than 50 KB. A blank export is ~3 KB, a real one is hundreds of KB.
 
+## PDF export: images must never be split across pages
+
+html2pdf's pagebreak plugin (see `pagebreaks.js` in the bundle) honours
+`page-break-inside: avoid` on an element and inserts a padding div in front of
+it so the element lands whole on the next page. **But** it only does that when
+the element is at most one page tall — `nPages <= 1` — otherwise it leaves it to
+be sliced.
+
+That single condition is the whole trap. Clamping the `<img>` to the page
+height is *not* enough: `.md-img-wrap` also has `margin: 12px auto` and a
+border, so the wrapper ends up taller than the page, `nPages > 1`, and the image
+gets cut anyway. `clampImagesToPage()` therefore measures the wrapper's margins
+and border and shrinks the image to fit inside that budget.
+
+`e2e_smoke_test.py` checks this for real, not by inspecting CSS: the test
+document contains a solid **red** image taller than a page, positioned to
+straddle a break. Every page of the exported PDF is a `DCTDecode` JPEG, so the
+test decodes each one in the browser and counts red pixels. A split shows a
+large red block on one page plus red starting at row 0 of the next. Verified to
+fail when the fix is removed.
+
 ## General rule before considering a task done
 
 Here CI broke twice in a row right after merge (first `npm ci`, then a

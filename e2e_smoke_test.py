@@ -29,13 +29,38 @@ TINY_PNG_B64 = base64.b64encode(bytes.fromhex(
     "44ae426082"
 )).decode()
 
+def make_solid_png(width, height, rgb):
+    """Solid-colour PNG, so the image has measurable ink in the exported PDF."""
+    import struct
+    import zlib
+
+    def chunk(tag, data):
+        c = tag + data
+        return struct.pack(">I", len(data)) + c + struct.pack(">I", zlib.crc32(c) & 0xFFFFFFFF)
+
+    raw = b"".join(b"\x00" + bytes(rgb) * width for _ in range(height))
+    return (b"\x89PNG\r\n\x1a\n"
+            + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0))
+            + chunk(b"IDAT", zlib.compress(raw, 9))
+            + chunk(b"IEND", b""))
+
+
+# Taller than one printable A4 page, so without the page-break fix it would be
+# sliced in half by the page boundary.
+TALL_PNG_B64 = base64.b64encode(make_solid_png(400, 1400, (200, 30, 30))).decode()
+
 MD_INTRO = "# Test note\n\nHello world.\n\n![pic](../../Asset/pic.jpg)\n"
+# Filler pushes the tall image across a page boundary, which is what makes the
+# "images are never split" assertion below meaningful rather than vacuous.
+MD_FILLER = ("\n\n".join(f"Filler paragraph {i}." for i in range(30))
+             + "\n\n![tall](../../Asset/tall.png)\n")
 LONG_BODY = "\n".join(f"Line {i} - text to force the editor to overflow vertically." for i in range(400))
-MD_CONTENT = MD_INTRO + "\n" + LONG_BODY + "\n"
+MD_CONTENT = MD_INTRO + MD_FILLER + LONG_BODY + "\n"
 
 FAKE_TREE = {
     "tree": [
         {"path": "Asset/pic.jpg", "type": "blob", "sha": "sha-pic"},
+        {"path": "Asset/tall.png", "type": "blob", "sha": "sha-tall"},
         {"path": "Notes/Test note.md", "type": "blob", "sha": "sha-note"},
     ]
 }
@@ -52,6 +77,8 @@ def handle_github_api(route, request):
         route.fulfill(status=200, content_type="application/json", body=json.dumps({"content": b64, "sha": "sha-note"}))
     elif "/contents/Asset/pic.jpg" in url:
         route.fulfill(status=200, content_type="application/json", body=json.dumps({"content": TINY_PNG_B64, "sha": "sha-pic"}))
+    elif "/contents/Asset/tall.png" in url:
+        route.fulfill(status=200, content_type="application/json", body=json.dumps({"content": TALL_PNG_B64, "sha": "sha-tall"}))
     else:
         route.fulfill(status=404, content_type="application/json", body=json.dumps({"message": "Not Found (mock)"}))
 
@@ -63,6 +90,53 @@ def handle_cdn(route, request):
         route.fulfill(status=200, content_type=ct, body=local_path.read_bytes())
     else:
         route.fulfill(status=404, body=b"")
+
+
+def pdf_page_images(path):
+    """Every JPEG stream in the PDF — html2pdf embeds exactly one per page."""
+    data = path.read_bytes()
+    out = []
+    for m in re.finditer(rb"/Filter\s*/DCTDecode", data):
+        sm = re.compile(rb"stream\r?\n").search(data, m.end())
+        if not sm:
+            continue
+        end = data.find(b"endstream", sm.end())
+        if end == -1:
+            continue
+        blob = data[sm.end():end].rstrip(b"\r\n")
+        if blob[:2] == b"\xff\xd8":  # JPEG SOI marker
+            out.append(blob)
+    return out
+
+
+def measure_red_per_page(page, streams):
+    """Decode each page image in the browser and measure the red image ink on it.
+
+    Returns [(red_px, first_red_row, rows_total), ...] per page.
+    """
+    results = []
+    for blob in streams:
+        b64 = base64.b64encode(blob).decode()
+        results.append(page.evaluate("""async (b64) => {
+            const img = new Image();
+            img.src = 'data:image/jpeg;base64,' + b64;
+            await img.decode();
+            const c = document.createElement('canvas');
+            c.width = 200;
+            c.height = Math.max(1, Math.round(200 * img.height / img.width));
+            const ctx = c.getContext('2d');
+            ctx.drawImage(img, 0, 0, c.width, c.height);
+            const d = ctx.getImageData(0, 0, c.width, c.height).data;
+            let red = 0, firstRow = -1;
+            for (let i = 0; i < d.length; i += 4) {
+                if (d[i] > 120 && d[i] > d[i + 1] + 40 && d[i] > d[i + 2] + 40) {
+                    red++;
+                    if (firstRow < 0) firstRow = Math.floor(i / 4 / c.width);
+                }
+            }
+            return {red: red, firstRow: firstRow, rows: c.height};
+        }""", b64))
+    return results
 
 
 page_errors = []
@@ -214,7 +288,6 @@ with sync_playwright() as p:
     pdf_path = BASE / "_e2e_export.pdf"
     dl.value.save_as(pdf_path)
     pdf_bytes = pdf_path.stat().st_size
-    pdf_path.unlink()
 
     container_pos = page.evaluate("window.__pdfPos")
     assert container_pos == "static", \
@@ -223,7 +296,24 @@ with sync_playwright() as p:
     assert pdf_bytes > 50_000, f"exported PDF is suspiciously small: {pdf_bytes} bytes"
     print(f"✓ PDF export renders content ({pdf_bytes} bytes, container position: {container_pos})")
 
-    # --- 5. Scrolling a long document ---
+    # --- 5. Images must never be cut in half by a page boundary ---
+    # The document contains a red image taller than one page, placed so it lands
+    # across a page break. Measure the red ink on every page of the exported
+    # PDF: a split shows a big red block on one page and red starting at the very
+    # top of the next. Thresholds are loose on purpose — JPEG ringing puts a
+    # handful of stray red pixels on the seam.
+    red_per_page = measure_red_per_page(page, pdf_page_images(pdf_path))
+    total_red = sum(r["red"] for r in red_per_page)
+    assert total_red > 5_000, f"the red test image is missing from the PDF: {red_per_page}"
+    for i in range(len(red_per_page) - 1):
+        cur, nxt = red_per_page[i], red_per_page[i + 1]
+        assert not (cur["red"] > 2_000 and nxt["red"] > 500 and nxt["firstRow"] <= 3), \
+            f"image is split across pages {i} and {i + 1}: {red_per_page}"
+    print(f"✓ images are not split by page breaks (red ink per page: "
+          f"{[r['red'] for r in red_per_page]})")
+    pdf_path.unlink()
+
+    # --- 6. Scrolling a long document ---
     scroll_info = page.evaluate("""() => {
         const el = document.querySelector('.CodeMirror-scroll');
         return {scrollHeight: el.scrollHeight, clientHeight: el.clientHeight};

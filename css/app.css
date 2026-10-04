@@ -575,6 +575,30 @@ button.secondary:hover { background: #21262d; }
 #pdf-export-container .md-img-wrap.broken .md-img-placeholder-text { color: #b91c1c; }
 #pdf-export-container .md-img-resize-handle { display: none; }
 
+/* Images must never be cut in half by a page boundary.
+   html2pdf's pagebreak plugin reads `break-inside` and, when an element with
+   `avoid` would straddle a page boundary, inserts a padding div in front of it
+   so the whole element lands on the next page. It only does this for elements
+   at most one page tall (nPages <= 1) — taller images are capped to
+   MAX_IMAGE_HEIGHT_PX in js/pdf-export.js.
+   The `avoid` list in the pagebreak options names the same selectors so the
+   behaviour does not depend on the computed break-inside being reported. */
+#pdf-export-container .md-img-wrap {
+  display: block;
+  margin: 12px auto;
+  page-break-inside: avoid;
+  break-inside: avoid;
+}
+#pdf-export-container .md-img-wrap img {
+  max-height: 100%;
+  margin: 0 auto;
+}
+#pdf-export-container table,
+#pdf-export-container pre {
+  page-break-inside: avoid;
+  break-inside: avoid;
+}
+
 
 /* ===== Live Preview of images right inside CodeMirror =====
    The ![alt](path) text stays in the document, but in the editor it is visually
