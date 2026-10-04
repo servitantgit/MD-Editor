@@ -187,6 +187,25 @@ test decodes each one in the browser and counts red pixels. A split shows a
 large red block on one page plus red starting at row 0 of the next. Verified to
 fail when the fix is removed.
 
+## Never assign a handler with a parameter straight to `onclick`
+
+`els.btnNewFile.onclick = onCreateNewFile;` looks fine and is a classic
+JS idiom — until the handler has a **path** parameter. The browser calls the
+handler with the `MouseEvent`/`PointerEvent`, so `folderPath` became the event
+object, the `= fileTree.getActiveFolder()` default never applied (defaults only
+fire on `undefined`), and the app asked GitHub for
+`contents/%5Bobject%20PointerEvent%5D/name.md`. The user saw the prompt say
+`created in "[object PointerEvent]"`.
+
+Only `onCreateNewFile` / `onCreateNewFolder` take an argument — every other
+`onclick` assignment in `js/app.js` points at a zero-arg handler, which is why
+only these two broke. Two rules follow from it: wrap such handlers in
+`() => fn()`, and make the function itself defensive with
+`toFolderPath(value)` (returns `''` = repo root for anything non-string).
+
+`e2e_smoke_test.py` clicks both buttons, answers the prompt, and asserts the
+resulting `/contents/...` request URL contains no `object`/`PointerEvent`.
+
 ## General rule before considering a task done
 
 Here CI broke twice in a row right after merge (first `npm ci`, then a

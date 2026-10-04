@@ -254,6 +254,39 @@ with sync_playwright() as p:
     print(f"✓ folder context menu can create ({folder_actions})")
     page.keyboard.press("Escape")
 
+    # --- 4. The toolbar buttons must not leak the click event into the path ---
+    # `onclick = onCreateNewFile` passed the PointerEvent as `folderPath`, so the
+    # file was created at "[object PointerEvent]/name.md". It reached the GitHub
+    # API as such, so watching the request URL proves it without any real write.
+    # Must run BEFORE the dialog handler below is registered: that one accepts
+    # with an empty string, which would cancel these prompts.
+    write_urls = []
+    page.route(re.compile(r"https://api\.github\.com/.*/contents/.*"),
+               lambda route, request: (write_urls.append(request.url), route.abort()))
+    create_prompts = []
+    page.on("dialog", lambda d: (create_prompts.append(d.message), d.accept("root-new.md")))
+
+    page.click("#btn-new-file")
+    page.wait_for_timeout(1000)
+    page.click("#btn-new-folder")
+    page.wait_for_timeout(1000)
+
+    assert "PointerEvent" not in " ".join(create_prompts), \
+        f"toolbar prompt shows the click event instead of a folder: {create_prompts}"
+    assert write_urls, "new file/folder never reached the API"
+    for url in write_urls:
+        assert "object" not in url.lower() and "PointerEvent" not in url, \
+            f"created path was built from the click event: {url}"
+    # The file lands in the tree's active folder (here "Notes", which the test
+    # opened earlier). What matters is that it is a real path segment, not an
+    # event object stringified into the URL.
+    assert any(u.endswith("contents/Notes/root-new.md") for u in write_urls), \
+        f"created path is not inside the active folder: {write_urls}"
+    assert any(u.endswith("root-new.md/.gitkeep") for u in write_urls), \
+        f"new folder did not create its .gitkeep: {write_urls}"
+    print(f"✓ toolbar create targets the real folder, not the click event ({create_prompts[0]})")
+    page.unroute(re.compile(r"https://api\.github\.com/.*/contents/.*"))
+
     # Merely finding the items is not enough — the earlier version of this test did
     # exactly that and missed that clicking one did nothing (the action dispatch ran
     # before the click happened). Actually pick "delete" and require the confirmation.
@@ -267,7 +300,7 @@ with sync_playwright() as p:
         f"clicking Delete showed no confirmation: {seen_dialogs}"
     print("✓ file context menu delete is wired up (confirmation shown)")
 
-    # --- 4. PDF export must render the document, not a blank page ---
+    # --- 5. PDF export must render the document, not a blank page ---
     # html2canvas captures the element exactly where it sits, so putting
     # `position: fixed; left: -99999px` on #pdf-export-container (as app.css once
     # did) yields a ~3 KB, one-empty-page PDF. Watch the container as it is created
@@ -296,7 +329,7 @@ with sync_playwright() as p:
     assert pdf_bytes > 50_000, f"exported PDF is suspiciously small: {pdf_bytes} bytes"
     print(f"✓ PDF export renders content ({pdf_bytes} bytes, container position: {container_pos})")
 
-    # --- 5. Images must never be cut in half by a page boundary ---
+    # --- 6. Images must never be cut in half by a page boundary ---
     # The document contains a red image taller than one page, placed so it lands
     # across a page break. Measure the red ink on every page of the exported
     # PDF: a split shows a big red block on one page and red starting at the very
@@ -313,7 +346,7 @@ with sync_playwright() as p:
           f"{[r['red'] for r in red_per_page]})")
     pdf_path.unlink()
 
-    # --- 6. Scrolling a long document ---
+    # --- 7. Scrolling a long document ---
     scroll_info = page.evaluate("""() => {
         const el = document.querySelector('.CodeMirror-scroll');
         return {scrollHeight: el.scrollHeight, clientHeight: el.clientHeight};

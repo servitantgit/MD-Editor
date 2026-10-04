@@ -80,8 +80,10 @@ function init() {
     location.reload();
   };
   els.btnRefresh.onclick = () => loadTree();
-  els.btnNewFile.onclick = onCreateNewFile;
-  els.btnNewFolder.onclick = onCreateNewFolder;
+  // Wrap in arrows: assigning the handler directly would hand it the click
+  // event as `folderPath`, creating "[object PointerEvent]/name.md".
+  els.btnNewFile.onclick = () => onCreateNewFile();
+  els.btnNewFolder.onclick = () => onCreateNewFolder();
   els.btnSave.onclick = onSaveFile;
   els.btnExportPdf.onclick = onExportPdf;
   els.btnDelete.onclick = onDeleteFile;
@@ -473,11 +475,22 @@ function targetFolderLabel(folderPath) {
   return folderPath ? `"${folderPath}"` : 'the repository root';
 }
 
+/** Turns whatever was passed into a folder path, or '' for the repo root.
+ *
+ * The toolbar wires these handlers straight to `onclick`, so a stray
+ * MouseEvent/PointerEvent can arrive here as `folderPath`. Coercing it keeps a
+ * typo in one place from producing a path like "[object PointerEvent]/x.md"
+ * all the way down to the GitHub API. */
+function toFolderPath(value) {
+  return typeof value === 'string' ? value : '';
+}
+
 /**
  * Creates a new .md file. folderPath defaults to the tree's active folder — the last
  * folder the user opened/expanded — so the file lands where they are looking.
  */
 async function onCreateNewFile(folderPath = fileTree.getActiveFolder()) {
+  folderPath = toFolderPath(folderPath);
   const name = prompt(`New file name (created in ${targetFolderLabel(folderPath)}):`, 'untitled.md');
   if (!name) return;
 
@@ -505,6 +518,7 @@ async function onCreateNewFile(folderPath = fileTree.getActiveFolder()) {
 
 /** Creates a new folder (via .gitkeep) inside the active folder. */
 async function onCreateNewFolder(folderPath = fileTree.getActiveFolder()) {
+  folderPath = toFolderPath(folderPath);
   const name = prompt(`New folder name (created in ${targetFolderLabel(folderPath)}):`);
   if (!name) return;
 
