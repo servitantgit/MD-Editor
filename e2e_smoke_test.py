@@ -20,6 +20,7 @@ CDN_MOCKS = {
     "https://cdn.jsdelivr.net/npm/easymde/dist/easymde.min.css": BASE / "node_modules/easymde/dist/easymde.min.css",
     "https://cdn.jsdelivr.net/npm/easymde/dist/easymde.min.js": BASE / "node_modules/easymde/dist/easymde.min.js",
     "https://cdn.jsdelivr.net/npm/marked/marked.min.js": BASE / "node_modules/marked/lib/marked.umd.js",
+    "https://cdn.jsdelivr.net/npm/minisearch@7.2.0/dist/umd/index.js": BASE / "node_modules/minisearch/dist/umd/index.js",
     "https://cdn.jsdelivr.net/npm/html2pdf.js@0.10.1/dist/html2pdf.bundle.min.js": BASE / "node_modules/html2pdf.js/dist/html2pdf.bundle.min.js",
 }
 
@@ -189,6 +190,48 @@ with sync_playwright() as p:
     page.click("text=Test note.md")
     page.wait_for_function("document.getElementById('btn-save').disabled === false", timeout=5000)
     print("✓ file opened")
+
+    # --- 2. Full-text search over the whole repo ---
+    # The index is built in the BACKGROUND after login, so wait for it to finish
+    # rather than typing immediately — otherwise this would be a race, not a test.
+    # NOTE: this seeds sessionStorage and reloads, so it is a cold start by
+    # design; nothing here may assume the index survives a reload.
+    page.wait_for_function(
+        "() => { const el = document.getElementById('search-status');"
+        " return el && el.textContent.startsWith('Indexed'); }",
+        timeout=20000,
+    )
+    status_text = page.inner_text("#search-status")
+    assert "Indexed" in status_text and "last synced" in status_text, \
+        f"unexpected search status line: {status_text!r}"
+    print(f"✓ search index built ({status_text})")
+
+    # "Filler" only exists in MD_FILLER, i.e. inside the indexed body.
+    page.fill("#search-input", "Filler")
+    page.wait_for_selector(".search-result", timeout=10000)
+    result_paths = page.eval_on_selector_all(".search-result", "els => els.map(e => e.dataset.path)")
+    assert "Notes/Test note.md" in result_paths, \
+        f"search did not find the note: {result_paths}"
+    # The tree must be REPLACED by the results, not shown next to them.
+    assert page.locator(".file-item.folder:visible").count() == 0, \
+        "the file tree is still visible while search results are shown"
+    # ...and the snippet highlights the term that was searched for.
+    assert page.locator(".search-result-snippet mark").count() > 0, \
+        "search result has no <mark> highlight in its snippet"
+    print(f"✓ search finds the note and replaces the tree ({result_paths})")
+
+    page.click(".search-result")
+    page.wait_for_function("document.getElementById('btn-save').disabled === false", timeout=5000)
+    assert page.inner_text("#current-file") == "Notes/Test note.md", \
+        f"clicking a search result opened the wrong file: {page.inner_text('#current-file')!r}"
+    print("✓ clicking a search result opens the file")
+
+    # Clearing the input must bring the tree back exactly as it was.
+    page.fill("#search-input", "")
+    page.wait_for_selector(".search-result", state="detached", timeout=5000)
+    page.wait_for_selector(".file-item.folder", state="visible", timeout=5000)
+    assert page.locator(".search-result").count() == 0, "results are still on screen"
+    print("✓ clearing the search brings the file tree back")
 
     # --- 1b. Informational statuses must clear themselves. Without this the last
     # message ("Ready", "Moved: ...", "Saved ✓") stays on screen until a reload.

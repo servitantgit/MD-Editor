@@ -12,6 +12,8 @@
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
   <!-- Markdown -> HTML -->
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <!-- Full-text search (UMD build -> window.MiniSearch; there is no bundler) -->
+  <script src="https://cdn.jsdelivr.net/npm/minisearch@7.2.0/dist/umd/index.js"></script>
   <!-- PDF export -->
   <script src="https://cdn.jsdelivr.net/npm/html2pdf.js@0.10.1/dist/html2pdf.bundle.min.js"></script>
 
@@ -116,10 +118,18 @@
           <button class="secondary" id="btn-new-file" style="padding:2px 8px;font-size:12px" title="Create a .md file inside the folder selected in the tree">+ file</button>
         </div>
       </div>
+      <div class="sidebar-search">
+        <input id="search-input" type="text" placeholder="Search in all notes…" autocomplete="off" spellcheck="false" />
+        <div class="search-status">
+          <span id="search-status"></span>
+          <button class="secondary" id="btn-reindex" title="Rebuild the search index from scratch">↻</button>
+        </div>
+      </div>
       <div class="folder-dropzone" id="folder-dropzone">
         <div id="folder-dropzone-overlay" class="hidden">Drop a folder here to upload</div>
       </div>
       <div class="file-tree" id="file-tree"></div>
+      <div class="search-results hidden" id="search-results"></div>
     </div>
 
     <div class="editor-area">

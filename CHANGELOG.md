@@ -8,7 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- **Project info on the homepage** — the start screen is now a landing card: what the app is ("Browser-based Markdown editor for any GitHub repo"), a feature list (OAuth login without manual tokens, full file/folder CRUD with automatic link rewriting on move, inline image previews via the GitHub API, PDF export, no local clone / no build step) and a link to the repository + author (`index.html`, `css/app.css`)
+- **Full-text search over every `.md` file in the repo** — a search box in the sidebar header (`Ctrl`/`Cmd+K` focuses it from anywhere). Results replace the file tree as you type, each row showing the file path plus a one-line snippet with the matched term highlighted; clicking one opens the note like a normal tree click. Clearing the input brings the tree back exactly as it was (`index.html`, `css/app.css`, `js/search-ui.js`)
+  - **Indexed locally, no new backend** — the index is built in the browser from the existing GitHub API reads and persisted in IndexedDB (`md-editor-search`, one record per `${owner}/${repo}@${branch}`, 30-day TTL). Signing back into the same repo reuses it, so only changed files are refetched; `↻` next to the status line forces a full reindex (`js/search-index.js`, `js/search-store.js`, `js/search-sync.js`)
+  - Runs entirely in the background after the tree loads — neither the tree nor the editor ever waits for it, and the status line shows `Indexing… 47/342` while it works
+  - Degrades to an in-memory index and says *"Search is session-only (storage unavailable)"* when IndexedDB is unavailable (private window / Safari ITP) or the origin quota is exhausted — search keeps working, only persistence is lost
+- **New dependency: [`minisearch`](https://github.com/lucaong/minisearch) ^7.2.0** (MIT, ~20KB, zero dependencies), loaded from jsdelivr as a `<script>` tag like `marked`/`html2pdf.js` — still no bundler. `fake-indexeddb` was added as a devDependency for the IndexedDB tests
+- Project info on the homepage — the start screen is now a landing card: what the app is ("Browser-based Markdown editor for any GitHub repo"), a feature list (OAuth login without manual tokens, full file/folder CRUD with automatic link rewriting on move, inline image previews via the GitHub API, PDF export, no local clone / no build step) and a link to the repository + author (`index.html`, `css/app.css`)
 - A GitHub icon link to the repository in the app header, next to "Sign out"
 
 ### Added

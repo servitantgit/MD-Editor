@@ -14,6 +14,9 @@ import { moveFile, renameFile } from './file-mover.js';
 import { createFolder, renameFolder, deleteFolder, getFolders, isFolderEmpty } from './folder-manager.js';
 import { basenameOf, dirnameOf } from './paths.js';
 import { looksLikeGitHubUrl, parseGitHubOwnerRepo } from './github-repo-url.js';
+import { SearchStore } from './search-store.js';
+import { SearchSync } from './search-sync.js';
+import { createSearchUI, formatAge } from './search-ui.js';
 
 const els = {
   loginScreen: document.getElementById('login-screen'),
@@ -29,6 +32,10 @@ const els = {
   btnLogout: document.getElementById('btn-logout'),
 
   fileTreeEl: document.getElementById('file-tree'),
+  searchInput: document.getElementById('search-input'),
+  searchStatus: document.getElementById('search-status'),
+  searchResults: document.getElementById('search-results'),
+  btnReindex: document.getElementById('btn-reindex'),
   folderDropzone: document.getElementById('folder-dropzone'),
   folderDropOverlay: document.getElementById('folder-dropzone-overlay'),
   btnNewFolder: document.getElementById('btn-new-folder'),
@@ -52,11 +59,18 @@ const state = {
   currentPath: null,
   currentSha: null,
   allFiles: [], // [{path, sha}]
+  // False until the first getTree() succeeds. Distinguishes "not loaded yet"
+  // (skip the sync) from "loaded and genuinely empty" (must still sync).
+  treeLoaded: false,
 };
 
 let imageResolver = null;
 let fileTree = null;
 let editorHandle = null;
+let searchSync = null;
+let searchUI = null;
+// Set while a background reindex is running, so a second one is not started.
+let syncing = false;
 
 // ====================== LOGIN ======================
 init();
@@ -222,6 +236,14 @@ function setSaveStatus(msg, isError) {
 
 // ====================== APP SHELL ======================
 function showApp(owner, repo) {
+  // A different repo means a different file list. Reset it here, not only on
+  // logout, so a re-login cannot hand the new session the previous repo's tree
+  // (which would make runSearchSync diff against the wrong paths).
+  state.allFiles = [];
+  state.treeLoaded = false;
+  state.currentPath = null;
+  state.currentSha = null;
+
   // Defensive: createEditor() owns a ResizeObserver, a paste handler and a
   // CodeMirror 'change' handler, and re-wrapping an already-wrapped textarea
   // stacks a second editor. Tear the previous one down before building again.
@@ -229,6 +251,18 @@ function showApp(owner, repo) {
     editorHandle.destroy();
     editorHandle = null;
   }
+  // Same reason: an in-flight sync holds a GitHubClient and an index belonging to
+  // the PREVIOUS session. Without this, a re-login would leave the old indexer
+  // fetching and writing into the new one — two indexers, one store.
+  if (searchSync) {
+    searchSync.destroy();
+    searchSync = null;
+  }
+  if (searchUI) {
+    searchUI.destroy();
+    searchUI = null;
+  }
+  syncing = false;
   if (fileTree) fileTree = null;
 
   els.loginScreen.classList.add('hidden');
@@ -301,6 +335,103 @@ function showApp(owner, repo) {
     onStatus: setSaveStatus,
     onUploaded: () => loadTree(),
   });
+
+  setupSearch(owner, repo);
+}
+
+/**
+ * Wires the search input and starts the background index sync.
+ *
+ * Everything here is deliberately AFTER the editor is built and NOT awaited:
+ * the tree and the editor must be usable immediately, and on a returning login
+ * the hydrated index already answers queries from memory.
+ */
+function setupSearch(owner, repo) {
+  if (typeof window.MiniSearch !== 'function') {
+    // The CDN <script> failed to load. Search is the only feature that can be
+    // missing like this, so say so instead of failing on a bare type error.
+    els.searchStatus.textContent = 'Search unavailable (library failed to load)';
+    els.searchStatus.classList.add('degraded');
+    return;
+  }
+
+  const store = new SearchStore({
+    onDegrade: () => setSearchStatus(null, true),
+  });
+
+  searchSync = new SearchSync({
+    client: state.client,
+    store,
+    owner,
+    repo,
+    branch: state.branch,
+    MiniSearchCtor: window.MiniSearch,
+    onProgress: (done, total) => {
+      els.searchStatus.textContent = `Indexing… ${done}/${total}`;
+      els.searchStatus.classList.remove('degraded');
+    },
+    onDone: ({ persistent }) => {
+      setSearchStatus(null, !persistent);
+      // The index may have just gained the file the results are showing.
+      if (searchUI && searchUI.isActive()) searchUI.renderResults(els.searchInput.value);
+    },
+  });
+
+  searchUI = createSearchUI({
+    inputEl: els.searchInput,
+    statusEl: els.searchStatus,
+    reindexBtn: els.btnReindex,
+    treeEl: els.fileTreeEl,
+    resultsEl: els.searchResults,
+    getSync: () => searchSync,
+    onOpenFile: openFile,
+    onReindex: () => runSearchSync(state.allFiles, { force: true }),
+  });
+
+  // Hydrate from IndexedDB first (a returning login can search straight away),
+  // then sync whatever the tree says is new or changed.
+  searchSync
+    .hydrate()
+    .then(() => {
+      setSearchStatus(null, !store.persistent);
+      return runSearchSync(state.allFiles);
+    })
+    .catch((e) => {
+      els.searchStatus.textContent = `Search unavailable: ${e.message}`;
+      els.searchStatus.classList.add('degraded');
+    });
+}
+
+/**
+ * Background diff+fetch.
+ *
+ * Skips only while the tree has never been loaded. An EMPTY array is a real
+ * state — the user just deleted the last note — and it must still sync, or the
+ * index keeps returning files that no longer exist.
+ */
+async function runSearchSync(tree, { force = false } = {}) {
+  if (!searchSync || !tree || !state.treeLoaded) return;
+  if (syncing && !force) return;
+  syncing = true;
+  try {
+    await searchSync.run(tree, { force });
+  } catch (e) {
+    console.warn('search sync failed', e);
+  } finally {
+    syncing = false;
+  }
+}
+
+/** "Indexed 342 notes · last synced 12s ago", or the degraded banner. */
+function setSearchStatus(indexSize, degraded) {
+  if (!searchUI || !searchSync || !searchSync.index) return;
+  const count = indexSize == null ? searchSync.index.size : indexSize;
+  if (degraded) {
+    searchUI.setStatus('Search is session-only (storage unavailable)', true);
+    return;
+  }
+  const age = formatAge(Date.now() - searchSync.lastSyncedAt);
+  searchUI.setStatus(`Indexed ${count} note${count === 1 ? '' : 's'} · last synced ${age}`);
 }
 
 function insertMarkdownAtCursor(text) {
@@ -319,7 +450,12 @@ async function loadTree() {
   try {
     const files = await state.client.getTree(state.branch);
     state.allFiles = files;
+    state.treeLoaded = true;
     fileTree.setFiles(files);
+    // Every local write (save/delete/move/rename/create/upload) ends in a
+    // loadTree(), so this ONE hook covers them all. The diff makes it cheap:
+    // when nothing changed, the sync makes no request at all.
+    runSearchSync(files);
   } catch (e) {
     els.fileTreeEl.innerHTML = `<div class="tree-error">Error: ${escapeHtml(e.message)}</div>`;
   }

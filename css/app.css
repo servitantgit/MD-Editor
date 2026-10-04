@@ -115,6 +115,87 @@ button.secondary:hover { background: #21262d; }
   background: #1f6feb22;
 }
 
+/* ===== Search ===== */
+.sidebar-search {
+  padding: 8px 12px 6px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.sidebar-search input {
+  width: 100%;
+  padding: 5px 8px;
+  font-size: 13px;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-sizing: border-box;
+}
+.sidebar-search input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.search-status {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  margin-top: 4px;
+  min-height: 18px;
+  font-size: 11px;
+  color: var(--muted);
+}
+.search-status span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.search-status span.degraded { color: #d29922; }
+.search-status button {
+  padding: 0 6px;
+  font-size: 12px;
+  line-height: 16px;
+  flex-shrink: 0;
+}
+
+/* Shares the flex slot with .file-tree: exactly one of the two is visible. */
+.search-results {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 4px 0;
+  font-size: 13px;
+}
+.search-result {
+  padding: 6px 12px;
+  cursor: pointer;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  margin: 0 4px;
+}
+.search-result:hover { background: #21262d; }
+.search-result-path {
+  font-size: 11px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.search-result-snippet {
+  margin-top: 2px;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.search-result-snippet mark {
+  background: #d2992266;
+  color: #f0d68a;
+  border-radius: 2px;
+}
+.search-empty { padding: 12px; color: var(--muted); }
+
+/* ===== File tree ===== */
 .file-tree {
   flex: 1;
   min-height: 0;

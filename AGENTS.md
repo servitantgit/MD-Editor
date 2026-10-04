@@ -407,6 +407,77 @@ by writing the four `sessionStorage` keys and reloading — so it exercises the
 `init()` race is **not** covered by any test, and per the OAuth notes above it
 cannot be verified locally without `wrangler pages dev` and a test OAuth app.
 
+## Search index — IndexedDB quirks and the no-Cache-Control rule (again)
+
+Added for the client-side full-text search (MiniSearch + IndexedDB). The four
+modules are `js/search-index.js` (pure logic), `js/search-store.js` (IndexedDB),
+`js/search-sync.js` (orchestration), `js/search-ui.js` (DOM).
+
+**No `Cache-Control` header, still.** The sync fetches hundreds of files in a
+loop, which makes "just add `no-cache` to be sure" very tempting. Don't — see the
+CORS safelist section above. `getTree()` busts GitHub's cache with a unique
+query parameter, which is the only mechanism allowed here.
+
+**Degraded modes are deliberate — do not "fix" them by deleting the fallback.**
+Both are hit in the wild and neither is reachable from `e2e_smoke_test.py`:
+
+- **No IndexedDB** (private window, Safari ITP, storage disabled).
+  `indexedDB.open` can throw synchronously or never resolve. `SearchStore.open()`
+  returns `false`, flips `degraded`, and every read/write silently falls through
+  to an in-memory map. Search keeps working for the session and the status line
+  says *"Search is session-only (storage unavailable)"*.
+- **`QuotaExceededError` on `put`.** The index is re-serialized on every batch,
+  so a big repo can exceed the origin quota. `put()` drops the oldest record of a
+  **different** repo and retries **once**; a second failure degrades to memory
+  with the same banner. `evictOldest(keepKey)` must never delete `keepKey` —
+  that record is the one being written, and losing it loses the whole index.
+
+`degraded` is **sticky**: `open()` returns `false` immediately once set. Without
+that, the next call re-opens the database (opening still works — it is the
+*writes* that fail), the store resumes reading a database with nothing in it,
+and the session appears to lose the index it just built. This was a real bug
+caught by `test/search-store.test.js`.
+
+**Records outlive the session on purpose.** The index lives in IndexedDB; the
+token lives in `sessionStorage`; logout clears only the latter. Signing back into
+the same repo reuses the index instead of refetching the repo. Do **not** add
+"clear the index on logout". Records carry a 30-day TTL on `savedAt`, swept in
+`open()`, so a repository deleted on GitHub does not linger forever.
+
+**The body is never in the index.** `storeFields: ['path', 'title']` only —
+serializing bodies would balloon the blob. Snippets come from a 200-entry LRU
+cache of raw bodies, filled as the sync fetches them, with a lazy per-result
+fetch for a cache miss. `buildSnippet()` HTML-escapes everything except its own
+`<mark>`; a note body is untrusted and that string goes to `innerHTML`.
+
+**`discard()`, not `remove()`.** MiniSearch's `remove()` demands the *full*
+original document, which we cannot reconstruct because we do not store the body.
+`discard(id)` is documented as having "the same visible effect", and MiniSearch's
+own auto-vacuuming cleans up afterwards. Calling `remove()` with a rebuilt body
+corrupts the index.
+
+**MiniSearch 7 API changes** (`getDocument` → `getStoredFields`, deserializing
+via the static `MiniSearch.loadJSON(json, options)`). The options object must
+match the one used at construction, so `createSearcherOptions()` returns a fresh
+object per call instead of a shared constant.
+
+**An empty tree is a real diff, not a no-op.** `runSearchSync()` skips only
+while `state.treeLoaded` is false; deleting the *last* note leaves `allFiles`
+empty and must still sync, or the deleted file stays in the results forever
+(found in a real browser, pinned by the "emptied repository" test). For the same
+reason the "nothing changed" branch of `SearchSync.run()` still stamps
+`lastSyncedAt` — otherwise the status reads "last synced 20731d ago".
+
+**Teardown**: `showApp()` destroys the in-flight sync alongside the editor
+handle, for the same reason — a re-login must not leave the old indexer fetching
+and writing into the new session's store.
+
+**What local checks cannot see:** `e2e_smoke_test.py` mocks `api.github.com`,
+so rate limits (403), IndexedDB quota and private-window behaviour are all
+invisible to it — they are covered by `test/search-store.test.js` instead. The e2e
+test seeds `sessionStorage` and reloads, so it is a cold start: never assert
+that the index survives a reload there.
+
 ## General rule before considering a task done
 
 Here CI broke twice in a row right after merge (first `npm ci`, then a
