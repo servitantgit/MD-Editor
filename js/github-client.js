@@ -43,12 +43,16 @@ export class GitHubClient {
   /** Full recursive file tree of the repository on the given branch. */
   async getTree(branch) {
     const ref = branch || 'HEAD';
-    // GitHub caches GET responses (git/trees included), so without this a folder or
-    // file created a moment ago is missing from the tree and the user has to reload
-    // the page to see it. no-cache forces a fresh request.
+    // GitHub caches GET responses (git/trees included), so right after a write the tree
+    // can still be the pre-write one and a new folder/file only shows up after a reload.
+    //
+    // The bust is a query parameter, NOT a `Cache-Control: no-cache` header: that header
+    // is not CORS-safelisted, so it turns the request into a preflight that GitHub rejects
+    // ("Request header field cache-control is not allowed by Access-Control-Allow-Headers").
+    // A unique URL is a different cache key and needs no preflight at all.
+    const bust = `cb=${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const res = await this.request(
-      `/repos/${this.owner}/${this.repo}/git/trees/${encodePathForApi(ref)}?recursive=1`,
-      { headers: { 'Cache-Control': 'no-cache', Pragma: 'no-cache' } }
+      `/repos/${this.owner}/${this.repo}/git/trees/${encodePathForApi(ref)}?recursive=1&${bust}`
     );
     if (!res.ok) throw await this._error(res, '');
     const data = await res.json();
