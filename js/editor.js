@@ -105,7 +105,14 @@ export function createEditor(textareaEl, deps) {
   // Live Preview right in the text field: the Markdown image link
   // stays in the document but is visually replaced in CodeMirror by the real
   // picture. This doesn't change the text that will be saved to GitHub.
-  const onChange = () => scheduleInlineImages();
+  //
+  // `deps.onChange` is the autosave hook. It runs AFTER the inline-image render
+  // is scheduled, and it does nothing but arm its own timers, so the two
+  // concerns stay independent — neither one delays the other.
+  const onChange = () => {
+    scheduleInlineImages();
+    if (deps.onChange) deps.onChange(easyMDE.codemirror.getValue());
+  };
   easyMDE.codemirror.on('change', onChange);
 
   const resizeObserver = new ResizeObserver(() => refreshLayout());

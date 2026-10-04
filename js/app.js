@@ -17,6 +17,8 @@ import { looksLikeGitHubUrl, parseGitHubOwnerRepo } from './github-repo-url.js';
 import { SearchStore } from './search-store.js';
 import { SearchSync } from './search-sync.js';
 import { createSearchUI, formatAge } from './search-ui.js';
+import { DraftStore } from './draft-store.js';
+import { Autosave } from './autosave.js';
 
 const els = {
   loginScreen: document.getElementById('login-screen'),
@@ -46,6 +48,13 @@ const els = {
   btnExportPdf: document.getElementById('btn-export-pdf'),
   btnDelete: document.getElementById('btn-delete'),
   saveStatus: document.getElementById('save-status'),
+  autosaveStatus: document.getElementById('autosave-status'),
+  draftBanner: document.getElementById('draft-banner'),
+  draftBannerText: document.getElementById('draft-banner-text'),
+  draftKeep: document.getElementById('draft-keep'),
+  draftDiscard: document.getElementById('draft-discard'),
+  draftReload: document.getElementById('draft-reload'),
+  draftOverwrite: document.getElementById('draft-overwrite'),
 
   editorContainer: document.getElementById('editor-container'),
   editorTextarea: document.getElementById('editor'),
@@ -69,6 +78,17 @@ let fileTree = null;
 let editorHandle = null;
 let searchSync = null;
 let searchUI = null;
+let draftStore = null;
+let autosave = null;
+// Set while the editor is being loaded programmatically. EasyMDE fires
+// CodeMirror's 'change' SYNCHRONOUSLY from .value(), so without this a plain
+// file open would look exactly like the user typing: autosave would arm its
+// timers and the freshly loaded file would immediately claim "● Unsaved".
+let suppressEditorChange = false;
+// The draft text behind a visible recovery banner. It is kept here because
+// "Keep local" is a click that happens long after onOpen() returned — autosave
+// only knows there IS a draft, the text to load lives with the banner.
+let pendingDraft = null;
 // Set while a background reindex is running, so a second one is not started.
 let syncing = false;
 
@@ -95,6 +115,9 @@ async function init() {
 
   els.btnLogin.onclick = onLoginClick;
   els.btnLogout.onclick = () => {
+    // Defence in depth: logout reloads the page, which tears down every timer
+    // anyway, but an autosave aimed at the old token should not outlive it.
+    if (autosave) autosave.destroy();
     sessionStorage.clear();
     location.reload();
   };
@@ -106,6 +129,21 @@ async function init() {
   els.btnSave.onclick = onSaveFile;
   els.btnExportPdf.onclick = onExportPdf;
   els.btnDelete.onclick = onDeleteFile;
+
+  // Switching tabs is the natural checkpoint Google Docs uses too: commit a
+  // dirty draft immediately instead of making the user wait out the 10s window.
+  // beforeunload is NOT the place for this — a fetch started there is cancelled
+  // by the browser, so all it can do is ask the user to confirm.
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden' && autosave) autosave.onVisibilityChange(true);
+  });
+  window.addEventListener('beforeunload', (e) => {
+    if (!autosave || !autosave.hasUnsavedDraft()) return;
+    // The draft is already in IndexedDB by now; this is only the courtesy
+    // prompt users expect. Nothing is fetched here — it would not survive.
+    e.preventDefault();
+    e.returnValue = '';
+  });
 }
 
 function readSession() {
@@ -234,6 +272,113 @@ function setSaveStatus(msg, isError) {
   }
 }
 
+// ====================== AUTOSAVE ======================
+// The label next to Save. Deliberately NOT setSaveStatus(): that one wipes
+// itself after 4s for every informational message ("Moved: ..."), which is
+// right for a one-off event and wrong for the live condition of the open file.
+// Only "✓ Saved to GitHub" fades here, and only because autosave says so
+// (`fade: true`) — see the STATUS table in js/autosave.js.
+let autosaveClearTimer = null;
+
+function setAutosaveStatus(status) {
+  clearTimeout(autosaveClearTimer);
+  if (!status) {
+    els.autosaveStatus.textContent = '';
+    els.autosaveStatus.className = 'autosave-status';
+    return;
+  }
+  els.autosaveStatus.textContent = status.text;
+  els.autosaveStatus.className = `autosave-status ${status.variant}`;
+  if (status.fade) {
+    autosaveClearTimer = setTimeout(() => {
+      // Guard: a newer status may have arrived in the meantime — never wipe it.
+      if (els.autosaveStatus.textContent !== status.text) return;
+      els.autosaveStatus.textContent = '';
+      els.autosaveStatus.className = 'autosave-status';
+    }, STATUS_CLEAR_MS);
+  }
+}
+
+/** One banner, two questions. The user always picks a side — never a merge. */
+function showDraftBanner(text, buttons) {
+  els.draftBannerText.textContent = text;
+  els.draftKeep.classList.toggle('hidden', buttons !== 'draft');
+  els.draftDiscard.classList.toggle('hidden', buttons !== 'draft');
+  els.draftReload.classList.toggle('hidden', buttons !== 'conflict');
+  els.draftOverwrite.classList.toggle('hidden', buttons !== 'conflict');
+  els.draftBanner.classList.remove('hidden');
+}
+
+function hideDraftBanner() {
+  els.draftBanner.classList.add('hidden');
+  pendingDraft = null;
+}
+
+/**
+ * Builds the session's Autosave over the shared DraftStore.
+ *
+ * Called from showApp() and again from openFile() whenever the previous
+ * instance was destroyed (closeCurrentFile() does that on delete), because a
+ * destroyed Autosave deliberately ignores everything afterwards.
+ */
+function createAutosave(owner, repo) {
+  if (draftStore) draftStore.close();
+  draftStore = new DraftStore({
+    onDegrade: () => {
+      // Crash recovery is GONE from now on, and the user should know that
+      // rather than find out by losing work.
+      setSaveStatus('Local drafts unavailable (browser storage is disabled) — closing the tab will lose unsaved text', true);
+    },
+  });
+  draftStore.open().catch(() => { /* open() never rejects; it degrades */ });
+
+  return new Autosave({
+    client: state.client,
+    store: draftStore,
+    owner,
+    repo,
+    branch: state.branch,
+    getText: () => (editorHandle ? editorHandle.easyMDE.value() : ''),
+    onStatus: setAutosaveStatus,
+    onRemoteCommit: (path, sha) => {
+      if (sha && state.currentPath === path) state.currentSha = sha;
+    },
+    onConflict: () => {
+      showDraftBanner(
+        'This file changed on GitHub while you were editing it. Reload to take the GitHub version, or overwrite it with yours.',
+        'conflict'
+      );
+    },
+    onReloadRemote: (path, text, sha) => {
+      if (state.currentPath !== path) return;
+      state.currentSha = sha;
+      setEditorValue(text);
+      hideDraftBanner();
+      setSaveStatus(`Reloaded from GitHub: ${path}`, false);
+    },
+  });
+}
+
+/** The instance to use right now, rebuilt after a closeCurrentFile(). */
+function ensureAutosave() {
+  if (!autosave || autosave.destroyed) {
+    autosave = createAutosave(state.client.owner, state.client.repo);
+  }
+  return autosave;
+}
+
+/** Loads text into CodeMirror without it looking like a user edit. */
+function setEditorValue(text) {
+  suppressEditorChange = true;
+  try {
+    editorHandle.easyMDE.value(text);
+  } finally {
+    suppressEditorChange = false;
+  }
+  editorHandle.refreshLayout();
+  editorHandle.refreshInlineImages();
+}
+
 // ====================== APP SHELL ======================
 function showApp(owner, repo) {
   // A different repo means a different file list. Reset it here, not only on
@@ -261,6 +406,12 @@ function showApp(owner, repo) {
   if (searchUI) {
     searchUI.destroy();
     searchUI = null;
+  }
+  // Same reason as the editor handle: a live Autosave owns timers and an
+  // in-flight PUT aimed at the PREVIOUS session's repository.
+  if (autosave) {
+    autosave.destroy();
+    autosave = null;
   }
   syncing = false;
   if (fileTree) fileTree = null;
@@ -290,6 +441,13 @@ function showApp(owner, repo) {
     imageResolver,
     getCurrentPath: () => state.currentPath,
     onImageUploadRequest: () => els.imageFileInput.click(),
+    // Every keystroke arms the autosave timers. `suppressEditorChange` is what
+    // keeps a programmatic .value() (opening a file, reloading after a
+    // conflict) from being mistaken for typing.
+    onChange: (text) => {
+      if (suppressEditorChange) return;
+      ensureAutosave().onChange(text);
+    },
     onImagePaste: (file) => uploadImage(file, {
       client: state.client,
       imageResolver,
@@ -336,7 +494,29 @@ function showApp(owner, repo) {
     onUploaded: () => loadTree(),
   });
 
+  setupAutosaveUI(owner, repo);
   setupSearch(owner, repo);
+}
+
+/** Draft banner buttons + the two "the user is leaving" hooks. */
+function setupAutosaveUI(owner, repo) {
+  autosave = createAutosave(owner, repo);
+
+  els.draftKeep.onclick = () => {
+    const path = state.currentPath;
+    const text = pendingDraft;
+    hideDraftBanner();
+    if (text == null) return;
+    setEditorValue(text);
+    autosave.resumeDraft(path, text);
+  };
+  els.draftDiscard.onclick = async () => {
+    await autosave.discardDraft(state.currentPath);
+    hideDraftBanner();
+    setSaveStatus('Local draft discarded', false);
+  };
+  els.draftReload.onclick = () => autosave.resolveConflict('reload');
+  els.draftOverwrite.onclick = () => autosave.resolveConflict('overwrite');
 }
 
 /**
@@ -456,9 +636,27 @@ async function loadTree() {
     // loadTree(), so this ONE hook covers them all. The diff makes it cheap:
     // when nothing changed, the sync makes no request at all.
     runSearchSync(files);
+    sweepDrafts(files);
   } catch (e) {
     els.fileTreeEl.innerHTML = `<div class="tree-error">Error: ${escapeHtml(e.message)}</div>`;
   }
+}
+
+/**
+ * Drops drafts nobody can use any more: older than 30 days, or for a path that
+ * no longer exists in this repository. Scoped to the CURRENT repo/branch on
+ * purpose — signing into another repository must never delete the drafts of the
+ * one you were working in (you may switch back).
+ */
+function sweepDrafts(files) {
+  if (!draftStore) return;
+  draftStore
+    .sweepStaleDrafts(files.map((f) => f.path), Date.now(), {
+      owner: state.client.owner,
+      repo: state.client.repo,
+      branch: state.branch,
+    })
+    .catch((e) => console.warn('draft sweep failed', e));
 }
 
 function previewImageFile(path) {
@@ -529,45 +727,63 @@ async function onMoveFile(oldPath, targetFolder) {
 
 // ====================== OPEN / SAVE ======================
 async function openFile(path) {
+  // Switching files: the local draft is written immediately and the commit is
+  // kicked off in the background, so the next file opens instantly.
+  const switching = state.currentPath && state.currentPath !== path;
+  if (switching && autosave) await autosave.flushCurrentFile();
+
   fileTree.setActive(path);
   els.currentFileLabel.textContent = path;
   els.btnSave.disabled = true;
   els.btnExportPdf.disabled = true;
   els.btnDelete.disabled = true;
+  hideDraftBanner();
+  setAutosaveStatus(null);
   setSaveStatus('Loading...', false);
 
   try {
     const { b64, sha } = await state.client.getFileB64(path);
+    let remoteText;
+    try {
+      remoteText = b64ToUtf8(b64);
+    } catch (_) {
+      // b64ToUtf8 THROWS on content that is not valid UTF-8, by design — a
+      // binary blob wearing a .md extension. Refuse it instead of opening
+      // replacement characters the user might then commit back to GitHub.
+      setSaveStatus(`Cannot open ${path}: the file is not valid UTF-8`, true);
+      return;
+    }
+
     state.currentPath = path;
     state.currentSha = sha;
-    editorHandle.easyMDE.value(b64ToUtf8(b64));
-    editorHandle.refreshLayout();
-    editorHandle.refreshInlineImages();
+    const opened = await ensureAutosave().onOpen(path, remoteText, sha);
+    if (state.currentPath !== path) return; // another open won the race
+    setEditorValue(opened.text);
 
     els.btnSave.disabled = false;
     els.btnExportPdf.disabled = false;
     els.btnDelete.disabled = false;
     setSaveStatus('Ready', false);
+
+    if (opened.hasDraft) {
+      // No automatic merge — the user picks which version is the real one.
+      pendingDraft = opened.draftText;
+      showDraftBanner(
+        `You have unsaved local changes from ${formatAge(Date.now() - opened.draftSavedAt)}.`,
+        'draft'
+      );
+    }
   } catch (e) {
     setSaveStatus('Error: ' + e.message, true);
   }
 }
 
 async function onSaveFile() {
+  // Explicit Save: commit right now, ignore the timers. Same escape hatch as
+  // before for "I know I want this on GitHub now" — it is simply no longer the
+  // ONLY way to save.
   if (!state.currentPath) return;
-  const content = editorHandle.easyMDE.value();
-
-  els.btnSave.disabled = true;
-  setSaveStatus('Saving...', false);
-  try {
-    const data = await state.client.putFile(state.currentPath, utf8ToB64(content), `Update ${state.currentPath}`, state.currentSha);
-    state.currentSha = data.content.sha;
-    setSaveStatus('Saved ✓', false);
-  } catch (e) {
-    setSaveStatus('Error: ' + e.message, true);
-  } finally {
-    els.btnSave.disabled = false;
-  }
+  await ensureAutosave().saveNow();
 }
 
 // Deleting the active file. The GitHub API requires the sha of that same blob, so
@@ -601,13 +817,20 @@ async function onDeleteFile() {
 // After deletion (or when no file is open) the editor must not keep
 // the deleted file's contents: clear the text, drop inline images, lock actions.
 function closeCurrentFile() {
+  // Any draft of this file is written and committed before we let go of it...
+  if (autosave && state.currentPath) autosave.flushCurrentFile();
+  // ...and the instance is destroyed, which clears every timer it owns. This is
+  // the path that actually matters (unlike logout, where location.reload()
+  // tears the whole realm down anyway). openFile() builds a fresh one through
+  // ensureAutosave(), because a destroyed Autosave ignores everything.
+  if (autosave) autosave.destroy();
+  hideDraftBanner();
+  setAutosaveStatus(null);
   state.currentPath = null;
   state.currentSha = null;
   els.currentFileLabel.textContent = 'No file selected';
   fileTree.clearActive();
-  editorHandle.easyMDE.value('');
-  editorHandle.refreshLayout();
-  editorHandle.refreshInlineImages();
+  setEditorValue('');
   els.btnSave.disabled = true;
   els.btnExportPdf.disabled = true;
   els.btnDelete.disabled = true;

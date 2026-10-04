@@ -478,6 +478,121 @@ invisible to it — they are covered by `test/search-store.test.js` instead. The
 test seeds `sessionStorage` and reloads, so it is a cold start: never assert
 that the index survives a reload there.
 
+### Autosave — why `beforeunload` is a trap and `visibilitychange` is not, and why the 10s idle timer resets on onChange but the 5min max does not
+
+Two independent layers, `js/draft-store.js` (IndexedDB, instant, crash recovery)
+and `js/autosave.js` (GitHub, debounced, one commit per window). Read this before
+touching either timer: collapsing them into one is the tempting mistake.
+
+**The timers — three, never two:**
+
+| Timer | Fires at | Restarted by | Why |
+|---|---|---|---|
+| local-write debounce | 400ms after the last keystroke | every `onChange` | writing IndexedDB per keystroke causes jank on long docs; 400ms ≈ "finished the current word" |
+| remote idle | 10s after the last keystroke | every `onChange` | "idle" is defined as no keystrokes. Writing the DRAFT is not user activity, so it never restarts this |
+| remote max | 5min after the file first became dirty | **nothing** | a user who types continuously for 5 minutes must still get a commit. If reset by `onChange` it would never fire |
+
+The idle timer resets because a gap in typing is exactly what it measures. The max
+timer does not, because it measures *time since the file became dirty*, not idleness.
+Resetting it from `onChange` is the single most likely regression here — and it is
+silent: everything still works for anyone who pauses while typing.
+
+**`beforeunload` is a trap; `visibilitychange` is the right trigger.** You cannot
+await a fetch inside `beforeunload` — modern browsers cancel the request as part of
+teardown, so any "commit on close" written there looks fine and loses every write.
+The 400ms draft write is what actually saves the user; `beforeunload` only earns the
+browser's native "changes may not be saved" prompt (`app.js` checks
+`autosave.hasUnsavedDraft()`, and nothing else — no network, ever, in that handler).
+
+`visibilitychange` → hidden is where a checkpoint belongs: the tab is going away,
+nothing is racing teardown, and `onVisibilityChange(true)` pushes a dirty draft
+immediately instead of making the user wait out the 10s. This is how Google Docs
+behaves. It only fires when `hasUnsavedDraft()`.
+
+**The state machine** (pinned in `test/autosave.test.js` on `mock.timers`):
+
+```
+clean         --onChange-->               dirtyLocal   ● Unsaved
+                                          (write draft after 400ms debounce,
+                                           arm 10s idle timer,
+                                           arm 5min max timer if not already)
+dirtyLocal    --400ms draft write-->      dirtyIdle    ○ Draft saved locally
+dirtyIdle     --onChange-->               dirtyLocal   (restart 10s idle)
+dirtyLocal    --onChange-->               dirtyLocal   (restart 10s idle)
+dirtyLocal    --10s idle elapsed-->       pushing
+dirtyLocal    --5min max elapsed-->       pushing      (even if still typing)
+dirtyLocal    --saveNow()-->              pushing      (immediate)
+dirtyLocal    --flushCurrentFile()-->     pushing      (in background; new file loads)
+pushing       --putFile resolves-->       clean        (clear draft, ✓ Saved, update baseSha)
+pushing       --putFile rejects
+               with 409 sha conflict-->   error        (⚠ reload / overwrite)
+pushing       --putFile rejects other-->  dirtyLocal   (⚠ Save failed, retry on next idle)
+error (409)   --user picks reload-->      clean        (load fresh, discard draft)
+error (409)   --user picks overwrite-->   pushing      (putFile with the fresh sha)
+```
+
+The two rules that keep it honest: `saveNow()` cancels both timers and leaves them
+cancelled (the next keystroke arms fresh ones), and `flushCurrentFile()` resolves
+after the DRAFT write, never after the push — switching files must feel instant.
+
+**Background failures are stored per-path.** A flush whose push fails after the user
+moved on must not paint ⚠ on the file they just opened. `_push()` deliberately does
+NOT bail out when `this.path` changes — the task snapshot (path/text/sha) is already
+captured and still exactly what the user asked to commit, so dropping it there would
+silently lose a commit — but only `_afterCommit`/`_afterFailure` touch the UI, and
+both compare against `this.path`. The error is stored in `_backgroundErrors` and
+surfaces only when that path is reopened (`onOpen` drains it).
+
+**`destroy()` is the third "leaving" path.** `closeCurrentFile()` (i.e. deleting the
+open file) calls `flushCurrentFile()` and then `destroy()`, because a live instance
+would keep timers aimed at a file that no longer exists. **A destroyed `Autosave`
+ignores everything**, so `openFile()` goes through `ensureAutosave()`, which rebuilds
+it over the same `DraftStore` (`open()` is idempotent, the db handle is still open).
+Log out destroys it too, but that is defence in depth only — `location.reload()`
+already tears the whole realm down. Same shape as the editor handle: one owner, one
+teardown, `showApp()` rebuilds.
+
+**Programmatic `.value()` must be suppressed.** EasyMDE fires CodeMirror's `change`
+*synchronously* from `.value()`, so opening a file would otherwise look exactly like
+typing ("● Unsaved" on a file the user never touched, timers armed). `app.js` wraps
+those loads in `setEditorValue()` with the `suppressEditorChange` flag, and the hook
+installed by `createEditor` checks it. The inline-image render still runs first in
+the same handler — autosave only *arms timers*, it never delays the preview.
+
+**The status label is a separate element.** `#autosave-status` next to Save is owned
+by autosave; `setSaveStatus()` is untouched and still handles moves/deletes/folder ops.
+Do not merge them: `setSaveStatus()` auto-clears after 4s, which is right for a
+one-off event and wrong for the live condition of the open file. Only
+`✓ Saved to GitHub` fades (`STATUS.saved.fade`); `● Unsaved`,
+`○ Draft saved locally` and `⟳ Saving to GitHub…` are persistent.
+
+**The draft store is keyed `${owner}/${repo}@${branch}:${path}`** in its own database
+`md-editor-drafts` — deliberately NOT `md-editor-search`. The search index is derived
+from committed GitHub state and can be rebuilt; a draft is the only copy of work that
+exists nowhere else. Two consequences: never index drafts (they would pollute search
+with half-written text), and never sweep other repositories on login — the
+`sweepStaleDrafts(knownPaths, now, scope)` call in `loadTree()` is scoped to the
+current repo/branch for exactly that reason, with the same 30-day TTL as the search
+sweep. Changing repos orphans the old drafts; the TTL reclaims them later. The
+generic open/degrade/quota logic lives in `js/idb-backend.js`; `search-store.js` still
+carries its own copy on purpose (the search modules were left read-only) — if those
+two are ever unified, `test/search-store.test.js` must stay green unchanged.
+
+**409 is routine, not an edge case.** With a 5-minute max timer, a user editing in
+two tabs hits it constantly. The FIRST 409 is silently retried once with a freshly
+read sha (copying `moveFile`'s one-shot pattern) because that is almost always "the
+other tab committed first"; only a SECOND 409 in a row opens the reload/overwrite
+banner. On the reload path, `b64ToUtf8` throwing on non-UTF-8 must be caught exactly
+like `moveToPath()` does — leave the bytes alone, keep the draft, change nothing.
+
+**What local checks cannot see:** `e2e_smoke_test.py` mocks `api.github.com`, so real
+409s, sha drift and quota errors are invisible to it — they belong in
+`test/autosave.test.js` / `test/draft-store.test.js`. The e2e covers what it *can*
+see: typing does not commit, exactly one idle commit arrives with the right message,
+and an explicit Save bypasses the timer. It never waits out the 5-minute max
+(five real minutes in CI flakes constantly) and never claims a reload survives a
+cold start.
+
 ## General rule before considering a task done
 
 Here CI broke twice in a row right after merge (first `npm ci`, then a

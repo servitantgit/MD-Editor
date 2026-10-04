@@ -312,6 +312,55 @@ button.secondary:hover { background: #21262d; }
   position: relative;
 }
 
+/* ===== Autosave: the label next to Save, and the draft/conflict banner =====
+   #save-status is the transient "Moved: ..." line and wipes itself after 4s.
+   #autosave-status describes the LIVE condition of the open file, so it must
+   not auto-clear: "● Unsaved" / "○ Draft saved locally" / "⟳ Saving…" stay put
+   until something replaces them, and only "✓ Saved to GitHub" fades. */
+.autosave-status {
+  font-size: 12px;
+  color: var(--muted);
+  margin-left: 2px;
+  white-space: nowrap;
+}
+.autosave-status.unsaved { color: #d29922; }
+.autosave-status.drafted { color: var(--muted); }
+.autosave-status.saving { color: var(--muted); }
+.autosave-status.saving::first-letter { display: inline-block; animation: autosave-spin 1s linear infinite; }
+.autosave-status.ok { color: #3fb950; }
+.autosave-status.err { color: #f85149; }
+
+@keyframes autosave-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.draft-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  background: #2d2205;
+  border-bottom: 1px solid #d29922;
+  color: var(--text);
+  font-size: 13px;
+  flex-shrink: 0;
+}
+.draft-banner span { margin-right: auto; }
+.draft-banner button {
+  background: transparent;
+  border: 1px solid #d29922;
+  color: var(--text);
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 500;
+}
+.draft-banner button:hover { background: #3d2f07; }
+.draft-banner .draft-keep { border-color: var(--accent); }
+.draft-banner .draft-keep:hover { background: #1b3a22; }
+.draft-banner button.hidden { display: none; }
+
 /* EasyMDE/CodeMirror: without min-height:0 and explicit flex here, CodeMirror sometimes "gets stuck"
    with the default height (~300px or 0) and looks like you can neither
    scroll nor edit long text. */

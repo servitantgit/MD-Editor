@@ -10,11 +10,16 @@ the real CDN.
 """
 import re
 import json
+import time
 import base64
 import pathlib
 from playwright.sync_api import sync_playwright
 
 BASE = pathlib.Path(__file__).parent
+
+# Every write the app sends to the contents API, with the DECODED markdown —
+# putFile() sends base64, so asserting on the raw body would only ever see noise.
+CONTENT_WRITES = []
 
 CDN_MOCKS = {
     "https://cdn.jsdelivr.net/npm/easymde/dist/easymde.min.css": BASE / "node_modules/easymde/dist/easymde.min.css",
@@ -69,6 +74,35 @@ FAKE_TREE = {
 
 def handle_github_api(route, request):
     url = request.url
+    # Writes first: the content GETs below match on URL alone, so a PUT would
+    # otherwise be answered with a file body and no `content.sha` for the app to
+    # remember. Autosave commits land here, which is what makes the "exactly one
+    # PUT, with this text in it" assertions below possible.
+    if "/contents/" in url and request.method in ("PUT", "DELETE"):
+        body = {}
+        try:
+            body = json.loads(request.post_data or "{}")
+        except ValueError:
+            pass
+        text = ""
+        if body.get("content"):
+            try:
+                text = base64.b64decode(body["content"]).decode("utf-8", "replace")
+            except Exception:
+                pass
+        CONTENT_WRITES.append({
+            "url": url,
+            "method": request.method,
+            "message": body.get("message"),
+            "sha": body.get("sha"),
+            "text": text,
+        })
+        if request.method == "PUT":
+            route.fulfill(status=200, content_type="application/json", body=json.dumps(
+                {"content": {"sha": f"sha-put-{len(CONTENT_WRITES)}"}, "commit": {"sha": "c"}}))
+        else:
+            route.fulfill(status=200, content_type="application/json", body=json.dumps({"commit": {"sha": "c"}}))
+        return
     if re.search(r"/repos/[^/]+/[^/]+$", url) and "/git/" not in url and "/contents/" not in url:
         route.fulfill(status=200, content_type="application/json", body=json.dumps({"default_branch": "main"}))
     elif "/git/trees/" in url:
@@ -233,16 +267,79 @@ with sync_playwright() as p:
     assert page.locator(".search-result").count() == 0, "results are still on screen"
     print("✓ clearing the search brings the file tree back")
 
-    # --- 1b. Informational statuses must clear themselves. Without this the last
-    # message ("Ready", "Moved: ...", "Saved ✓") stays on screen until a reload.
+    # --- 1b. Two status lines with two different rules. #save-status is the
+    # transient one and wipes itself after 4s; #autosave-status describes the
+    # live condition of the open file and only "✓ Saved to GitHub" fades.
+    # Save also becomes a no-op on a file nobody has touched — a commit with
+    # identical content is noise in the repository history.
+    CONTENT_WRITES.clear()
     page.click("#btn-save")
+    page.wait_for_timeout(1000)
+    assert not CONTENT_WRITES, \
+        f"Save committed a file that was never edited: {CONTENT_WRITES}"
+
+    page.click(".file-item:not(.folder)")
     page.wait_for_function(
-        "document.getElementById('save-status').textContent.startsWith('Saved')", timeout=5000
+        "document.getElementById('save-status').textContent === 'Ready'", timeout=5000
     )
     page.wait_for_function(
         "document.getElementById('save-status').textContent === ''", timeout=10000
     )
-    print("✓ status message clears itself")
+    print("✓ Save skips an untouched file; informational statuses still clear themselves")
+
+    # --- 8. Two-tier autosave. Typing must NOT commit; the 10s idle window
+    # must. (The 5-minute maximum is deliberately NOT tested here — real time
+    # 5 minutes in CI flakes constantly, and test/autosave.test.js covers it
+    # with a fake clock.)
+    def writes_with(marker):
+        return [w for w in CONTENT_WRITES if marker in w["text"]]
+
+    CONTENT_WRITES.clear()
+    page.click(".CodeMirror")
+    page.keyboard.type("AUTOSAVE_IDLE_MARKER")
+    page.wait_for_timeout(3000)
+    assert not writes_with("AUTOSAVE_IDLE_MARKER"), \
+        f"typing committed after 3s: {writes_with('AUTOSAVE_IDLE_MARKER')}"
+    assert not CONTENT_WRITES, f"nothing at all should have been committed yet: {CONTENT_WRITES}"
+    page.wait_for_function(
+        "document.getElementById('autosave-status').textContent.includes('Unsaved')"
+        " || document.getElementById('autosave-status').textContent.includes('Draft saved')",
+        timeout=3000,
+    )
+    print("✓ typing shows the unsaved label and commits nothing")
+
+    # Now let the editor go idle: 10s after the last keystroke it must commit,
+    # exactly once, and with the same message a manual save would use.
+    page.wait_for_timeout(11000)
+    idle_writes = writes_with("AUTOSAVE_IDLE_MARKER")
+    assert len(idle_writes) == 1, \
+        f"expected exactly one idle commit, got {len(idle_writes)}: {CONTENT_WRITES}"
+    assert idle_writes[0]["message"] == "Update Notes/Test note.md", \
+        f"autosave commit message changed: {idle_writes[0]['message']!r}"
+    page.wait_for_function(
+        "document.getElementById('autosave-status').textContent.includes('Saved to GitHub')",
+        timeout=5000,
+    )
+    print("✓ 10s idle commits once, with the same message format as a manual save")
+
+    # --- 9. Save is an escape hatch, not the only way to save: clicking it must
+    # commit immediately, long before the idle window would have fired.
+    CONTENT_WRITES.clear()
+    page.click(".CodeMirror")
+    page.keyboard.type("AUTOSAVE_MANUAL_MARKER")
+    page.wait_for_timeout(1000)
+    page.click("#btn-save")
+    deadline = time.time() + 5
+    while time.time() < deadline and not writes_with("AUTOSAVE_MANUAL_MARKER"):
+        page.wait_for_timeout(200)
+    manual_writes = writes_with("AUTOSAVE_MANUAL_MARKER")
+    assert len(manual_writes) == 1, \
+        f"Save did not commit the typed text within 5s: {CONTENT_WRITES}"
+    page.wait_for_function(
+        "document.getElementById('autosave-status').textContent.includes('Saved to GitHub')",
+        timeout=5000,
+    )
+    print("✓ explicit Save bypasses the timer and commits at once")
 
     # --- 1. Editing ---
     page.click(".CodeMirror")
@@ -369,6 +466,15 @@ with sync_playwright() as p:
     assert seen_dialogs and "delete this file" in seen_dialogs[-1].lower(), \
         f"clicking Delete showed no confirmation: {seen_dialogs}"
     print("✓ file context menu delete is wired up (confirmation shown)")
+
+    # That delete succeeded, so the editor is closed and the toolbar is
+    # disabled — closeCurrentFile() does exactly that, and it is correct.
+    # The PDF checks below need a file open, so re-open the note first (the
+    # mock's tree is static and still lists it).
+    page.click(".file-item:not(.folder)")
+    page.wait_for_function(
+        "document.getElementById('btn-export-pdf').disabled === false", timeout=5000
+    )
 
     # --- 5. PDF export must render the document, not a blank page ---
     # html2canvas captures the element exactly where it sits, so putting

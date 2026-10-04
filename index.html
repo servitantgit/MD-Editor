@@ -136,9 +136,24 @@
       <div class="editor-toolbar">
         <span class="current-file" id="current-file">No file selected</span>
         <button id="btn-save" disabled>Save</button>
+        <!-- Autosave status, owned by js/autosave.js. Kept separate from
+             #save-status on purpose: that one auto-clears after 4s for every
+             other operation (moves, deletes, folder ops), while these states
+             describe the live condition of the open file and must not flicker. -->
+        <span id="autosave-status" class="autosave-status"></span>
         <button class="secondary" id="btn-export-pdf" disabled title="Export the active page to PDF">📄 PDF</button>
         <button class="secondary danger" id="btn-delete" disabled title="Delete the active file from the repository">🗑 Delete</button>
         <span id="save-status" class="status"></span>
+      </div>
+      <!-- Draft recovery / remote-changed banner. One element, two questions:
+           "you have unsaved local changes" and "GitHub changed underneath
+           you". The user always picks a side; nothing is ever merged. -->
+      <div id="draft-banner" class="draft-banner hidden">
+        <span id="draft-banner-text"></span>
+        <button id="draft-keep" class="draft-keep">Keep local</button>
+        <button id="draft-discard" class="draft-discard">Discard</button>
+        <button id="draft-reload" class="draft-keep hidden">Reload from GitHub</button>
+        <button id="draft-overwrite" class="draft-discard hidden">Overwrite</button>
       </div>
       <div id="editor-container">
         <textarea id="editor"></textarea>
