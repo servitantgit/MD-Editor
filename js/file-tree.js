@@ -209,29 +209,38 @@ export class FileTree {
       .map((it) => `<button data-action="${escapeAttr(it.action)}"${it.className ? ` class="${it.className}"` : ''}>${escapeAttr(it.label)}</button>`)
       .join('');
 
+    const closeMenu = () => {
+      menu.remove();
+      document.removeEventListener('click', onDocClick);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+    // Registered SYNCHRONOUSLY, deliberately. Deferring this with setTimeout(0)
+    // leaves a window in which the menu is on screen but not yet armed, so a
+    // click landing in that window silently does nothing — that is exactly what
+    // made the e2e dismissal check flaky.
+    //
+    // Synchronous is safe here even though the menu opens from `contextmenu`,
+    // because `document` is the outermost ancestor: in the bubble phase its
+    // handler always runs AFTER the menu's own. The containment check below
+    // makes that reasoning unnecessary as well, so opening the menu from a plain
+    // click (a "⋯" button) in future would still work.
+    const onDocClick = (e) => {
+      // A click INSIDE the menu belongs to the menu's own handler; dismissing
+      // here would rip the button out of the DOM before that handler runs.
+      if (menu.contains(e.target)) return;
+      closeMenu();
+    };
+    const onKeyDown = (e) => { if (e.key === 'Escape') closeMenu(); };
+
     menu.addEventListener('click', (e) => {
       const btn = e.target.closest('button');
       if (!btn) return;
-      menu.remove();
+      closeMenu();
       onPick(btn.dataset.action);
     });
 
-    const closeMenu = () => menu.remove();
-
-    // Register the dismiss listeners in a later task, not synchronously. This is
-    // safe today only because the menu opens from `contextmenu`, and a right-click
-    // does not produce a `click` event — so no click is in flight to close it.
-    // Registering synchronously would break the moment the menu is opened from a
-    // left click (a "⋯" button, say): that very click would still be bubbling and
-    // would reach `document` and remove the menu before anyone could pick from it.
-    //
-    // Note this defers *registration only*. `onPick` above stays synchronous on
-    // purpose — see the "Do NOT defer that call" note at the top of this method.
-    const armDismiss = () => {
-      document.addEventListener('click', closeMenu, { once: true });
-      document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeMenu(); }, { once: true });
-    };
-    setTimeout(armDismiss, 0);
+    document.addEventListener('click', onDocClick);
+    document.addEventListener('keydown', onKeyDown);
 
     document.body.appendChild(menu);
 
