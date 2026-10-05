@@ -124,14 +124,13 @@ export class SearchSync {
         // signal to skip the file — a binary blob with a .md extension must not
         // be indexed as a string of U+FFFD replacement characters.
         this.index.add(path, b64ToUtf8(b64));
+        done++;
+        sinceSave++;
+        this.onProgress(done, pending.length);
       } catch (_) {
         // A skipped file stays absent from the index, but it is still listed in
         // the manifest below so we do not re-fetch it on every single sync.
       }
-
-      done++;
-      sinceSave++;
-      this.onProgress(done, pending.length);
 
       // Persist in batches, not per file: put() of a multi-MB blob is not free.
       if (sinceSave >= BATCH_SIZE) {
