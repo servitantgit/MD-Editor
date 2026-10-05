@@ -137,6 +137,10 @@ test('drafts survive a store restart — that is the whole point of IndexedDB', 
   // exactly the crash-recovery path.
   const second = newStore({ indexedDB: idb, now: () => 600 });
   const loaded = await second.get(SCOPE_PATH('a.md'));
+  assert.equal(loaded.text, 'SURVIVED');
+  assert.equal(loaded.baseSha, 'sha-a');
+});
+
 test('a successful commit deletes the draft rather than clearing the flag', async () => {
   const store = newStore();
   await store.put(draft('a.md', 'TEXT'));
@@ -234,7 +238,4 @@ test('a persistent quota error degrades to memory rather than throwing', async (
   assert.equal(store.degraded, true);
   assert.ok(reasons.some((r) => r.startsWith('quota:')), reasons.join('|'));
   assert.equal((await store.get(SCOPE_PATH('a.md'))).text, 'TOOBIG', 'the session still works');
-});
-  assert.equal(loaded.text, 'SURVIVED');
-  assert.equal(loaded.baseSha, 'sha-a');
 });

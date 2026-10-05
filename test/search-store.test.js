@@ -92,6 +92,11 @@ test('get on a store that was never written to returns null', async () => {
 
 test('delete removes a record', async () => {
   const store = newStore();
+  await store.put({ key: KEY, serializedIndex: 'X' });
+  await store.delete(KEY);
+  assert.equal(await store.get(KEY), null);
+});
+
 test('TTL eviction removes a record older than 30 days', async () => {
   // A repository deleted on GitHub must not leave an index behind forever.
   const NOW = 1_700_000_000_000;
@@ -165,6 +170,11 @@ test('evictOldest drops the oldest record of ANOTHER repo, never the one being s
 
 test('evictOldest returns false when the only record is the one being saved', async () => {
   const store = newStore();
+  await store.put({ key: KEY, serializedIndex: 'ONLY' });
+  assert.equal(await store.evictOldest(KEY), false);
+  assert.ok(await store.get(KEY), 'evictOldest must never delete the key it is protecting');
+});
+
 test('with no indexedDB at all the store degrades to memory and says so', async () => {
   // A private window / Safari ITP: indexedDB.open can be missing or throw.
   // Search must still WORK for the session — only persistence is lost.
@@ -278,12 +288,4 @@ test('a record whose manifest is empty still round-trips', async () => {
   const loaded = await store.get(KEY);
   assert.deepEqual(loaded.manifest, {});
   assert.equal(loaded.serializedIndex, '{}');
-});
-  await store.put({ key: KEY, serializedIndex: 'ONLY' });
-  assert.equal(await store.evictOldest(KEY), false);
-  assert.ok(await store.get(KEY), 'evictOldest must never delete the key it is protecting');
-});
-  await store.put({ key: KEY, serializedIndex: 'X' });
-  await store.delete(KEY);
-  assert.equal(await store.get(KEY), null);
 });
