@@ -516,7 +516,13 @@ function setupAutosaveUI(owner, repo) {
     setSaveStatus('Local draft discarded', false);
   };
   els.draftReload.onclick = () => autosave.resolveConflict('reload');
-  els.draftOverwrite.onclick = () => autosave.resolveConflict('overwrite');
+  // The banner must go away once the overwrite actually landed. If it conflicts
+  // again (result.ok === false) the autosave raises onConflict() once more and the
+  // banner simply stays, so only a successful push may hide it.
+  els.draftOverwrite.onclick = async () => {
+    const result = await autosave.resolveConflict('overwrite');
+    if (result && result.ok) hideDraftBanner();
+  };
 }
 
 /**

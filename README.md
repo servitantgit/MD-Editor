@@ -121,7 +121,7 @@ responses). Runs automatically in CI:
 ```bash
 pip install playwright && playwright install chromium
 node serve.mjs &                  # start the app on :8080
-python3 e2e_smoke_test.py         # checks editing, scrolling, image previews
+python3 e2e_smoke_test.py         # editing, autosave + 409 handling, create/delete, search, PDF export, image previews
 ```
 
 ## Features

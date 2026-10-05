@@ -21,6 +21,12 @@ BASE = pathlib.Path(__file__).parent
 # putFile() sends base64, so asserting on the raw body would only ever see noise.
 CONTENT_WRITES = []
 
+# Scripted HTTP statuses for the NEXT contents-API PUTs, consumed one per request
+# (anything not scripted succeeds with 200). `[409]` makes only the first write
+# conflict; `[409, 409]` makes two in a row. Every write is recorded in
+# CONTENT_WRITES together with the status it was answered with.
+PUT_STATUS_QUEUE = []
+
 CDN_MOCKS = {
     "https://cdn.jsdelivr.net/npm/easymde/dist/easymde.min.css": BASE / "node_modules/easymde/dist/easymde.min.css",
     "https://cdn.jsdelivr.net/npm/easymde/dist/easymde.min.js": BASE / "node_modules/easymde/dist/easymde.min.js",
@@ -90,13 +96,19 @@ def handle_github_api(route, request):
                 text = base64.b64decode(body["content"]).decode("utf-8", "replace")
             except Exception:
                 pass
+        status = PUT_STATUS_QUEUE.pop(0) if (request.method == "PUT" and PUT_STATUS_QUEUE) else 200
         CONTENT_WRITES.append({
             "url": url,
             "method": request.method,
             "message": body.get("message"),
             "sha": body.get("sha"),
             "text": text,
+            "status": status,
         })
+        if status == 409:
+            route.fulfill(status=409, content_type="application/json", body=json.dumps(
+                {"message": "sha does not match (mock)"}))
+            return
         if request.method == "PUT":
             route.fulfill(status=200, content_type="application/json", body=json.dumps(
                 {"content": {"sha": f"sha-put-{len(CONTENT_WRITES)}"}, "commit": {"sha": "c"}}))
@@ -145,9 +157,12 @@ def pdf_page_images(path):
 
 
 def measure_red_per_page(page, streams):
-    """Decode each page image in the browser and measure the red image ink on it.
+    """Decode each page image in the browser and measure it.
 
-    Returns [(red_px, first_red_row, rows_total), ...] per page.
+    Returns one dict per page: `red` = pixels of the red test image, `firstRow` =
+    first row containing red, `rows` = rows sampled, and `ink` = pixels darker than
+    paper white (text, code blocks, images) — what tells a rendered page from a
+    blank one.
     """
     results = []
     for blob in streams:
@@ -162,17 +177,23 @@ def measure_red_per_page(page, streams):
             const ctx = c.getContext('2d');
             ctx.drawImage(img, 0, 0, c.width, c.height);
             const d = ctx.getImageData(0, 0, c.width, c.height).data;
-            let red = 0, firstRow = -1;
+            let red = 0, firstRow = -1, ink = 0;
             for (let i = 0; i < d.length; i += 4) {
+                if ((d[i] + d[i + 1] + d[i + 2]) / 3 < 200) ink++;
                 if (d[i] > 120 && d[i] > d[i + 1] + 40 && d[i] > d[i + 2] + 40) {
                     red++;
                     if (firstRow < 0) firstRow = Math.floor(i / 4 / c.width);
                 }
             }
-            return {red: red, firstRow: firstRow, rows: c.height};
+            return {red: red, firstRow: firstRow, rows: c.height, ink: ink};
         }""", b64))
     return results
 
+
+# A rendered page has text or an image on it; a blank one has (almost) no pixel darker
+# than paper white. Measured on a 200px-wide copy of the page; the threshold is
+# deliberately far below any real page.
+PDF_MIN_INK_PX = 50
 
 page_errors = []
 
@@ -310,11 +331,12 @@ with sync_playwright() as p:
 
     # Now let the editor go idle: 10s after the last keystroke it must commit,
     # exactly once, and with the same message a manual save would use.
-    # Poll for the commit instead of a fixed sleep — the status fades after 4s,
-    # so we must check it immediately after the write lands.
+    # Poll for the first commit instead of sleeping a fixed time, then keep watching:
+    # "exactly once" means no duplicate follows the first one a moment later.
     deadline = time.time() + 20
     while time.time() < deadline and not writes_with("AUTOSAVE_IDLE_MARKER"):
         page.wait_for_timeout(200)
+    page.wait_for_timeout(3000)
     idle_writes = writes_with("AUTOSAVE_IDLE_MARKER")
     assert len(idle_writes) == 1, \
         f"expected exactly one idle commit, got {len(idle_writes)}: {CONTENT_WRITES}"
@@ -431,6 +453,9 @@ with sync_playwright() as p:
         "new-folder-in-notes",   # Scenario B
     ]
     create_response_idx = [0]
+    # Set to True right before an action whose confirm() the test wants to CANCEL;
+    # the handler dismisses exactly one confirm and resets it.
+    dismiss_next_confirm = [False]
 
     def handle_dialog(d):
         msg = d.message
@@ -443,7 +468,11 @@ with sync_playwright() as p:
                 d.accept("default.md")
         else:
             seen_dialogs.append(msg)
-            d.accept()
+            if dismiss_next_confirm[0]:
+                dismiss_next_confirm[0] = False
+                d.dismiss()
+            else:
+                d.accept()
 
     page.on("dialog", handle_dialog)
     write_urls = []
@@ -507,25 +536,56 @@ with sync_playwright() as p:
     assert "Notes/new-folder-in-notes/.gitkeep" in folder_write[0]["url"], f"folder not created in Notes: {folder_write[0]['url']}"
     print(f"✓ toolbar create folder in selected folder works (PUT to {folder_write[0]['url']})")
 
-    # --- C. Delete file via context menu and toolbar ---
-    # First, create a file to delete (mock tree is static, so we just test the API call)
-    # Right-click on the test note and delete via context menu
+    # --- C. Delete: the confirm decides. Dismissed -> nothing is sent; accepted -> one DELETE with the sha ---
+    def deletes():
+        return [w for w in CONTENT_WRITES if w["method"] == "DELETE"]
+
+    def pick_file_menu_delete():
+        page.click(".file-item:not(.folder)", button="right")
+        page.wait_for_selector(".folder-context-menu", timeout=5000)
+        page.click(".folder-context-menu button[data-action='delete']")
+        page.wait_for_timeout(500)
+
+    # C1. Context menu, confirm CANCELLED.
     CONTENT_WRITES.clear()
-    page.click(".file-item:not(.folder)", button="right")
-    page.wait_for_selector(".folder-context-menu", timeout=5000)
-    page.click(".folder-context-menu button[data-action='delete']")
-    page.wait_for_timeout(500)
-    delete_write = [w for w in CONTENT_WRITES if w["method"] == "DELETE"]
+    seen_dialogs.clear()
+    dismiss_next_confirm[0] = True
+    pick_file_menu_delete()
+    assert seen_dialogs and "delete this file" in seen_dialogs[-1].lower(), \
+        f"no delete confirmation was shown: {seen_dialogs}"
+    assert not dismiss_next_confirm[0], "the dismissed confirm never reached the handler"
+    assert not deletes(), f"a cancelled confirm still sent a DELETE: {CONTENT_WRITES}"
+    assert page.locator(".file-item:not(.folder)").count() == 1, \
+        "the file left the tree even though the delete was cancelled"
+    print("✓ context menu delete: cancelling the confirm sends nothing")
+
+    # C2. Context menu, confirm ACCEPTED.
+    CONTENT_WRITES.clear()
+    pick_file_menu_delete()
+    delete_write = deletes()
     assert len(delete_write) == 1, f"expected one DELETE for context menu delete, got {CONTENT_WRITES}"
     assert "Notes/Test%20note.md" in delete_write[0]["url"], f"wrong file deleted: {delete_write[0]['url']}"
     assert delete_write[0]["sha"] == "sha-note", f"DELETE missing sha: {delete_write[0]}"
     print(f"✓ context menu delete sends DELETE with sha ({delete_write[0]['url']})")
 
-    # Test cancelled delete (press Escape on confirm)
-    # The mock's handle_dialog auto-accepts all non-create dialogs, so we need a different approach.
-    # For this test, we verify that clicking delete shows a confirmation (already tested above).
-    # The "cancelled confirm → DELETE not sent" is implicitly tested by the fact that
-    # the mock only records writes when the dialog is accepted.
+    # C3. Toolbar delete acts on the OPEN file, so open it again (the mock tree is static).
+    page.click(".file-item:not(.folder)")
+    page.wait_for_function("document.getElementById('btn-delete').disabled === false", timeout=5000)
+    CONTENT_WRITES.clear()
+    seen_dialogs.clear()
+    dismiss_next_confirm[0] = True
+    page.click("#btn-delete")
+    page.wait_for_timeout(500)
+    assert seen_dialogs and "delete this file" in seen_dialogs[-1].lower(), \
+        f"toolbar delete showed no confirmation: {seen_dialogs}"
+    assert not deletes(), f"a cancelled toolbar delete still sent a DELETE: {CONTENT_WRITES}"
+    page.click("#btn-delete")
+    page.wait_for_timeout(500)
+    toolbar_delete = deletes()
+    assert len(toolbar_delete) == 1, f"expected one DELETE for toolbar delete, got {CONTENT_WRITES}"
+    assert "Notes/Test%20note.md" in toolbar_delete[0]["url"], f"wrong file deleted: {toolbar_delete[0]['url']}"
+    assert toolbar_delete[0]["sha"], f"toolbar DELETE carries no sha: {toolbar_delete[0]}"
+    print("✓ toolbar delete: cancel sends nothing, accept sends one DELETE with a sha")
 
     # --- D. Continuous typing: no commit during typing, one commit after 10s idle ---
     # Re-open the test note (mock tree still has it)
@@ -587,18 +647,74 @@ with sync_playwright() as p:
     assert len(keep_writes) >= 1, f"manual save after Keep local did not commit draft: {CONTENT_WRITES}"
     print(f"✓ draft survives reload; Keep local restores text; manual save commits it")
 
-    # --- F. 409 conflict handling ---
-    # We need to modify the mock to return 409 on first PUT, then 200
-    # For simplicity, we'll test this by checking the autosave's conflict handling
-    # through the UI banner. Since we can't easily change the mock mid-test,
-    # we'll verify the conflict UI elements exist and can be interacted with.
-    # This is a lighter check since the real 409 logic is unit-tested.
-    conflict_banner = page.locator("#draft-banner:not(.hidden)")
-    reload_btn = page.locator("#draft-reload")
-    overwrite_btn = page.locator("#draft-overwrite")
-    # Just verify the conflict UI structure exists (it's shown when autosave.state === ERROR)
-    # The actual 409 triggering is covered by unit tests.
-    print("✓ conflict UI elements present (409 handling covered by unit tests)")
+    # --- F. 409 handling, driven for real by the mock (PUT_STATUS_QUEUE) ---
+    def pushes_with(marker):
+        return [w for w in CONTENT_WRITES if w["method"] == "PUT" and marker in w["text"]]
+
+    def wait_for_pushes(marker, count, seconds=10):
+        deadline = time.time() + seconds
+        while time.time() < deadline and len(pushes_with(marker)) < count:
+            page.wait_for_timeout(200)
+
+    def type_and_save(marker):
+        page.click(".CodeMirror")
+        page.keyboard.type(marker)
+        page.click("#btn-save")
+
+    # F1. ONE 409 is settled silently: re-read the sha, push again, no banner.
+    CONTENT_WRITES.clear()
+    PUT_STATUS_QUEUE[:] = [409]
+    type_and_save("F_RETRY_MARKER")
+    wait_for_pushes("F_RETRY_MARKER", 2)
+    attempts = pushes_with("F_RETRY_MARKER")
+    assert [a["status"] for a in attempts] == [409, 200], f"expected 409 then 200, got {CONTENT_WRITES}"
+    assert attempts[0]["sha"] != attempts[1]["sha"], "the silent retry reused the stale sha"
+    assert attempts[1]["sha"] == "sha-note", f"the retry did not use the freshly read sha: {attempts[1]}"
+    page.wait_for_function(
+        "document.getElementById('autosave-status').textContent.includes('Saved to GitHub')", timeout=5000)
+    assert page.locator("#draft-banner:not(.hidden)").count() == 0, "a single 409 must not bother the user"
+    print("✓ a single 409 is retried silently with a fresh sha and ends as saved")
+
+    # F2. TWO 409s in a row: the user chooses. Nothing more is sent until they do.
+    CONTENT_WRITES.clear()
+    PUT_STATUS_QUEUE[:] = [409, 409]
+    type_and_save("F_CONFLICT_MARKER")
+    page.wait_for_selector("#draft-banner:not(.hidden)", timeout=10000)
+    attempts = pushes_with("F_CONFLICT_MARKER")
+    assert [a["status"] for a in attempts] == [409, 409], f"expected two 409s, got {CONTENT_WRITES}"
+    assert page.locator("#draft-reload").is_visible() and page.locator("#draft-overwrite").is_visible(), \
+        "conflict banner is missing Reload / Overwrite"
+    assert not page.locator("#draft-keep").is_visible() and not page.locator("#draft-discard").is_visible(), \
+        "the draft-recovery buttons must not show in a conflict"
+    page.wait_for_timeout(1500)
+    assert len(pushes_with("F_CONFLICT_MARKER")) == 2, "autosave kept pushing after the conflict was raised"
+    print("✓ two 409s in a row raise the Reload / Overwrite banner and stop pushing")
+
+    # F2b. Overwrite: our text goes on top of the freshly read sha, and the banner goes away.
+    page.click("#draft-overwrite")
+    wait_for_pushes("F_CONFLICT_MARKER", 3)
+    attempts = pushes_with("F_CONFLICT_MARKER")
+    assert len(attempts) == 3 and attempts[2]["status"] == 200 and attempts[2]["sha"] == "sha-note", \
+        f"Overwrite did not push on top of the fresh sha: {attempts}"
+    page.wait_for_function(
+        "document.getElementById('autosave-status').textContent.includes('Saved to GitHub')", timeout=5000)
+    assert page.locator("#draft-banner:not(.hidden)").count() == 0, \
+        "the conflict banner is still on screen after a successful Overwrite"
+    print("✓ Overwrite pushes our text over the fresh sha and clears the banner")
+
+    # F3. Reload: GitHub's version replaces ours, nothing is pushed, the banner goes away.
+    CONTENT_WRITES.clear()
+    PUT_STATUS_QUEUE[:] = [409, 409]
+    type_and_save("F_RELOAD_MARKER")
+    page.wait_for_selector("#draft-banner:not(.hidden)", timeout=10000)
+    page.click("#draft-reload")
+    page.wait_for_selector("#draft-banner", state="hidden", timeout=5000)
+    editor_text = page.evaluate("document.querySelector('.CodeMirror').CodeMirror.getValue()")
+    assert "F_RELOAD_MARKER" not in editor_text, "Reload kept our text instead of GitHub's"
+    assert "Hello world." in editor_text, f"Reload did not bring back the GitHub version: {editor_text[:120]!r}"
+    assert len(pushes_with("F_RELOAD_MARKER")) == 2, "Reload must not push anything"
+    print("✓ Reload replaces our text with GitHub's and pushes nothing")
+    assert not PUT_STATUS_QUEUE, f"unused scripted statuses left behind: {PUT_STATUS_QUEUE}"
 
     # That delete succeeded, so the editor is closed and the toolbar is
     # disabled — closeCurrentFile() does exactly that, and it is correct.
@@ -636,12 +752,17 @@ with sync_playwright() as p:
         f"#pdf-export-container must not be positioned (got {container_pos!r}) — that makes html2canvas capture a blank page"
     # A real render of the long test document is hundreds of KB; the blank one was ~3 KB.
     assert pdf_bytes > 50_000, f"exported PDF is suspiciously small: {pdf_bytes} bytes"
-    # At least one page, and no empty pages (each page has a JPEG stream)
+    # At least one page, and no page that is just white paper. The size of a JPEG
+    # stream proves nothing (a blank page compresses to a few KB), so decode each
+    # page and count pixels darker than paper white.
     page_images = pdf_page_images(pdf_path)
     assert len(page_images) >= 1, f"PDF has no pages: {len(page_images)}"
-    for i, img in enumerate(page_images):
-        assert len(img) > 100, f"page {i} appears empty (only {len(img)} bytes)"
-    print(f"✓ PDF export renders content ({pdf_bytes} bytes, {len(page_images)} pages, container position: {container_pos})")
+    page_stats = measure_red_per_page(page, page_images)
+    for i, st in enumerate(page_stats):
+        assert st["ink"] >= PDF_MIN_INK_PX, \
+            f"page {i} looks blank ({st['ink']} non-white px of {st['rows'] * 200}): {page_stats}"
+    print(f"✓ PDF export renders content ({pdf_bytes} bytes, {len(page_images)} pages, "
+          f"non-white px per page {[st['ink'] for st in page_stats]}, container position: {container_pos})")
 
     # --- 6. Images must never be cut in half by a page boundary ---
     # The document contains a red image taller than one page, placed so it lands
@@ -649,7 +770,7 @@ with sync_playwright() as p:
     # PDF: a split shows a big red block on one page and red starting at the very
     # top of the next. Thresholds are loose on purpose — JPEG ringing puts a
     # handful of stray red pixels on the seam.
-    red_per_page = measure_red_per_page(page, pdf_page_images(pdf_path))
+    red_per_page = page_stats
     total_red = sum(r["red"] for r in red_per_page)
     assert total_red > 5_000, f"the red test image is missing from the PDF: {red_per_page}"
     for i in range(len(red_per_page) - 1):

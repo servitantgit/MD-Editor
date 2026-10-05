@@ -113,7 +113,13 @@ export class SearchSync {
       return { indexed: 0, removed: removed.length };
     }
 
+    // `done` counts files that really entered the index (it is what run() returns
+    // and what onDone reports); `processed` counts every file we TRIED, including
+    // ones skipped as unreadable or not valid UTF-8. Progress follows `processed`
+    // so the status line still reaches N/N when a file is skipped, and the batch
+    // persistence below follows it too, exactly as before.
     let done = 0;
+    let processed = 0;
     let sinceSave = 0;
 
     await this._pool(pending, FETCH_CONCURRENCY, async (path) => {
@@ -125,12 +131,14 @@ export class SearchSync {
         // be indexed as a string of U+FFFD replacement characters.
         this.index.add(path, b64ToUtf8(b64));
         done++;
-        sinceSave++;
-        this.onProgress(done, pending.length);
       } catch (_) {
         // A skipped file stays absent from the index, but it is still listed in
         // the manifest below so we do not re-fetch it on every single sync.
       }
+
+      processed++;
+      sinceSave++;
+      this.onProgress(processed, pending.length);
 
       // Persist in batches, not per file: put() of a multi-MB blob is not free.
       if (sinceSave >= BATCH_SIZE) {

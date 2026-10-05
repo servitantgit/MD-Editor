@@ -162,9 +162,18 @@ So: the container is a **neutral block** (width/background/padding only), and
 z-index: -9999` holder that is removed in `finally`. Don't "simplify" the holder
 back into a CSS rule on the container.
 
-`e2e_smoke_test.py` guards it two ways: it records the container's computed
-`position` while exporting (must be `static`) and asserts the downloaded PDF is
-larger than 50 KB. A blank export is ~3 KB, a real one is hundreds of KB.
+`e2e_smoke_test.py` guards it three ways: it records the container's computed
+`position` while exporting (must be `static`), asserts the downloaded PDF is
+larger than 50 KB (a blank export is ~3 KB, a real one is hundreds of KB), and
+decodes every page and requires some non-white pixels on it. The size of a JPEG
+stream proves nothing — a blank page compresses to a few KB too — so do not
+replace the pixel check with a byte-length one.
+
+**The html2pdf.js version is pinned in three places that must agree:** the CDN
+URL in `index.html`, the devDependency in `package.json` (exact version, no
+`^`), and `CDN_MOCKS` in `e2e_smoke_test.py`. The e2e test serves the library from
+`node_modules` under the URL it mocks, so a mismatch means the PDF checks run
+against a different release than production does.
 
 ## PDF export: images must never be split across pages
 
@@ -468,6 +477,14 @@ empty and must still sync, or the deleted file stays in the results forever
 reason the "nothing changed" branch of `SearchSync.run()` still stamps
 `lastSyncedAt` — otherwise the status reads "last synced 20731d ago".
 
+**Two counters, on purpose.** In `SearchSync.run()`, `done` counts files that
+really entered the index and is what `run()` returns and `onDone` reports;
+`processed` counts every file attempted, skipped ones included, and drives
+`onProgress` and the batch persistence. Progress must reach `N/N` even when a
+file is skipped (unreadable, or not valid UTF-8), and `indexed` must not claim
+files that are absent from the index. Both are pinned in
+`test/search-sync.test.js`.
+
 **Teardown**: `showApp()` destroys the in-flight sync alongside the editor
 handle, for the same reason — a re-login must not leave the old indexer fetching
 and writing into the new session's store.
@@ -585,13 +602,22 @@ other tab committed first"; only a SECOND 409 in a row opens the reload/overwrit
 banner. On the reload path, `b64ToUtf8` throwing on non-UTF-8 must be caught exactly
 like `moveToPath()` does — leave the bytes alone, keep the draft, change nothing.
 
-**What local checks cannot see:** `e2e_smoke_test.py` mocks `api.github.com`, so real
-409s, sha drift and quota errors are invisible to it — they belong in
-`test/autosave.test.js` / `test/draft-store.test.js`. The e2e covers what it *can*
-see: typing does not commit, exactly one idle commit arrives with the right message,
-and an explicit Save bypasses the timer. It never waits out the 5-minute max
-(five real minutes in CI flakes constantly) and never claims a reload survives a
-cold start.
+**What local checks cannot see:** `e2e_smoke_test.py` mocks `api.github.com`, so how
+the real API behaves — genuine sha drift, quota errors, rate limits — is invisible to
+it; the state machine itself belongs in `test/autosave.test.js` /
+`test/draft-store.test.js`. What the e2e *can* see, it checks: typing does not commit,
+exactly one idle commit arrives with the right message (and no duplicate a few
+seconds later), an explicit Save bypasses the timer, a draft survives a reload, and
+the 409 path end to end. The mock answers PUTs from `PUT_STATUS_QUEUE` (`[409]` = the
+next write conflicts once, `[409, 409]` = twice in a row), which is how single-retry,
+Reload and Overwrite are exercised with real 409 responses. It never waits out the
+5-minute max (five real minutes in CI flakes constantly) and never claims a reload
+survives a cold start.
+
+**Overwrite must clear the conflict banner.** `resolveConflict('overwrite')` returns
+the push result; `#draft-overwrite` in `js/app.js` hides the banner only when
+`result.ok`, and leaves it up if the push conflicts again. Reload hides it through
+`onReloadRemote`. Don't move that logic into `Autosave` — it has no DOM.
 
 ## General rule before considering a task done
 
@@ -610,3 +636,12 @@ insignificant relative to the main task. Before push:
    GitHub behaviour are untested locally. If you touched `js/github-client.js`,
    make sure the new rule is covered by `npm test` instead of assuming the green
    e2e run proves anything about the real API.
+5. Read the `# cancelled` line of `npm test`, not only `# fail`. A test body cut off
+   mid-way (tail stranded at the end of the file) still passes `node --check`, and
+   every test after the cut is reported as *cancelled*, which is easy to miss. The
+   expected summary is `# fail 0` **and** `# cancelled 0`.
+6. A test that cannot fail is worse than no test. Before trusting a new e2e or unit
+   assertion, break the code it guards and watch it go red (e.g. put
+   `position: fixed; left: -99999px` back on `#pdf-export-container`, drop the
+   `clampImagesToPage()` call, set `IDLE_MS` to 0, remove the silent 409 retry).
+   The 409 scenario once only printed a ✓ without asserting anything.

@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import MiniSearch from 'minisearch';
 import { IDBFactory } from 'fake-indexeddb';
-import { SearchSync } from '../js/search-sync.js';
+import { SearchSync, FETCH_CONCURRENCY } from '../js/search-sync.js';
 import { SearchStore } from '../js/search-store.js';
 import { SearchIndex, createSearchIndex, diffTree, isMarkdownPath } from '../js/search-index.js';
 
@@ -219,19 +219,48 @@ test('search-sync: file fetch error does not abort entire sync', async () => {
   assert.ok(sync.index.query('overview').length > 0);
 });
 
-test('search-sync: destroy() during sync stops further writes to store', async () => {
-  const client = new FakeGitHubClient({ tree: SAMPLE_TREE, files: SAMPLE_FILES });
+test('search-sync: destroy() mid-sync stops fetching, persisting and reporting', async () => {
+  // Many more files than the pool's width, so there is a queue left to abandon.
+  const N = FETCH_CONCURRENCY * 10;
+  const tree = Array.from({ length: N }, (_, i) => ({ path: `Bulk/f${i}.md`, sha: `sha-${i}` }));
+  const files = Object.fromEntries(
+    tree.map((f) => [f.path, { sha: f.sha, body: `# ${f.path}\n\nbody ${f.path}` }])
+  );
+  const client = new FakeGitHubClient({ tree, files });
+
+  // Hold every fetch open until the test releases it, so destroy() lands while
+  // requests are genuinely in flight.
+  let release;
+  const gate = new Promise((resolve) => { release = resolve; });
+  const started = [];
+  const realGet = client.getFileB64.bind(client);
+  client.getFileB64 = async (path) => {
+    started.push(path);
+    await gate;
+    return realGet(path);
+  };
+
   const store = newStore();
-  const sync = newSync({ client, store });
+  let puts = 0;
+  const realPut = store.put.bind(store);
+  store.put = async (record) => { puts++; return realPut(record); };
 
+  let doneCalls = 0;
+  const sync = newSync({ client, store, onDone: () => { doneCalls++; } });
   await sync.hydrate();
-  // Start sync but destroy before it completes
-  const runPromise = sync.run(SAMPLE_TREE);
-  sync.destroy();
-  await runPromise; // should not throw
 
-  // The sync should have been cut short
+  const runPromise = sync.run(tree);
+  await new Promise((resolve) => setImmediate(resolve)); // let the pool start its fetches
+  assert.equal(started.length, FETCH_CONCURRENCY, 'the pool should be exactly full before destroy()');
+
+  sync.destroy();
+  release();
+  await runPromise; // must not throw
+
   assert.equal(sync.destroyed, true);
+  assert.equal(started.length, FETCH_CONCURRENCY, 'no new fetch may start after destroy()');
+  assert.equal(puts, 0, 'a destroyed sync must not write into the store');
+  assert.equal(doneCalls, 0, 'a destroyed sync must not report completion');
 });
 
 test('search-sync: progress callback reports done/total', async () => {
@@ -251,6 +280,31 @@ test('search-sync: progress callback reports done/total', async () => {
   for (let i = 1; i < progress.length; i++) {
     assert.ok(progress[i].done >= progress[i - 1].done);
   }
+});
+
+test('search-sync: progress still reaches N/N when a file is skipped, while indexed counts only real adds', async () => {
+  const client = new FakeGitHubClient({
+    tree: SAMPLE_TREE,
+    files: SAMPLE_FILES,
+    shouldFail: new Set(['Notes/b.md']),
+  });
+  const store = newStore();
+  const progress = [];
+  let doneInfo = null;
+  const sync = newSync({
+    client,
+    store,
+    onProgress: (done, total) => progress.push({ done, total }),
+    onDone: (info) => { doneInfo = info; },
+  });
+
+  await sync.hydrate();
+  const result = await sync.run(SAMPLE_TREE);
+
+  const last = progress[progress.length - 1];
+  assert.deepEqual(last, { done: 3, total: 3 }, 'a skipped file must still advance the progress line to N/N');
+  assert.equal(result.indexed, 2, 'indexed counts only files that entered the index');
+  assert.equal(doneInfo.indexed, 2, 'onDone reports the same number');
 });
 
 test('search-sync: diffTree reports every file as REMOVED for emptied repository', () => {
