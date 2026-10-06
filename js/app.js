@@ -24,7 +24,7 @@ import { createTabBar } from './tabs-ui.js';
 import { WorkingTree } from './working-tree.js';
 import { bindCommitPanel, bindHistoryPanel } from './commit-ui.js';
 import { unifiedDiff, renderDiffLines } from './diff-util.js';
-import { kindFromPath, isHtmlPath, isMarkdownPath } from './file-kind.js';
+import { kindFromPath, isHtmlPath, isMarkdownPath, isEditableTextPath } from './file-kind.js';
 
 const els = {
   loginScreen: document.getElementById('login-screen'),
@@ -1271,18 +1271,26 @@ function toFolderPath(value) {
 }
 
 /**
- * Creates a new .md file. folderPath defaults to the tree's active folder — the last
- * folder the user opened/expanded — so the file lands where they are looking.
+ * Creates a new text file (.md, .html, .js, .css, …). folderPath defaults to the
+ * tree's active folder so the file lands where the user is looking.
  */
 async function onCreateNewFile(folderPath = fileTree.getActiveFolder()) {
   folderPath = toFolderPath(folderPath);
-  const name = prompt(`New file name (created in ${targetFolderLabel(folderPath)}):`, 'untitled.md');
+  const name = prompt(
+    `New file name (created in ${targetFolderLabel(folderPath)}):\n` +
+      `Examples: note.md, page.html, script.js, styles.css`,
+    'untitled.md'
+  );
   if (!name) return;
 
   let path;
   try {
     path = resolvePathIn(folderPath, name);
-    if (!path.toLowerCase().endsWith('.md')) throw new Error('Path must end with .md');
+    if (!isEditableTextPath(path)) {
+      throw new Error(
+        'Unsupported file type. Use a text extension (.md, .html, .js, .css, .json, .txt, …)'
+      );
+    }
     if (state.allFiles.some((f) => f.path === path)) throw new Error(`"${path}" already exists`);
   } catch (e) {
     alert(e.message);
@@ -1291,7 +1299,8 @@ async function onCreateNewFile(folderPath = fileTree.getActiveFolder()) {
 
   try {
     setSaveStatus(`Creating ${path}...`, false);
-    await state.client.putFile(path, utf8ToB64('# New file\n'), `Create ${path}`);
+    const starter = starterContentForPath(path);
+    await state.client.putFile(path, utf8ToB64(starter), `Create ${path}`);
     await loadTree();
     fileTree.setActiveFolder(folderPath, { expand: true }); // reveal the new file
     await openFile(path);
@@ -1301,7 +1310,28 @@ async function onCreateNewFile(folderPath = fileTree.getActiveFolder()) {
   }
 }
 
-/** Creates a new folder (via .gitkeep) inside the active folder. */
+/** Initial body for a newly created file, by kind. */
+function starterContentForPath(path) {
+  const kind = kindFromPath(path);
+  if (kind.kind === 'html') {
+    return (
+      '<!DOCTYPE html>\n<html lang="en">\n<head>\n  <meta charset="UTF-8" />\n' +
+      '  <title>New page</title>\n</head>\n<body>\n  <h1>New page</h1>\n</body>\n</html>\n'
+    );
+  }
+  if (kind.kind === 'code') {
+    if (kind.ext === 'css') return '/* styles */\n\n';
+    if (kind.ext === 'json') return '{\n  \n}\n';
+    if (kind.ext === 'js' || kind.ext === 'mjs' || kind.ext === 'cjs' || kind.ext === 'ts' || kind.ext === 'jsx' || kind.ext === 'tsx') {
+      return '// script\n\n';
+    }
+    if (kind.ext === 'py') return '# script\n\n';
+    return '';
+  }
+  if (kind.kind === 'markdown') return '# New file\n';
+  return '';
+}
+
 async function onCreateNewFolder(folderPath = fileTree.getActiveFolder()) {
   folderPath = toFolderPath(folderPath);
   const name = prompt(`New folder name (created in ${targetFolderLabel(folderPath)}):`);
