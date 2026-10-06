@@ -6,7 +6,7 @@
 ![Vanilla JS](https://img.shields.io/badge/vanilla-JS-f7df1e?logo=javascript&logoColor=black)
 ![Last commit](https://img.shields.io/github/last-commit/servitantgit/MD-Editor)
 ![Code size](https://img.shields.io/github/languages/code-size/servitantgit/MD-Editor)
-![Top language](https://img.shields.io/github/languages/top/servitantgit/MD-Editor)
+![Top language](https://img.shields.io/github/languages/top-language/servitantgit/MD-Editor)
 ![Open issues](https://img.shields.io/github/issues/servitantgit/MD-Editor)
 ![License](https://img.shields.io/github/license/servitantgit/MD-Editor)
 
@@ -18,7 +18,9 @@ exchange (details and setup in [README-CLOUDFLARE.md](./README-CLOUDFLARE.md)).
 
 Works with no backend and no build step: renders and edits Markdown, resolves
 images in the preview, supports drag & drop for files and images,
-**folder management**, and exports the active page to PDF.
+**folder management**, **multi-tab editing**, **full-text search**,
+**autosave with local drafts**, **Commit / Push / History**, and exports the
+active page to PDF.
 
 ## Screenshots
 
@@ -29,7 +31,7 @@ images in the preview, supports drag & drop for files and images,
 
 <p align="center">
   <img src="https://github.com/user-attachments/assets/f4949051-31fd-4fca-acf3-c976a22b9685" alt="GitHub MD Editor — main editing view" width="900"><br>
-  <sub>File tree, live preview and toolbar side by side while editing a note.</sub>
+  <sub>File tree, tabs, live preview and toolbar side by side while editing a note.</sub>
 </p>
 
 ## Architecture
@@ -50,18 +52,33 @@ js/
                             "canonical" preview HTML (no DOM/network)
   reference-rewriter.js    logic for rewriting links when files move
                             (pure functions, no network)
-  github-client.js         thin GitHub REST API client (auth, contents, trees)
+  github-client.js         thin GitHub REST API client (auth, contents, trees,
+                            Git Data API)
+  github-repo-url.js       parses a pasted GitHub repo URL into owner/repo
+  file-kind.js             file extension -> kind mapping (md/html/js/css/…)
   image-resolver.js        markdown path -> data: URL via the GitHub API, cached
   file-mover.js            orchestrates moving a file (reads/writes through
                             github-client, uses reference-rewriter)
   folder-manager.js        create/rename/delete folders (via file operations)
   image-preview.js         DOM side of the preview: src substitution, resize handle
   editor.js                wrapper around EasyMDE (setup, preview rendering,
-                            correct CodeMirror.refresh())
+                            correct CodeMirror.refresh(), tab-aware Preview)
   file-tree.js             file tree + drag & drop for files and folders (context menu)
   upload.js                image uploads (OS drag & drop + toolbar button)
   folder-upload.js         folder upload via drag & drop (webkitGetAsEntry)
   pdf-export.js            exports the active page to PDF
+  working-tree.js          tracks dirty state across files/tabs for Commit panel
+  commit-ui.js             Commit + History panel DOM helpers
+  diff-util.js             unified diff helpers for the History panel
+  tabs.js                  tab model: ordered paths + active + persistence
+  tabs-ui.js               tab strip rendering and click handling
+  autosave.js              two-tier autosave: local IndexedDB draft + GitHub commit
+  draft-store.js           per-repo/branch IndexedDB store for local drafts
+  idb-backend.js           generic IndexedDB wrapper (open/degrade/quota/sweep)
+  search-index.js           MiniSearch index over repo markdown
+  search-store.js          IndexedDB persistence for search index
+  search-sync.js           background sync: diff tree, fetch bodies, update index
+  search-ui.js             search box + results list DOM helpers
   app.js                   assembly point: login (incl. the OAuth redirect),
                             state, wiring up the modules
 test/                      unit tests (node:test) for the pure logic
@@ -101,7 +118,7 @@ to be served over http(s). Options:
 
 | Check | Status | What it covers |
 |---|---|---|
-| Unit tests | 🧪 **`npm test`** | paths, markdown-tokens, reference-rewriter, file-mover, autosave state machine, draft/search stores, search sync, tabs (model + strip) |
+| Unit tests | 🧪 **`npm test`** | paths, markdown-tokens, reference-rewriter, file-mover, autosave state machine, draft/search stores, search sync, tabs (model + strip), editor teardown, git client CORS |
 | Browser smoke test | 🧪 **CI** | real Chromium: editing, autosave + 409 handling, tabs, create/delete, search, PDF export, image previews |
 | GitHub Actions | 🔄 **automatic** | runs both checks on `push` and `pull_request` |
 
@@ -130,10 +147,37 @@ python3 e2e_smoke_test.py         # editing, autosave + 409 handling, tabs, crea
   authorization and any 2FA/mobile confirmation happen on GitHub's side, and
   the app receives a ready-made access token that it keeps only in
   `sessionStorage`.
+- **Layout modes** — Source / Live (side-by-side source + preview) / Preview
+  (preview only), toggled in the header. Preference is stored in
+  `localStorage`.
 - **Tabs** — open as many files as you like and switch between them without
   losing your place: each tab keeps its text, undo history, cursor and scroll
-  position. A dot on a tab means it is not on GitHub yet; closing a tab never
-  loses work. Tabs are restored after a reload.
+  position. The active tab's preview re-renders automatically in Live/Preview
+  mode. A dot on a tab means *not on GitHub yet*; closing a tab never loses
+  work. Tabs are restored after a reload, and only the active one is fetched
+  at startup.
+- **Two-tier autosave + local drafts** — typing is persisted to IndexedDB
+  within 400 ms (crash recovery), and a commit is pushed to GitHub when the
+  editor has been idle for 10 s, when 5 minutes have passed since the file
+  first became dirty, or when the user clicks Save. A status label next to
+  Save shows the live condition (`● Unsaved` / `○ Draft saved locally` /
+  `⟳ Saving to GitHub…` / `✓ Saved to GitHub` / `⚠ Save failed`). A draft
+  survives closing the tab and reload; reopening shows a one-time banner
+  *"Keep local / Discard"* — nothing is merged automatically.
+- **409 conflicts handled gracefully** — the first sha conflict is retried
+  silently with a freshly read sha; a second one in a row raises a banner
+  offering *Reload from GitHub / Overwrite*.
+- **Commit panel** — multi-file commits with a message via the Git Data API
+  (blobs → tree → commit → update ref). Dirty files show **M**/**A** badges
+  in the file tree; the header **Commit** button shows the number of changes.
+- **History panel** — recent commits on the current branch; click a commit
+  to see a per-file unified diff.
+- **Full-text search** — a search box in the sidebar header (`Ctrl`/`Cmd+K`
+  focuses it from anywhere). Results replace the file tree as you type, each
+  row showing the file path plus a one-line snippet with the matched term
+  highlighted; clicking one opens the note. The index is built in the browser
+  and persisted in IndexedDB for 30 days; clearing the input brings the tree
+  back exactly as it was.
 - **Image previews** — resolved through the GitHub API (works with private
   repos too), not as direct links. This is the editor's own preview, not a
   separate static GitHub Preview.
@@ -158,9 +202,13 @@ python3 e2e_smoke_test.py         # editing, autosave + 409 handling, tabs, crea
   `[text](path)` links alike).
 - **Folder management** — the "+ folder" button creates a new folder (via a
   `.gitkeep` file); right-click a folder in the tree → "Rename" / "Delete".
-  Renaming updates references in `.md` files.
+  Renaming updates references in `.md` files. Files also have a right-click
+  menu: *New file here* / *Rename* / *Delete*.
+- **File and folder context menus** — right-click any file or folder in the
+  tree to create, rename, or delete. The menu survives edge clicks and closes
+  on Escape.
 - **PDF export** — the "📄 PDF" button renders the active page with images
-  resolved in place.
+  resolved in place. Large images are scaled to avoid page-break splits.
 
 ## Known limitations
 
@@ -175,3 +223,6 @@ python3 e2e_smoke_test.py         # editing, autosave + 409 handling, tabs, crea
   deliberately left untouched.
 - PDF export depends on `html2pdf.js` (html2canvas) — very large images can
   slow generation down.
+- Full-text search degrades to session-only when IndexedDB is unavailable
+  (private window, Safari ITP, storage disabled) or the origin quota is
+  exceeded; search still works, but results are not persisted.
