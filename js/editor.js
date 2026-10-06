@@ -197,6 +197,55 @@ export function createEditor(textareaEl, deps) {
 
   refreshInlineImages();
 
+  // ---- One CodeMirror document per open tab -------------------------------
+  // `easyMDE.value(text)` would REPLACE the text of the single document, which
+  // throws away undo history, cursor and scroll position — exactly what a tab is
+  // supposed to keep. Each tab owns its own Doc instead and the editor merely
+  // shows one of them. swapDoc() does not fire 'change', so switching tabs is not
+  // mistaken for typing; the caller still guards programmatic edits itself.
+
+  /** A fresh, empty-history document holding `text` (not attached to the editor). */
+  function createDoc(text) {
+    const cm = easyMDE.codemirror;
+    const Doc = cm.constructor && cm.constructor.Doc;
+    if (typeof Doc !== 'function') throw new Error('CodeMirror.Doc is not available');
+    return new Doc(text, cm.getOption('mode'));
+  }
+
+  /** The document the editor is showing right now. */
+  function getDoc() {
+    return easyMDE.codemirror.getDoc();
+  }
+
+  /**
+   * Shows `doc` in the editor and returns the document that was showing before.
+   * Inline image previews belong to the document they were drawn in, so they are
+   * rebuilt for the new one (and the old marks cleared, not left behind).
+   */
+  function showDoc(doc) {
+    const previous = easyMDE.codemirror.swapDoc(doc);
+    refreshLayout();
+    renderActivePreview();
+    refreshInlineImages();
+    return previous;
+  }
+
+  /**
+   * `easyMDE.value(text)` re-renders the Preview pane when it is showing; swapDoc()
+   * goes around value(), so without this Preview keeps displaying the document that
+   * was open when it was switched on: the tab and the file name change, the page
+   * does not. (Side-by-side re-renders itself from CodeMirror's 'update' event.)
+   * This mirrors what EasyMDE's own value() does for the full Preview pane.
+   */
+  function renderActivePreview() {
+    if (typeof easyMDE.isPreviewActive !== 'function' || !easyMDE.isPreviewActive()) return;
+    const preview = easyMDE.codemirror.getWrapperElement().lastChild;
+    if (!preview) return;
+    const html = easyMDE.options.previewRender(easyMDE.value(), preview);
+    if (html !== null && html !== undefined) preview.innerHTML = html;
+    preview.scrollTop = 0;
+  }
+
   /**
    * Releases everything createEditor() attached. Without it there is no way to
    * get rid of this instance: the ResizeObserver keeps observing, the paste and
@@ -222,7 +271,7 @@ export function createEditor(textareaEl, deps) {
     }
   }
 
-  return { easyMDE, refreshLayout, refreshInlineImages, destroy };
+  return { easyMDE, refreshLayout, refreshInlineImages, createDoc, getDoc, showDoc, destroy };
 }
 
 function escapeHtml(s) {

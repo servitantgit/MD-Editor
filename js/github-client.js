@@ -114,6 +114,146 @@ export class GitHubClient {
     } catch (_) { /* body is not JSON — keep the status code */ }
     return new GitHubApiError(path ? `${msg} (${path})` : msg, res.status);
   }
+
+  // ===== Git Data API: multi-file commits + history =====
+
+  /** Current commit SHA for a branch ref. */
+  async getRefSha(branch) {
+    const res = await this.request(
+      `/repos/${this.owner}/${this.repo}/git/ref/heads/${encodePathForApi(branch)}`
+    );
+    if (!res.ok) throw await this._error(res, branch);
+    const data = await res.json();
+    return data.object.sha;
+  }
+
+  async getCommit(sha) {
+    const res = await this.request(`/repos/${this.owner}/${this.repo}/git/commits/${sha}`);
+    if (!res.ok) throw await this._error(res, sha);
+    return res.json();
+  }
+
+  /** Raw blob by SHA (for history restore / diffs against base). */
+  async getBlobB64(sha) {
+    const res = await this.request(`/repos/${this.owner}/${this.repo}/git/blobs/${sha}`);
+    if (!res.ok) throw await this._error(res, sha);
+    const data = await res.json();
+    if (!data.content) throw new GitHubApiError(`Empty blob (${sha})`, res.status);
+    return { b64: String(data.content).replace(/\n/g, ''), sha: data.sha, encoding: data.encoding };
+  }
+
+  async createBlob(contentB64) {
+    const res = await this.request(`/repos/${this.owner}/${this.repo}/git/blobs`, {
+      method: 'POST',
+      body: JSON.stringify({ content: contentB64, encoding: 'base64' }),
+    });
+    if (!res.ok) throw await this._error(res, 'blob');
+    return res.json(); // { sha, url }
+  }
+
+  /**
+   * Create a tree from base tree + path changes.
+   * @param {string} baseTreeSha
+   * @param {Array<{path: string, mode?: string, type?: string, sha: string|null}>} changes
+   *   sha=null means delete the path
+   */
+  async createTree(baseTreeSha, changes) {
+    const tree = changes.map((c) => {
+      if (c.sha === null) {
+        return { path: c.path, mode: '100644', type: 'blob', sha: null };
+      }
+      return {
+        path: c.path,
+        mode: c.mode || '100644',
+        type: c.type || 'blob',
+        sha: c.sha,
+      };
+    });
+    const res = await this.request(`/repos/${this.owner}/${this.repo}/git/trees`, {
+      method: 'POST',
+      body: JSON.stringify({ base_tree: baseTreeSha, tree }),
+    });
+    if (!res.ok) throw await this._error(res, 'tree');
+    return res.json();
+  }
+
+  async createCommitObject({ message, treeSha, parentSha }) {
+    const body = {
+      message,
+      tree: treeSha,
+      parents: parentSha ? [parentSha] : [],
+    };
+    const res = await this.request(`/repos/${this.owner}/${this.repo}/git/commits`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) throw await this._error(res, 'commit');
+    return res.json();
+  }
+
+  async updateRef(branch, sha, force = false) {
+    const res = await this.request(
+      `/repos/${this.owner}/${this.repo}/git/refs/heads/${encodePathForApi(branch)}`,
+      {
+        method: 'PATCH',
+        body: JSON.stringify({ sha, force }),
+      }
+    );
+    if (!res.ok) throw await this._error(res, branch);
+    return res.json();
+  }
+
+  /**
+   * Multi-file commit in one Git commit.
+   * @param {string} branch
+   * @param {string} message
+   * @param {Array<{path: string, contentB64: string|null}>} files
+   *   contentB64=null deletes the path
+   */
+  async commitFiles(branch, message, files) {
+    const parentSha = await this.getRefSha(branch);
+    const parentCommit = await this.getCommit(parentSha);
+    const baseTreeSha = parentCommit.tree.sha;
+
+    const changes = [];
+    for (const f of files) {
+      if (f.contentB64 === null) {
+        changes.push({ path: f.path, sha: null });
+      } else {
+        const blob = await this.createBlob(f.contentB64);
+        changes.push({ path: f.path, sha: blob.sha });
+      }
+    }
+
+    const tree = await this.createTree(baseTreeSha, changes);
+    const commit = await this.createCommitObject({
+      message,
+      treeSha: tree.sha,
+      parentSha,
+    });
+    await this.updateRef(branch, commit.sha);
+    return { commit, files: changes };
+  }
+
+  /** Recent commits on a branch (optionally filtered by path). */
+  async listCommits({ branch, path, perPage = 30 } = {}) {
+    const q = new URLSearchParams();
+    if (branch) q.set('sha', branch);
+    if (path) q.set('path', path);
+    q.set('per_page', String(perPage));
+    const res = await this.request(
+      `/repos/${this.owner}/${this.repo}/commits?${q}`
+    );
+    if (!res.ok) throw await this._error(res, 'commits');
+    return res.json();
+  }
+
+  /** Full commit detail including files + patch. */
+  async getCommitDetail(sha) {
+    const res = await this.request(`/repos/${this.owner}/${this.repo}/commits/${sha}`);
+    if (!res.ok) throw await this._error(res, sha);
+    return res.json();
+  }
 }
 
 /** utf-8 text -> base64, correct for Cyrillic/emoji (unlike bare btoa). */

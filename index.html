@@ -102,9 +102,17 @@
   <header class="hidden" id="app-header">
     <h1>MD Editor</h1>
     <span id="repo-label" style="color:var(--muted);font-size:13px"></span>
+    <span class="branch-pill" id="branch-pill" title="Current branch"><i class="fa-solid fa-code-branch"></i> <span id="branch-label">main</span></span>
     <a class="repo-link" href="https://github.com/servitantgit/MD-Editor" target="_blank" rel="noopener noreferrer" title="MD Editor on GitHub — source, issues, releases">
       <i class="fa-brands fa-github"></i>
     </a>
+    <div class="layout-toggle" id="layout-toggle" title="Editor layout">
+      <button class="secondary layout-btn" data-mode="source" title="Source only">Source</button>
+      <button class="secondary layout-btn active" data-mode="split" title="Hybrid live: source + preview">Live</button>
+      <button class="secondary layout-btn" data-mode="preview" title="Preview only">Preview</button>
+    </div>
+    <button class="secondary" id="btn-history" title="Commit history">History</button>
+    <button id="btn-commit" title="Commit local changes" disabled>Commit <span id="commit-badge" class="changes-badge hidden">0</span></button>
     <button class="secondary" id="btn-refresh" title="Refresh tree">↻</button>
     <button class="secondary" id="btn-logout">Sign out</button>
   </header>
@@ -133,9 +141,11 @@
     </div>
 
     <div class="editor-area">
+      <!-- Open files, one tab each. Rendered by js/tabs-ui.js; hidden while no file is open. -->
+      <div id="tab-bar" class="tab-bar hidden" role="tablist" aria-label="Open files"></div>
       <div class="editor-toolbar">
         <span class="current-file" id="current-file">No file selected</span>
-        <button id="btn-save" disabled>Save</button>
+        <button id="btn-save" disabled title="Quick-save this file (single-file commit)">Save</button>
         <!-- Autosave status, owned by js/autosave.js. Kept separate from
              #save-status on purpose: that one auto-clears after 4s for every
              other operation (moves, deletes, folder ops), while these states
@@ -158,6 +168,49 @@
       <div id="editor-container">
         <textarea id="editor"></textarea>
         <div id="editor-dropzone-overlay" class="hidden">Drop to add an image to the file</div>
+      </div>
+    </div>
+
+    <!-- Pre-commit / history diff overlay (covers editor-area) -->
+    <div id="diff-overlay" class="diff-overlay hidden">
+      <div class="diff-overlay-h">
+        <button class="secondary" id="btn-diff-back" title="Back">← Back</button>
+        <span id="diff-overlay-title" class="diff-overlay-title">Diff</span>
+        <button class="secondary hidden" id="btn-diff-restore" title="Restore this version into the editor">Restore file</button>
+      </div>
+      <div id="diff-overlay-body" class="diff-overlay-body"></div>
+    </div>
+
+    <!-- Commit panel (right drawer) -->
+    <div id="commit-panel" class="commit-panel hidden">
+      <div class="cp-h">
+        <span>Commit changes</span>
+        <button class="secondary" id="btn-commit-close" title="Close">✕</button>
+      </div>
+      <div class="cp-body">
+        <label class="cp-label" for="commit-message">Commit message</label>
+        <textarea id="commit-message" class="cp-msg" placeholder="Summarize your changes…" rows="4"></textarea>
+        <div class="cp-label">Changed files <span class="cp-hint-inline">click to view diff</span></div>
+        <div id="commit-files" class="cp-files"></div>
+      </div>
+      <div class="cp-actions">
+        <button id="btn-commit-only">Commit</button>
+        <button id="btn-commit-push" class="btn-purple">Commit &amp; Push</button>
+        <div class="cp-hint">Creates a Git commit on the current branch via GitHub API</div>
+      </div>
+    </div>
+
+    <!-- History panel (overlays editor area) -->
+    <div id="history-panel" class="history-panel hidden">
+      <div class="hist-side">
+        <div class="cp-h">
+          <span>History</span>
+          <button class="secondary" id="btn-history-close" title="Close">✕</button>
+        </div>
+        <div id="history-list" class="hist-list"></div>
+      </div>
+      <div id="history-detail" class="hist-detail">
+        <div class="hist-empty">Select a commit</div>
       </div>
     </div>
   </div>

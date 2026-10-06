@@ -275,6 +275,74 @@ button.secondary:hover { background: #21262d; }
 .folder-context-menu button.danger { color: #ff7b72; }
 .folder-context-menu button.danger:hover { background: #2d1214; }
 
+/* ===== Tabs: one per open file, above the toolbar ===== */
+.tab-bar {
+  display: flex;
+  align-items: stretch;
+  gap: 1px;
+  flex-shrink: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+  scrollbar-width: thin;
+}
+.tab-bar.hidden { display: none; }
+.tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+  max-width: 220px;
+  padding: 6px 6px 6px 12px;
+  font-size: 13px;
+  color: var(--muted);
+  background: var(--panel);
+  border-right: 1px solid var(--border);
+  border-top: 2px solid transparent;
+  cursor: pointer;
+  user-select: none;
+}
+.tab:hover { color: var(--text); background: #1c222b; }
+.tab.active {
+  color: var(--text);
+  background: var(--bg);
+  border-top-color: var(--accent);
+}
+.tab:focus-visible { outline: 1px solid var(--accent-hover); outline-offset: -2px; }
+.tab-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* The dot and the × share one slot, so a tab does not change width when it gets dirty. */
+.tab-dirty {
+  display: none;
+  color: #d29922;
+  font-size: 10px;
+  line-height: 1;
+}
+.tab.dirty .tab-dirty { display: inline; }
+.tab-close {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  line-height: 16px;
+  font-size: 15px;
+  text-align: center;
+  color: var(--muted);
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  opacity: 0;
+}
+.tab:hover .tab-close,
+.tab.active .tab-close,
+.tab:focus-within .tab-close { opacity: 1; }
+.tab-close:hover { color: var(--text); background: #30363d; }
+
 /* ===== Editor area ===== */
 .editor-area {
   flex: 1;
@@ -754,4 +822,346 @@ button.secondary:hover { background: #21262d; }
   padding: 2px 6px;
   color: var(--muted);
   font-size: 13px;
+}
+
+/* ===== Branch / layout / commit header controls ===== */
+.branch-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: #21262d;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 3px 10px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.branch-pill i { color: #a371f7; font-size: 11px; }
+
+.layout-toggle {
+  display: inline-flex;
+  gap: 0;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+.layout-toggle .layout-btn {
+  border: none;
+  border-radius: 0;
+  padding: 4px 10px;
+  font-size: 12px;
+  background: transparent;
+}
+.layout-toggle .layout-btn.active {
+  background: #238636;
+  color: #fff;
+}
+.layout-toggle .layout-btn:hover:not(.active) {
+  background: #21262d;
+}
+
+.changes-badge {
+  display: inline-block;
+  background: #d29922;
+  color: #000;
+  font-size: 10px;
+  font-weight: 700;
+  border-radius: 999px;
+  padding: 1px 6px;
+  margin-left: 4px;
+  vertical-align: middle;
+}
+.changes-badge.hidden { display: none; }
+
+#btn-commit:not(:disabled) {
+  background: #6e40c9;
+  border-color: #6e40c9;
+}
+#btn-commit:not(:disabled):hover {
+  background: #8b5cf6;
+}
+
+/* Dirty markers in file tree */
+.file-item .dirty-badge {
+  margin-left: auto;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 0 5px;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+.file-item .dirty-badge.M {
+  color: #d29922;
+  background: #d2992222;
+}
+.file-item .dirty-badge.A {
+  color: #3fb950;
+  background: #23863622;
+}
+
+/* ===== Commit panel ===== */
+.commit-panel {
+  width: 320px;
+  flex-shrink: 0;
+  background: var(--panel);
+  border-left: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.commit-panel.hidden { display: none; }
+.cp-h {
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-weight: 600;
+  font-size: 14px;
+  flex-shrink: 0;
+}
+.cp-h button { padding: 2px 8px; font-size: 12px; }
+.cp-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px 14px;
+  min-height: 0;
+}
+.cp-label {
+  display: block;
+  font-size: 11px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 6px;
+}
+.cp-msg {
+  width: 100%;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 13px;
+  min-height: 72px;
+  resize: vertical;
+  font-family: inherit;
+  margin-bottom: 14px;
+}
+.cp-msg:focus { outline: 1px solid #58a6ff; }
+.cp-files { margin-bottom: 8px; }
+.cp-file {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.cp-file:hover { background: #21262d; }
+.cp-file .path {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.badge-m, .badge-a, .badge-d {
+  font-weight: 700;
+  font-size: 10px;
+  width: 16px;
+  text-align: center;
+}
+.badge-m { color: #d29922; }
+.badge-a { color: #3fb950; }
+.badge-d { color: #f85149; }
+.cp-empty, .hist-empty {
+  padding: 16px;
+  color: var(--muted);
+  font-size: 13px;
+  text-align: center;
+}
+.cp-actions {
+  padding: 12px 14px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.cp-actions button { width: 100%; padding: 9px; font-size: 13px; }
+.btn-purple, #btn-commit-push {
+  background: #6e40c9 !important;
+  border-color: #6e40c9 !important;
+}
+.btn-purple:hover, #btn-commit-push:hover {
+  background: #8b5cf6 !important;
+}
+.cp-hint {
+  font-size: 11px;
+  color: var(--muted);
+  text-align: center;
+}
+
+/* ===== History panel ===== */
+.history-panel {
+  position: absolute;
+  inset: 0;
+  z-index: 15;
+  display: flex;
+  background: var(--bg);
+  border-left: 1px solid var(--border);
+}
+.history-panel.hidden { display: none; }
+.hist-side {
+  width: 300px;
+  flex-shrink: 0;
+  background: var(--panel);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.hist-list {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+}
+.hist-item {
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+}
+.hist-item:hover { background: #21262d; }
+.hist-item.sel {
+  background: #1f6feb22;
+  border-left: 3px solid #58a6ff;
+}
+.hist-sha {
+  font-family: ui-monospace, "SF Mono", Consolas, monospace;
+  font-size: 11px;
+  color: #a371f7;
+}
+.hist-msg { font-size: 13px; margin: 4px 0; }
+.hist-meta {
+  font-size: 11px;
+  color: var(--muted);
+  display: flex;
+  gap: 10px;
+}
+.hist-files { margin-top: 4px; font-size: 11px; color: var(--muted); }
+.hist-detail {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+  padding: 0;
+}
+.hist-detail-h {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel);
+  font-size: 13px;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+.diff-file { border-bottom: 1px solid var(--border); }
+.diff-file-h {
+  padding: 8px 14px;
+  background: #21262d;
+  font-size: 12px;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.diff-stats { margin-left: auto; color: var(--muted); font-size: 11px; }
+.diff-patch {
+  margin: 0;
+  padding: 8px 0;
+  font-family: ui-monospace, "SF Mono", Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-x: auto;
+}
+.diff-patch .diff-add { background: #23863633; color: #3fb950; padding: 0 14px; white-space: pre; }
+.diff-patch .diff-del { background: #da363333; color: #f85149; padding: 0 14px; white-space: pre; }
+.diff-patch .diff-hunk { background: #1f6feb18; color: #58a6ff; padding: 0 14px; white-space: pre; font-size: 11px; }
+.diff-patch div:not(.diff-add):not(.diff-del):not(.diff-hunk) {
+  padding: 0 14px;
+  white-space: pre;
+  color: var(--muted);
+}
+
+/* Hybrid Live: when side-by-side, give preview a bit more presence */
+.editor-area.mode-split .EasyMDEContainer .editor-preview-side {
+  background: var(--bg);
+}
+.editor-area.mode-preview .CodeMirror {
+  display: none !important;
+}
+.editor-area.mode-preview .editor-preview {
+  display: block !important;
+  position: static !important;
+  height: 100% !important;
+}
+.main { position: relative; }
+
+/* ===== Diff overlay (pre-commit review) ===== */
+.diff-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 12;
+  background: var(--bg);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.diff-overlay.hidden { display: none; }
+.diff-overlay-h {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel);
+  flex-shrink: 0;
+}
+.diff-overlay-title {
+  font-size: 13px;
+  color: var(--muted);
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.diff-overlay-body {
+  flex: 1;
+  overflow: auto;
+  min-height: 0;
+}
+.cp-hint-inline {
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: 400;
+  color: var(--muted);
+  font-size: 11px;
+  margin-left: 6px;
+}
+.cp-file.sel { background: #1f6feb22; }
+.cp-file .stats { font-size: 11px; color: var(--muted); flex-shrink: 0; }
+.cp-file .stats .s-add { color: #3fb950; }
+.cp-file .stats .s-del { color: #f85149; }
+.cp-file .stats.muted { opacity: 0.7; }
+.diff-stats .s-add { color: #3fb950; }
+.diff-stats .s-del { color: #f85149; }
+.btn-restore {
+  margin-left: 8px;
+  padding: 2px 8px !important;
+  font-size: 11px !important;
+  flex-shrink: 0;
+}
+.diff-fname {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }

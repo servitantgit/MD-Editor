@@ -61,6 +61,14 @@ export class FileTree {
     // The folder new files/folders are created in — follows the last folder the user
     // interacted with (opened or expanded). '' means the repository root.
     this.activeFolder = '';
+    /** @type {Record<string, 'M'|'A'>} */
+    this.dirtyMap = {};
+  }
+
+  /** Update dirty badges without changing the file list. */
+  setDirtyMap(map) {
+    this.dirtyMap = map || {};
+    if (this.files.length) this.render();
   }
 
   getActiveFolder() {
@@ -166,7 +174,11 @@ export class FileTree {
       el.style.paddingLeft = `${12 + (depth + 1) * 14}px`;
       el.dataset.path = file.path;
       el.title = file.path;
-      el.innerHTML = `<span class="icon">${icon}</span><span class="name">${escapeAttr(name)}</span>`;
+      const dirty = this.dirtyMap[file.path];
+      const dirtyHtml = dirty
+        ? `<span class="dirty-badge ${dirty}">${dirty}</span>`
+        : '';
+      el.innerHTML = `<span class="icon">${icon}</span><span class="name">${escapeAttr(name)}</span>${dirtyHtml}`;
 
       if (isMd && this.handlers.onOpenFile) {
         el.addEventListener('click', () => {

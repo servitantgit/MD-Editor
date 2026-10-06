@@ -154,3 +154,62 @@ test('switching files mid-render leaves no orphaned inline-image marks behind', 
   assert.equal(created[0].cleared, true);
   assert.equal(created[1].cleared, false, 'the live run’s mark must survive');
 });
+
+test('showDoc() swaps the document, refreshes layout, and re-renders the Preview pane when it is showing', async () => {
+  const dom = new JSDOM('<!doctype html><body></body>');
+  let shown = 'FIRST DOCUMENT';
+  const { easyMDE, codemirror } = installEnvironment(dom, { text: () => shown });
+
+  const previewEl = dom.window.document.createElement('div');
+  previewEl.className = 'editor-preview editor-preview-active';
+  previewEl.innerHTML = '<p>FIRST DOCUMENT</p>';
+  previewEl.scrollTop = 400;
+  const wrapper = dom.window.document.createElement('div');
+  wrapper.appendChild(previewEl);
+
+  class FakeDoc { constructor(text) { this.text = text; } }
+  Object.defineProperty(codemirror, 'constructor', { value: { Doc: FakeDoc } });
+  codemirror.getOption = () => 'gfm';
+  codemirror.getWrapperElement = () => wrapper;
+  const swaps = [];
+  codemirror.swapDoc = (doc) => { swaps.push(doc); shown = doc.text; return { text: 'old' }; };
+
+  let previewActive = true;
+  easyMDE.isPreviewActive = () => previewActive;
+  easyMDE.value = () => shown;
+  const rendered = [];
+  easyMDE.options = { previewRender: (text) => { rendered.push(text); return `<p>${text}</p>`; } };
+
+  const { createEditor } = await import('../js/editor.js');
+  const handle = createEditor(dom.window.document.createElement('textarea'), {
+    marked: {},
+    imageResolver: { resolve: async () => '' },
+    getCurrentPath: () => null,
+    onImageUploadRequest: () => {},
+    onImagePaste: () => {},
+  });
+
+  const doc = handle.createDoc('SECOND DOCUMENT');
+  assert.ok(doc instanceof FakeDoc, 'createDoc builds a CodeMirror Doc');
+  assert.equal(doc.text, 'SECOND DOCUMENT');
+
+  const refreshesBefore = codemirror.refreshes;
+  const previous = handle.showDoc(doc);
+  assert.deepEqual(swaps, [doc]);
+  assert.deepEqual(previous, { text: 'old' }, 'the document that was showing is handed back to the caller');
+  assert.ok(codemirror.refreshes > refreshesBefore, 'layout is refreshed after the swap');
+  assert.equal(previewEl.innerHTML, '<p>SECOND DOCUMENT</p>',
+    'Preview kept showing the previous document: tab switching never reached it');
+  assert.equal(previewEl.scrollTop, 0, 'a new document starts at the top of the preview');
+  assert.deepEqual(rendered, ['SECOND DOCUMENT']);
+
+  // With Preview off nothing is rendered or touched: the editor itself shows the doc.
+  previewActive = false;
+  previewEl.innerHTML = '<p>untouched</p>';
+  handle.showDoc(handle.createDoc('THIRD DOCUMENT'));
+  assert.equal(previewEl.innerHTML, '<p>untouched</p>');
+  assert.deepEqual(rendered, ['SECOND DOCUMENT']);
+
+  handle.destroy();
+});
+

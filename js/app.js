@@ -12,13 +12,18 @@ import { setupFolderDropzone } from './folder-upload.js';
 import { exportCurrentPageToPdf } from './pdf-export.js';
 import { moveFile, renameFile } from './file-mover.js';
 import { createFolder, renameFolder, deleteFolder, getFolders, isFolderEmpty } from './folder-manager.js';
-import { basenameOf, dirnameOf } from './paths.js';
+import { basenameOf, dirnameOf, encodePathForApi } from './paths.js';
 import { looksLikeGitHubUrl, parseGitHubOwnerRepo } from './github-repo-url.js';
 import { SearchStore } from './search-store.js';
 import { SearchSync } from './search-sync.js';
 import { createSearchUI, formatAge } from './search-ui.js';
 import { DraftStore } from './draft-store.js';
 import { Autosave } from './autosave.js';
+import { TabsModel, tabLabels, tabsStorageKey } from './tabs.js';
+import { createTabBar } from './tabs-ui.js';
+import { WorkingTree } from './working-tree.js';
+import { bindCommitPanel, bindHistoryPanel } from './commit-ui.js';
+import { unifiedDiff, renderDiffLines } from './diff-util.js';
 
 const els = {
   loginScreen: document.getElementById('login-screen'),
@@ -32,6 +37,28 @@ const els = {
   repoLabel: document.getElementById('repo-label'),
   btnRefresh: document.getElementById('btn-refresh'),
   btnLogout: document.getElementById('btn-logout'),
+  branchLabel: document.getElementById('branch-label'),
+  branchPill: document.getElementById('branch-pill'),
+  layoutToggle: document.getElementById('layout-toggle'),
+  btnHistory: document.getElementById('btn-history'),
+  btnCommit: document.getElementById('btn-commit'),
+  commitBadge: document.getElementById('commit-badge'),
+  commitPanel: document.getElementById('commit-panel'),
+  commitMessage: document.getElementById('commit-message'),
+  commitFiles: document.getElementById('commit-files'),
+  btnCommitClose: document.getElementById('btn-commit-close'),
+  btnCommitOnly: document.getElementById('btn-commit-only'),
+  btnCommitPush: document.getElementById('btn-commit-push'),
+  historyPanel: document.getElementById('history-panel'),
+  historyList: document.getElementById('history-list'),
+  historyDetail: document.getElementById('history-detail'),
+  btnHistoryClose: document.getElementById('btn-history-close'),
+  editorArea: document.querySelector('.editor-area'),
+  diffOverlay: document.getElementById('diff-overlay'),
+  diffOverlayTitle: document.getElementById('diff-overlay-title'),
+  diffOverlayBody: document.getElementById('diff-overlay-body'),
+  btnDiffBack: document.getElementById('btn-diff-back'),
+  btnDiffRestore: document.getElementById('btn-diff-restore'),
 
   fileTreeEl: document.getElementById('file-tree'),
   searchInput: document.getElementById('search-input'),
@@ -43,6 +70,7 @@ const els = {
   btnNewFolder: document.getElementById('btn-new-folder'),
   btnNewFile: document.getElementById('btn-new-file'),
 
+  tabBar: document.getElementById('tab-bar'),
   currentFileLabel: document.getElementById('current-file'),
   btnSave: document.getElementById('btn-save'),
   btnExportPdf: document.getElementById('btn-export-pdf'),
@@ -91,6 +119,34 @@ let suppressEditorChange = false;
 let pendingDraft = null;
 // Set while a background reindex is running, so a second one is not started.
 let syncing = false;
+
+// ---- Tabs ----
+// `tabs` is only the ordered list + which one is active (js/tabs.js). The heavy
+// per-tab state lives here, keyed by path:
+//   doc        the tab's own CodeMirror document, so undo history, cursor and
+//              scroll position survive switching away and back
+//   sha        the last blob sha we know GitHub has for this file
+//   unsaved    we left the tab with something GitHub did not have yet. Such a tab
+//              is reloaded from GitHub on return (the draft banner then offers the
+//              local text) instead of trusting a cached document
+//   stale      the file was renamed/moved or its links were rewritten, so the cached
+//              document no longer matches GitHub
+//   commitSeen a commit for this path landed since we started leaving it
+// A path with no entry here is a tab that was restored but never opened yet.
+let tabs = new TabsModel();
+let tabBar = null;
+let workingTree = new WorkingTree();
+let commitPanel = null;
+let historyPanel = null;
+let layoutMode = localStorage.getItem('md_layout') || 'split';
+const tabDocs = new Map();
+// Whether the ACTIVE file differs from GitHub, derived from the autosave label.
+let activeFileUnsaved = false;
+// Bumped by every openFile(); a slower, older open compares against it and gives
+// up instead of overwriting the editor with a file the user has moved on from.
+let openSeq = 0;
+// The persisted tab list is read once per session, on the first tree load.
+let tabsRestored = false;
 
 // ====================== LOGIN ======================
 init();
@@ -239,6 +295,7 @@ async function finishLogin(token, owner, repo) {
 
     state.client = client;
     state.branch = branch;
+    if (els.branchLabel) els.branchLabel.textContent = branch;
     showApp(owner, repo);
     loadTree();
   } catch (e) {
@@ -281,6 +338,13 @@ function setSaveStatus(msg, isError) {
 let autosaveClearTimer = null;
 
 function setAutosaveStatus(status) {
+  // Everything but "Saved to GitHub" (and no label at all) means the open file
+  // has something GitHub does not — that is what the dot on its tab shows.
+  const unsaved = !!status && status.variant !== 'ok';
+  if (unsaved !== activeFileUnsaved) {
+    activeFileUnsaved = unsaved;
+    renderTabs();
+  }
   clearTimeout(autosaveClearTimer);
   if (!status) {
     els.autosaveStatus.textContent = '';
@@ -318,8 +382,9 @@ function hideDraftBanner() {
  * Builds the session's Autosave over the shared DraftStore.
  *
  * Called from showApp() and again from openFile() whenever the previous
- * instance was destroyed (closeCurrentFile() does that on delete), because a
- * destroyed Autosave deliberately ignores everything afterwards.
+ * instance was destroyed, because a destroyed Autosave deliberately ignores
+ * everything afterwards. (Closing a tab or deleting the open file only release()s
+ * the instance, so in practice this runs once per session.)
  */
 function createAutosave(owner, repo) {
   if (draftStore) draftStore.close();
@@ -342,6 +407,7 @@ function createAutosave(owner, repo) {
     onStatus: setAutosaveStatus,
     onRemoteCommit: (path, sha) => {
       if (sha && state.currentPath === path) state.currentSha = sha;
+      noteCommit(path, sha);
     },
     onConflict: () => {
       showDraftBanner(
@@ -352,6 +418,8 @@ function createAutosave(owner, repo) {
     onReloadRemote: (path, text, sha) => {
       if (state.currentPath !== path) return;
       state.currentSha = sha;
+      const tab = tabDocs.get(path);
+      if (tab) tab.sha = sha;
       setEditorValue(text);
       hideDraftBanner();
       setSaveStatus(`Reloaded from GitHub: ${path}`, false);
@@ -359,7 +427,7 @@ function createAutosave(owner, repo) {
   });
 }
 
-/** The instance to use right now, rebuilt after a closeCurrentFile(). */
+/** The instance to use right now (rebuilt if it was ever destroyed). */
 function ensureAutosave() {
   if (!autosave || autosave.destroyed) {
     autosave = createAutosave(state.client.owner, state.client.repo);
@@ -415,6 +483,16 @@ function showApp(owner, repo) {
   }
   syncing = false;
   if (fileTree) fileTree = null;
+  // Tabs belong to one session of one repository.
+  if (tabBar) {
+    tabBar.destroy();
+    tabBar = null;
+  }
+  tabs = new TabsModel();
+  tabDocs.clear();
+  activeFileUnsaved = false;
+  tabsRestored = false;
+  openSeq++; // abandon any open still in flight from the previous session
 
   els.loginScreen.classList.add('hidden');
   els.appHeader.classList.remove('hidden');
@@ -447,6 +525,12 @@ function showApp(owner, repo) {
     onChange: (text) => {
       if (suppressEditorChange) return;
       ensureAutosave().onChange(text);
+      // Track multi-file dirty state for Commit panel
+      if (state.currentPath) {
+        workingTree.setDirty(state.currentPath, text, state.currentSha || null);
+        refreshCommitBadge();
+        if (fileTree) fileTree.setDirtyMap(workingTree.statusMap());
+      }
     },
     onImagePaste: (file) => uploadImage(file, {
       client: state.client,
@@ -460,6 +544,19 @@ function showApp(owner, repo) {
     onImageResolveFailures: (count) =>
       setSaveStatus(`Preview: failed to load ${count} image(s) — details shown in place of the image`, true),
   });
+
+  tabBar = createTabBar(els.tabBar, {
+    onActivate: (path) => openFile(path),
+    onClose: (path) => closeTab(path),
+  });
+  renderTabs();
+
+  // Hybrid layout + Commit / History panels (idempotent re-bind each showApp)
+  applyLayoutMode(layoutMode);
+  setupLayoutToggle();
+  setupCommitAndHistory();
+  workingTree.clearAll();
+  refreshCommitBadge();
 
   // Key fix for "doesn't scroll / not editable": force a CodeMirror layout
   // recalculation right after the container became visible and got its
@@ -638,6 +735,7 @@ async function loadTree() {
     state.allFiles = files;
     state.treeLoaded = true;
     fileTree.setFiles(files);
+    restoreTabsOnce(files);
     // Every local write (save/delete/move/rename/create/upload) ends in a
     // loadTree(), so this ONE hook covers them all. The diff makes it cheap:
     // when nothing changed, the sync makes no request at all.
@@ -710,13 +808,22 @@ async function onMoveFile(oldPath, targetFolder) {
       return;
     }
 
-    if (state.currentPath === oldPath) {
+    const wasCurrent = state.currentPath === oldPath;
+    tabs.rename(oldPath, newPath);
+    moveTabDoc(oldPath, newPath);
+    markStale(updatedFiles); // links were rewritten in these files
+    if (wasCurrent) {
       state.currentPath = newPath;
       els.currentFileLabel.textContent = newPath;
     }
-    if (state.currentPath && updatedFiles.includes(state.currentPath)) {
-      await openFile(state.currentPath); // pull fresh contents/sha after auto link replacement
+    if (state.currentPath && (wasCurrent || updatedFiles.includes(state.currentPath))) {
+      // Pull fresh contents/sha, and — for the moved file itself — rebind autosave
+      // to the NEW path. Left bound to the old one, the next keystroke would try
+      // to commit to a path that no longer exists.
+      await openFile(state.currentPath, { reload: true });
     }
+    persistTabs();
+    renderTabs();
 
     imageResolver.invalidate(oldPath);
     await loadTree();
@@ -731,40 +838,203 @@ async function onMoveFile(oldPath, targetFolder) {
   }
 }
 
-// ====================== OPEN / SAVE ======================
-async function openFile(path) {
-  // Switching files: the local draft is written immediately and the commit is
-  // kicked off in the background, so the next file opens instantly.
-  const switching = state.currentPath && state.currentPath !== path;
-  if (switching && autosave) await autosave.flushCurrentFile();
+// ====================== TABS ======================
+function tabsKey() {
+  return tabsStorageKey(state.client.owner, state.client.repo, state.branch);
+}
 
-  fileTree.setActive(path);
-  els.currentFileLabel.textContent = path;
+/** The open tabs survive a page reload (sessionStorage, like the token: gone with the browser tab). */
+function persistTabs() {
+  if (!state.client) return;
+  try {
+    sessionStorage.setItem(tabsKey(), JSON.stringify(tabs.toJSON()));
+  } catch (_) { /* storage disabled or full — tabs just will not survive a reload */ }
+}
+
+function renderTabs() {
+  if (!tabBar) return;
+  const dirty = new Set();
+  for (const path of tabs.paths) {
+    const isActive = path === state.currentPath;
+    if (isActive ? activeFileUnsaved : (tabDocs.get(path) || {}).unsaved) dirty.add(path);
+  }
+  tabBar.render({ paths: tabs.paths, active: tabs.active, labels: tabLabels(tabs.paths), dirty });
+}
+
+/** A commit for `path` landed (maybe in the background, for a tab the user already left). */
+function noteCommit(path, sha) {
+  const tab = tabDocs.get(path);
+  if (tab) {
+    if (sha) tab.sha = sha;
+    tab.commitSeen = true;
+    if (state.currentPath !== path && tab.unsaved) {
+      tab.unsaved = false;
+      renderTabs();
+    }
+  }
+  // Single-file Save / autosave also clears multi-file dirty tracking for this path
+  if (path && workingTree) {
+    workingTree.clear(path);
+    refreshCommitBadge();
+    if (fileTree) fileTree.setDirtyMap(workingTree.statusMap());
+  }
+}
+
+/**
+ * Brings the toolbar back in line with the file that is REALLY open, after an
+ * open that was started but did not happen (network error, not valid UTF-8).
+ */
+function restoreChrome() {
+  const path = state.currentPath;
+  els.currentFileLabel.textContent = path || 'No file selected';
+  els.btnSave.disabled = !path;
+  els.btnExportPdf.disabled = !path;
+  els.btnDelete.disabled = !path;
+  if (path) fileTree.setActive(path);
+  else fileTree.clearActive();
+}
+
+/** Shows a tab's document. swapDoc fires no 'change', but guard anyway. */
+function showDocInEditor(doc) {
+  suppressEditorChange = true;
+  try {
+    editorHandle.showDoc(doc);
+  } finally {
+    suppressEditorChange = false;
+  }
+}
+
+/** Tabs are restored once per session, from the first tree that loads. */
+function restoreTabsOnce(files) {
+  if (tabsRestored) return;
+  tabsRestored = true;
+  let saved = null;
+  try {
+    saved = JSON.parse(sessionStorage.getItem(tabsKey()) || 'null');
+  } catch (_) { /* corrupt entry: start with no tabs */ }
+  const known = new Set(files.map((f) => f.path));
+  const restored = TabsModel.fromJSON(saved, (path) => known.has(path));
+  if (restored.size === 0) return;
+
+  // Anything the user opened while the tree was still loading is kept, in front.
+  for (const path of restored.paths) tabs.open(path);
+  persistTabs();
+  renderTabs();
+  // Only one tab is fetched now; the others load when first clicked. When the file
+  // that was active has since disappeared, the first remaining tab takes its place
+  // rather than leaving tabs on screen next to an empty editor.
+  const toOpen = restored.active || restored.paths[0];
+  if (!state.currentPath && toOpen) openFile(toOpen);
+}
+
+// ====================== OPEN / SAVE ======================
+/**
+ * Opens a file in its tab (creating the tab if needed) and makes it active.
+ *
+ * Switching away commits what is pending in the old tab exactly as it always did
+ * (draft written at once, commit in the background). A tab that was clean when
+ * left comes back instantly from its cached document; one that was not is reloaded
+ * from GitHub and the draft banner offers the local text, because only GitHub plus
+ * the draft store know what the truth is after a background commit.
+ *
+ * `reload: true` is for callers that know the cached copy is wrong (rename, move,
+ * links rewritten) and for the active file, which is otherwise not re-opened.
+ */
+async function openFile(path, { reload = false } = {}) {
+  // Clicking the file or tab that is already on screen must not throw away its
+  // undo history and cursor by re-fetching it.
+  if (!reload && state.currentPath === path && tabDocs.has(path)) {
+    editorHandle.easyMDE.codemirror.focus();
+    return;
+  }
+
+  const seq = ++openSeq;
+  const leaving = state.currentPath;
+  const switching = !!leaving && leaving !== path;
+  const leavingTab = switching ? tabDocs.get(leaving) : null;
+
+  if (switching && autosave) {
+    if (leavingTab) leavingTab.commitSeen = false;
+    await autosave.flushCurrentFile();
+    if (seq !== openSeq) return;
+  }
+
+  const cached = tabDocs.get(path);
+  const useCache = !reload && !!cached && !!cached.doc && !cached.stale && !cached.unsaved;
+
   els.btnSave.disabled = true;
   els.btnExportPdf.disabled = true;
   els.btnDelete.disabled = true;
-  hideDraftBanner();
-  setAutosaveStatus(null);
-  setSaveStatus('Loading...', false);
+  els.currentFileLabel.textContent = path;
+  fileTree.setActive(path);
+  if (!useCache) setSaveStatus('Loading...', false);
 
   try {
-    const { b64, sha } = await state.client.getFileB64(path);
     let remoteText;
-    try {
-      remoteText = b64ToUtf8(b64);
-    } catch (_) {
-      // b64ToUtf8 THROWS on content that is not valid UTF-8, by design — a
-      // binary blob wearing a .md extension. Refuse it instead of opening
-      // replacement characters the user might then commit back to GitHub.
-      setSaveStatus(`Cannot open ${path}: the file is not valid UTF-8`, true);
-      return;
+    let sha;
+    if (useCache) {
+      remoteText = cached.doc.getValue();
+      sha = cached.sha;
+    } else {
+      const fetched = await state.client.getFileB64(path);
+      if (seq !== openSeq) return; // a newer open won the race
+      sha = fetched.sha;
+      try {
+        remoteText = b64ToUtf8(fetched.b64);
+      } catch (_) {
+        // b64ToUtf8 THROWS on content that is not valid UTF-8, by design — a
+        // binary blob wearing a .md extension. Refuse it instead of opening
+        // replacement characters the user might then commit back to GitHub.
+        setSaveStatus(`Cannot open ${path}: the file is not valid UTF-8`, true);
+        restoreChrome();
+        return;
+      }
     }
 
+    // The old tab stays editable while the new file loads. Whatever was typed in
+    // it in the meantime has to be committed too, and only now do we know whether
+    // GitHub already has everything.
+    if (switching) {
+      const leavingUnsaved = activeFileUnsaved || (autosave ? autosave.hasUnsavedDraft() : false);
+      if (autosave && autosave.hasUnsavedDraft()) {
+        if (leavingTab) leavingTab.commitSeen = false;
+        await autosave.flushCurrentFile();
+        if (seq !== openSeq) return;
+      }
+      if (leavingTab) leavingTab.unsaved = leavingUnsaved && !leavingTab.commitSeen;
+    }
+
+    hideDraftBanner();
+    setAutosaveStatus(null);
     state.currentPath = path;
     state.currentSha = sha;
     const opened = await ensureAutosave().onOpen(path, remoteText, sha);
-    if (state.currentPath !== path) return; // another open won the race
-    setEditorValue(opened.text);
+    if (seq !== openSeq) return; // another open won the race
+
+    let doc;
+    if (useCache) {
+      doc = cached.doc;
+      cached.sha = sha;
+      cached.unsaved = false;
+      cached.commitSeen = false;
+    } else {
+      doc = editorHandle.createDoc(opened.text);
+      // A reload keeps the reader where they were (CodeMirror clips the cursor
+      // if the text got shorter).
+      const previous = cached && cached.doc;
+      if (previous) {
+        doc.setCursor(previous.getCursor());
+        doc.scrollTop = previous.scrollTop;
+        doc.scrollLeft = previous.scrollLeft;
+      }
+      tabDocs.set(path, { doc, sha, unsaved: false, stale: false, commitSeen: false });
+    }
+    showDocInEditor(doc);
+
+    tabs.open(path);
+    tabs.activate(path);
+    persistTabs();
+    renderTabs();
 
     els.btnSave.disabled = false;
     els.btnExportPdf.disabled = false;
@@ -781,6 +1051,63 @@ async function openFile(path) {
     }
   } catch (e) {
     setSaveStatus('Error: ' + e.message, true);
+    restoreChrome();
+  }
+}
+
+/** Closes a tab. The active one hands over to its neighbour, or leaves an empty editor. */
+async function closeTab(path) {
+  if (!tabs.has(path)) return;
+  const wasActive = state.currentPath === path;
+  // Same promise as switching away: the text is on disk before the tab goes, and
+  // the commit continues in the background. Nothing is ever lost by closing.
+  if (wasActive && autosave) await autosave.flushCurrentFile();
+
+  const { next } = tabs.close(path);
+  tabDocs.delete(path);
+  persistTabs();
+  renderTabs();
+  if (!wasActive) return;
+
+  if (next) await openFile(next);
+  else closeCurrentFile({ flush: false });
+}
+
+/**
+ * These files no longer exist (deleted here). Their tabs go too; when the active
+ * one is among them the editor shows the neighbouring tab, or nothing.
+ * No flush: committing to a path that was just deleted is pointless.
+ */
+async function dropTabs(paths) {
+  const activeGone = state.currentPath !== null && paths.includes(state.currentPath);
+  for (const path of paths) {
+    tabs.close(path);
+    tabDocs.delete(path);
+  }
+  persistTabs();
+  renderTabs();
+  if (!activeGone) return;
+  closeCurrentFile({ flush: false });
+  if (tabs.active) await openFile(tabs.active);
+}
+
+/** A tab's cached document no longer matches GitHub; it is re-fetched next time it is shown. */
+function markStale(paths) {
+  for (const path of paths) {
+    const tab = tabDocs.get(path);
+    if (tab) tab.stale = true;
+  }
+}
+
+/** Re-keys a tab's cached state after its file was renamed or moved (it is stale by definition). */
+function moveTabDoc(oldPath, newPath) {
+  const tab = tabDocs.get(oldPath);
+  tabDocs.delete(oldPath);
+  if (tab) {
+    tab.stale = true;
+    tabDocs.set(newPath, tab);
+  } else {
+    tabDocs.delete(newPath);
   }
 }
 
@@ -808,7 +1135,7 @@ async function onDeleteFile() {
   try {
     await state.client.deleteFile(path, state.currentSha, `Delete ${path}`);
     imageResolver.invalidate(path);
-    closeCurrentFile();
+    await dropTabs([path]);
     await loadTree();
     setSaveStatus(`File deleted: ${path}`, false);
   } catch (e) {
@@ -820,23 +1147,27 @@ async function onDeleteFile() {
   }
 }
 
-// After deletion (or when no file is open) the editor must not keep
-// the deleted file's contents: clear the text, drop inline images, lock actions.
-function closeCurrentFile() {
-  // Any draft of this file is written and committed before we let go of it...
-  if (autosave && state.currentPath) autosave.flushCurrentFile();
-  // ...and the instance is destroyed, which clears every timer it owns. This is
-  // the path that actually matters (unlike logout, where location.reload()
-  // tears the whole realm down anyway). openFile() builds a fresh one through
-  // ensureAutosave(), because a destroyed Autosave ignores everything.
-  if (autosave) autosave.destroy();
+// After deletion (or when the last tab is closed) the editor must not keep the
+// file's contents: show an empty document, drop inline images, lock actions.
+// Tabs are the CALLER's business (dropTabs / closeTab) — this only resets the editor.
+function closeCurrentFile({ flush = true } = {}) {
+  if (autosave && state.currentPath) {
+    // Any draft of this file is written and committed before we let go of it
+    // (not when the file itself was just deleted — there is nothing to commit to)...
+    if (flush) autosave.flushCurrentFile();
+    // ...and the instance lets go of the file but is NOT destroyed: a commit that
+    // is still in flight must finish and delete its own draft, which a destroyed
+    // instance skips. release() cancels every timer and ignores typing until the
+    // next onOpen().
+    autosave.release();
+  }
   hideDraftBanner();
   setAutosaveStatus(null);
   state.currentPath = null;
   state.currentSha = null;
   els.currentFileLabel.textContent = 'No file selected';
   fileTree.clearActive();
-  setEditorValue('');
+  showDocInEditor(editorHandle.createDoc(''));
   els.btnSave.disabled = true;
   els.btnExportPdf.disabled = true;
   els.btnDelete.disabled = true;
@@ -947,13 +1278,19 @@ async function onRenameFile(path) {
     const { newPath, updatedFiles, skipped } = await renameFile(state.client, state.allFiles, path, trimmed);
     if (skipped) return;
 
-    if (state.currentPath === path) {
+    const wasCurrent = state.currentPath === path;
+    tabs.rename(path, newPath);
+    moveTabDoc(path, newPath);
+    markStale(updatedFiles);
+    if (wasCurrent) {
       state.currentPath = newPath;
       els.currentFileLabel.textContent = newPath;
-      await openFile(newPath); // refresh the editor + sha under the new path
-    } else if (state.currentPath && updatedFiles.includes(state.currentPath)) {
-      await openFile(state.currentPath);
     }
+    if (state.currentPath && (wasCurrent || updatedFiles.includes(state.currentPath))) {
+      await openFile(state.currentPath, { reload: true }); // refresh the editor + sha under the new path
+    }
+    persistTabs();
+    renderTabs();
 
     imageResolver.invalidate(path);
     await loadTree();
@@ -982,7 +1319,7 @@ async function onDeleteFileAt(path) {
 
     await state.client.deleteFile(path, sha, `Delete ${path}`);
     imageResolver.invalidate(path);
-    if (state.currentPath === path) closeCurrentFile();
+    await dropTabs([path]);
     await loadTree();
     setSaveStatus(`File deleted: ${path}`, false);
   } catch (e) {
@@ -1000,11 +1337,15 @@ async function onRenameFolder(folderPath) {
   try {
     setSaveStatus(`Renaming ${folderPath}...`, false);
     const { moved, updatedFiles } = await renameFolder(state.client, state.allFiles, folderPath, newPath);
+    for (const [from, to] of tabs.renameFolder(folderPath, newPath)) moveTabDoc(from, to);
+    markStale(updatedFiles);
     if (state.currentPath && state.currentPath.startsWith(folderPath + '/')) {
       state.currentPath = newPath + state.currentPath.slice(folderPath.length);
       els.currentFileLabel.textContent = state.currentPath;
-      await openFile(state.currentPath);
+      await openFile(state.currentPath, { reload: true });
     }
+    persistTabs();
+    renderTabs();
     await loadTree();
     setSaveStatus(`Renamed: ${folderPath} → ${newPath} (files: ${moved.length})`, false);
   } catch (e) {
@@ -1024,9 +1365,7 @@ async function onDeleteFolder(folderPath) {
   try {
     setSaveStatus(`Deleting folder ${folderPath}...`, false);
     await deleteFolder(state.client, state.allFiles, folderPath);
-    if (state.currentPath && state.currentPath.startsWith(folderPath + '/')) {
-      closeCurrentFile();
-    }
+    await dropTabs(tabs.paths.filter((p) => p.startsWith(folderPath + '/')));
     await loadTree();
     setSaveStatus(`Folder deleted: ${folderPath}`, false);
   } catch (e) {
@@ -1053,4 +1392,397 @@ function escapeHtml(s) {
   const d = document.createElement('div');
   d.textContent = s;
   return d.innerHTML;
+}
+
+
+// ====================== HYBRID LAYOUT + COMMIT / HISTORY ======================
+
+function applyLayoutMode(mode) {
+  layoutMode = mode;
+  localStorage.setItem('md_layout', mode);
+  if (els.editorArea) {
+    els.editorArea.classList.remove('mode-source', 'mode-split', 'mode-preview');
+    els.editorArea.classList.add('mode-' + mode);
+  }
+  if (els.layoutToggle) {
+    els.layoutToggle.querySelectorAll('.layout-btn').forEach((btn) => {
+      btn.classList.toggle('active', btn.dataset.mode === mode);
+    });
+  }
+  if (!editorHandle) return;
+  const easyMDE = editorHandle.easyMDE;
+  try {
+    // EasyMDE: side-by-side = hybrid live; preview = preview-only; neither = source
+    const side = typeof easyMDE.isSideBySideActive === 'function' && easyMDE.isSideBySideActive();
+    const prev = typeof easyMDE.isPreviewActive === 'function' && easyMDE.isPreviewActive();
+    if (mode === 'split') {
+      if (prev) easyMDE.togglePreview();
+      if (!side) easyMDE.toggleSideBySide();
+    } else if (mode === 'preview') {
+      if (side) easyMDE.toggleSideBySide();
+      if (!prev) easyMDE.togglePreview();
+    } else {
+      if (side) easyMDE.toggleSideBySide();
+      if (prev) easyMDE.togglePreview();
+    }
+  } catch (_) { /* EasyMDE may not be ready */ }
+  requestAnimationFrame(() => editorHandle && editorHandle.refreshLayout());
+}
+
+function setupLayoutToggle() {
+  if (!els.layoutToggle || els.layoutToggle.dataset.bound) return;
+  els.layoutToggle.dataset.bound = '1';
+  els.layoutToggle.addEventListener('click', (e) => {
+    const btn = e.target.closest('.layout-btn');
+    if (!btn) return;
+    applyLayoutMode(btn.dataset.mode);
+  });
+}
+
+function refreshCommitBadge() {
+  const n = workingTree.getChangeCount();
+  if (!els.commitBadge || !els.btnCommit) return;
+  if (n > 0) {
+    els.commitBadge.textContent = String(n);
+    els.commitBadge.classList.remove('hidden');
+    els.btnCommit.disabled = false;
+  } else {
+    els.commitBadge.classList.add('hidden');
+    els.btnCommit.disabled = true;
+  }
+}
+
+function setupCommitAndHistory() {
+  if (!els.commitPanel) return;
+
+  if (!commitPanel) {
+    commitPanel = bindCommitPanel({
+      panelEl: els.commitPanel,
+      messageEl: els.commitMessage,
+      filesEl: els.commitFiles,
+      btnCommit: els.btnCommitOnly,
+      btnCommitPush: els.btnCommitPush,
+      btnClose: els.btnCommitClose,
+      onCommit: doCommit,
+      onClose: () => {
+        commitPanel.close();
+        hideDiffOverlay();
+      },
+      onFileClick: (path) => showPreCommitDiff(path),
+    });
+  }
+  if (!historyPanel) {
+    historyPanel = bindHistoryPanel({
+      panelEl: els.historyPanel,
+      listEl: els.historyList,
+      detailEl: els.historyDetail,
+      btnClose: els.btnHistoryClose,
+      onClose: () => {
+        historyPanel.close();
+        hideDiffOverlay();
+      },
+      onSelect: loadCommitDetail,
+      onRestore: restoreFileFromHistory,
+    });
+  }
+
+  if (els.btnDiffBack && !els.btnDiffBack.dataset.bound) {
+    els.btnDiffBack.dataset.bound = '1';
+    els.btnDiffBack.addEventListener('click', () => hideDiffOverlay());
+  }
+
+  if (!els.btnCommit.dataset.bound) {
+    els.btnCommit.dataset.bound = '1';
+    els.btnCommit.addEventListener('click', () => {
+      // Flush current editor text into working tree before opening panel
+      if (state.currentPath && editorHandle) {
+        workingTree.setDirty(
+          state.currentPath,
+          editorHandle.easyMDE.value(),
+          state.currentSha || null
+        );
+      }
+      // Also pull dirty text from open tabs that aren't active
+      for (const path of tabs.paths) {
+        if (path === state.currentPath) continue;
+        const entry = tabDocs.get(path);
+        if (entry && entry.unsaved) {
+          // Prefer CodeMirror doc text if available
+          let text = null;
+          try {
+            if (entry.doc && typeof entry.doc.getValue === 'function') text = entry.doc.getValue();
+          } catch (_) {}
+          if (text != null) workingTree.setDirty(path, text, entry.sha || null);
+        }
+      }
+      refreshCommitBadge();
+      if (fileTree) fileTree.setDirtyMap(workingTree.statusMap());
+      commitPanel.open(workingTree.listChanges());
+      if (historyPanel) historyPanel.close();
+    });
+  }
+
+  if (!els.btnHistory.dataset.bound) {
+    els.btnHistory.dataset.bound = '1';
+    els.btnHistory.addEventListener('click', async () => {
+      if (commitPanel) commitPanel.close();
+      hideDiffOverlay();
+      historyPanel.open();
+      historyPanel.setLoading('Loading commits…');
+      try {
+        const list = await state.client.listCommits({ branch: state.branch, perPage: 40 });
+        const items = list.map((c) => ({
+          sha: c.sha,
+          message: (c.commit && c.commit.message) || '',
+          author: (c.commit && c.commit.author && c.commit.author.name) || (c.author && c.author.login) || 'unknown',
+          date: formatCommitDate(c.commit && c.commit.author && c.commit.author.date),
+          stats: c.stats ? `+${c.stats.additions || 0} −${c.stats.deletions || 0}` : '',
+        }));
+        historyPanel.renderList(items);
+        historyPanel.setLoading('Select a commit');
+      } catch (e) {
+        historyPanel.setLoading('Error: ' + e.message);
+      }
+    });
+  }
+}
+
+function formatCommitDate(iso) {
+  if (!iso) return '';
+  try {
+    const d = new Date(iso);
+    const now = Date.now();
+    const diff = (now - d.getTime()) / 1000;
+    if (diff < 60) return 'just now';
+    if (diff < 3600) return Math.floor(diff / 60) + ' min ago';
+    if (diff < 86400) return Math.floor(diff / 3600) + ' h ago';
+    if (diff < 86400 * 7) return Math.floor(diff / 86400) + ' d ago';
+    return d.toLocaleDateString();
+  } catch (_) {
+    return iso;
+  }
+}
+
+async function loadCommitDetail(sha) {
+  historyPanel.setLoading('Loading diff…');
+  try {
+    const detail = await state.client.getCommitDetail(sha);
+    historyPanel.renderDetail({
+      sha: detail.sha,
+      message: (detail.commit && detail.commit.message) || '',
+      files: (detail.files || []).map((f) => ({
+        filename: f.filename,
+        status: f.status,
+        patch: f.patch,
+        additions: f.additions,
+        deletions: f.deletions,
+        sha: f.sha,
+      })),
+    });
+  } catch (e) {
+    historyPanel.setLoading('Error: ' + e.message);
+  }
+}
+
+/**
+ * Multi-file commit via Git Data API.
+ * andPush is informational — API commit already updates the remote ref.
+ */
+async function doCommit(message, andPush) {
+  const changes = workingTree.listChanges();
+  if (!changes.length) return;
+  commitPanel.setBusy(true);
+  setSaveStatus(andPush ? 'Committing & pushing…' : 'Committing…', false);
+  try {
+    // Prefer current editor buffer for active path
+    if (state.currentPath && editorHandle) {
+      workingTree.setDirty(
+        state.currentPath,
+        editorHandle.easyMDE.value(),
+        state.currentSha || null
+      );
+    }
+    const latest = workingTree.listChanges();
+    const files = latest.map((c) => ({
+      path: c.path,
+      contentB64: utf8ToB64(c.text),
+    }));
+    const result = await state.client.commitFiles(state.branch, message, files);
+
+    // Clear dirty state for committed paths
+    for (const c of latest) workingTree.clear(c.path);
+    refreshCommitBadge();
+    if (fileTree) fileTree.setDirtyMap(workingTree.statusMap());
+
+    // Update current SHA if active file was in the commit
+    if (state.currentPath && latest.some((c) => c.path === state.currentPath)) {
+      // Best-effort: refresh sha from tree after commit
+      try {
+        const tree = await state.client.getTree(state.branch);
+        state.allFiles = tree;
+        const hit = tree.find((f) => f.path === state.currentPath);
+        if (hit) state.currentSha = hit.sha;
+        if (fileTree) {
+          fileTree.setFiles(tree);
+          fileTree.setDirtyMap(workingTree.statusMap());
+        }
+      } catch (_) {
+        await loadTree();
+      }
+    } else {
+      await loadTree();
+    }
+
+    // Mark tabs clean for committed paths
+    for (const c of latest) {
+      const entry = tabDocs.get(c.path);
+      if (entry) entry.unsaved = false;
+      if (c.path === state.currentPath) activeFileUnsaved = false;
+    }
+    renderTabs();
+
+    commitPanel.clearMessage();
+    commitPanel.close();
+    hideDiffOverlay();
+    const short = result.commit.sha.slice(0, 7);
+    setSaveStatus(
+      (andPush ? 'Committed & pushed ' : 'Committed ') + short + ' · ' + latest.length + ' file(s)',
+      false
+    );
+  } catch (e) {
+    setSaveStatus('Commit failed: ' + e.message, true);
+  } finally {
+    commitPanel.setBusy(false);
+  }
+}
+
+
+// ====================== PRE-COMMIT DIFF + HISTORY RESTORE ======================
+
+/** @type {{ path: string, text: string, mode: string, commitSha?: string }|null} */
+let diffOverlayState = null;
+
+function hideDiffOverlay() {
+  diffOverlayState = null;
+  if (els.diffOverlay) els.diffOverlay.classList.add('hidden');
+  if (els.btnDiffRestore) els.btnDiffRestore.classList.add('hidden');
+  if (els.diffOverlayBody) els.diffOverlayBody.innerHTML = '';
+}
+
+/**
+ * Show unified diff of working copy vs last known GitHub version (pre-commit review).
+ */
+async function showPreCommitDiff(path) {
+  const change = workingTree.get(path);
+  if (!change) {
+    setSaveStatus('No local changes for ' + path, true);
+    return;
+  }
+  if (els.diffOverlayBody) {
+    els.diffOverlayBody.innerHTML = '<div class="hist-empty">Computing diff…</div>';
+  }
+  if (els.diffOverlay) els.diffOverlay.classList.remove('hidden');
+  if (els.diffOverlayTitle) els.diffOverlayTitle.textContent = path + ' (local vs HEAD)';
+  if (els.btnDiffRestore) els.btnDiffRestore.classList.add('hidden');
+
+  let oldText = '';
+  try {
+    if (change.baseSha) {
+      try {
+        const blob = await state.client.getBlobB64(change.baseSha);
+        oldText = b64ToUtf8(blob.b64);
+      } catch (_) {
+        const file = await state.client.getFileB64(path);
+        oldText = b64ToUtf8(file.b64);
+      }
+    }
+  } catch (e) {
+    oldText = '';
+  }
+
+  const diff = unifiedDiff(oldText, change.text, path);
+  if (els.diffOverlayBody) {
+    els.diffOverlayBody.innerHTML = '';
+    const meta = document.createElement('div');
+    meta.className = 'diff-file-h';
+    meta.innerHTML =
+      '<span class="' + (change.baseSha ? 'badge-m' : 'badge-a') + '">' + (change.baseSha ? 'M' : 'A') + '</span> ' +
+      '<span>' + escapeHtml(path) + '</span>' +
+      '<span class="diff-stats"><span class="s-add">+' + diff.stats.additions + '</span> ' +
+      '<span class="s-del">−' + diff.stats.deletions + '</span></span>';
+    els.diffOverlayBody.appendChild(meta);
+    renderDiffLines(els.diffOverlayBody, diff);
+  }
+  diffOverlayState = { path, text: change.text, mode: 'precommit' };
+}
+
+/**
+ * Restore a file version from a historical commit into the editor as local changes.
+ * Does NOT commit — user reviews and commits intentionally.
+ */
+async function restoreFileFromHistory(file, commitSha) {
+  const path = file.filename || file.path;
+  if (!path) return;
+
+  const confirmed = confirm(
+    'Restore "' + path + '" from commit ' + String(commitSha).slice(0, 7) + '?\n\n' +
+    'This loads that version into the editor as local changes. ' +
+    'It will not commit until you do.'
+  );
+  if (!confirmed) return;
+
+  setSaveStatus('Restoring ' + path + '…', false);
+  try {
+    let text = '';
+    const res = await state.client.request(
+      '/repos/' + state.client.owner + '/' + state.client.repo +
+      '/contents/' + encodePathForApi(path) + '?ref=' + encodeURIComponent(commitSha)
+    );
+    if (res.ok) {
+      const data = await res.json();
+      if (data.content) {
+        text = b64ToUtf8(String(data.content).replace(/\n/g, ''));
+      } else if (data.sha) {
+        const blob = await state.client.getBlobB64(data.sha);
+        text = b64ToUtf8(blob.b64);
+      }
+    } else if (file.sha) {
+      const blob = await state.client.getBlobB64(file.sha);
+      text = b64ToUtf8(blob.b64);
+    } else {
+      throw new Error('Could not fetch file content at that commit');
+    }
+
+    let baseSha = null;
+    const head = (state.allFiles || []).find((f) => f.path === path);
+    if (head) baseSha = head.sha;
+
+    await openFile(path);
+    setEditorValue(text);
+    state.currentPath = path;
+    if (head) state.currentSha = head.sha;
+
+    workingTree.setDirty(path, text, baseSha);
+    activeFileUnsaved = true;
+    const tab = tabDocs.get(path);
+    if (tab) {
+      tab.unsaved = true;
+      try {
+        if (tab.doc && typeof tab.doc.setValue === 'function') tab.doc.setValue(text);
+      } catch (_) {}
+    }
+    ensureAutosave().onChange(text);
+    refreshCommitBadge();
+    if (fileTree) fileTree.setDirtyMap(workingTree.statusMap());
+    renderTabs();
+
+    if (historyPanel) historyPanel.close();
+    hideDiffOverlay();
+    setSaveStatus(
+      'Restored ' + path + ' from ' + String(commitSha).slice(0, 7) + ' — review and Commit when ready',
+      false
+    );
+  } catch (e) {
+    setSaveStatus('Restore failed: ' + e.message, true);
+  }
 }

@@ -101,8 +101,8 @@ to be served over http(s). Options:
 
 | Check | Status | What it covers |
 |---|---|---|
-| Unit tests | 🧪 **34 tests** | paths, markdown-tokens, reference-rewriter, file-mover, image-preview via jsdom |
-| Browser smoke test | 🧪 **CI** | real Chromium: editing, document/preview scrolling, image previews |
+| Unit tests | 🧪 **`npm test`** | paths, markdown-tokens, reference-rewriter, file-mover, autosave state machine, draft/search stores, search sync, tabs (model + strip) |
+| Browser smoke test | 🧪 **CI** | real Chromium: editing, autosave + 409 handling, tabs, create/delete, search, PDF export, image previews |
 | GitHub Actions | 🔄 **automatic** | runs both checks on `push` and `pull_request` |
 
 Current CI status is shown by the **Tests** badge at the top of this README.
@@ -121,7 +121,7 @@ responses). Runs automatically in CI:
 ```bash
 pip install playwright && playwright install chromium
 node serve.mjs &                  # start the app on :8080
-python3 e2e_smoke_test.py         # editing, autosave + 409 handling, create/delete, search, PDF export, image previews
+python3 e2e_smoke_test.py         # editing, autosave + 409 handling, tabs, create/delete, search, PDF export, image previews
 ```
 
 ## Features
@@ -130,6 +130,10 @@ python3 e2e_smoke_test.py         # editing, autosave + 409 handling, create/del
   authorization and any 2FA/mobile confirmation happen on GitHub's side, and
   the app receives a ready-made access token that it keeps only in
   `sessionStorage`.
+- **Tabs** — open as many files as you like and switch between them without
+  losing your place: each tab keeps its text, undo history, cursor and scroll
+  position. A dot on a tab means it is not on GitHub yet; closing a tab never
+  loses work. Tabs are restored after a reload.
 - **Image previews** — resolved through the GitHub API (works with private
   repos too), not as direct links. This is the editor's own preview, not a
   separate static GitHub Preview.

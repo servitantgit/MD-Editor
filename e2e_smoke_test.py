@@ -27,6 +27,15 @@ CONTENT_WRITES = []
 # CONTENT_WRITES together with the status it was answered with.
 PUT_STATUS_QUEUE = []
 
+# Every contents-API GET the app made (full URLs). Lets a test prove that a tab
+# came back from memory instead of being fetched again.
+FETCH_LOG = []
+
+# Files added to the mock tree on demand (the tabs scenario needs a second note,
+# but the default tree must stay a single note: other scenarios count files).
+EXTRA_TREE = []
+SECOND_MD = "# Second note\n\nSECOND_NOTE_BODY\n"
+
 CDN_MOCKS = {
     "https://cdn.jsdelivr.net/npm/easymde/dist/easymde.min.css": BASE / "node_modules/easymde/dist/easymde.min.css",
     "https://cdn.jsdelivr.net/npm/easymde/dist/easymde.min.js": BASE / "node_modules/easymde/dist/easymde.min.js",
@@ -115,13 +124,19 @@ def handle_github_api(route, request):
         else:
             route.fulfill(status=200, content_type="application/json", body=json.dumps({"commit": {"sha": "c"}}))
         return
+    if "/contents/" in url:
+        FETCH_LOG.append(url)
     if re.search(r"/repos/[^/]+/[^/]+$", url) and "/git/" not in url and "/contents/" not in url:
         route.fulfill(status=200, content_type="application/json", body=json.dumps({"default_branch": "main"}))
     elif "/git/trees/" in url:
-        route.fulfill(status=200, content_type="application/json", body=json.dumps(FAKE_TREE))
+        route.fulfill(status=200, content_type="application/json",
+                      body=json.dumps({"tree": FAKE_TREE["tree"] + EXTRA_TREE}))
     elif "/contents/Notes/Test%20note.md" in url:
         b64 = base64.b64encode(MD_CONTENT.encode("utf-8")).decode()
         route.fulfill(status=200, content_type="application/json", body=json.dumps({"content": b64, "sha": "sha-note"}))
+    elif "/contents/Notes/Second%20note.md" in url:
+        b64 = base64.b64encode(SECOND_MD.encode("utf-8")).decode()
+        route.fulfill(status=200, content_type="application/json", body=json.dumps({"content": b64, "sha": "sha-second"}))
     elif "/contents/Asset/pic.jpg" in url:
         route.fulfill(status=200, content_type="application/json", body=json.dumps({"content": TINY_PNG_B64, "sha": "sha-pic"}))
     elif "/contents/Asset/tall.png" in url:
@@ -716,11 +731,239 @@ with sync_playwright() as p:
     print("✓ Reload replaces our text with GitHub's and pushes nothing")
     assert not PUT_STATUS_QUEUE, f"unused scripted statuses left behind: {PUT_STATUS_QUEUE}"
 
-    # That delete succeeded, so the editor is closed and the toolbar is
-    # disabled — closeCurrentFile() does exactly that, and it is correct.
-    # The PDF checks below need a file open, so re-open the note first (the
-    # mock's tree is static and still lists it).
-    page.click(".file-item:not(.folder)")
+    # --- G. Tabs: several documents open at once ---
+    CM = "document.querySelector('.CodeMirror').CodeMirror"
+    SECOND_URL_PART = "Notes/Second%20note.md"
+
+    def tab_labels():
+        return page.eval_on_selector_all("#tab-bar .tab .tab-label", "els => els.map(e => e.textContent)")
+
+    def active_tab():
+        labels = page.eval_on_selector_all("#tab-bar .tab.active .tab-label", "els => els.map(e => e.textContent)")
+        return labels[0] if labels else None
+
+    def editor_text():
+        return page.evaluate(f"{CM}.getValue()")
+
+    def wait_until(cond, seconds=10, what="condition"):
+        deadline = time.time() + seconds
+        while time.time() < deadline:
+            if cond():
+                return
+            page.wait_for_timeout(100)
+        raise AssertionError(f"timed out waiting for {what}")
+
+    def open_in_tree(name):
+        # The tree is rebuilt asynchronously after a refresh or a reload, and a
+        # folder starts collapsed after a reload. Expand "Notes" only while it is
+        # seen collapsed, and keep looking until the row is on screen.
+        row = f".file-item:not(.folder):visible >> text={name}"
+        for _ in range(24):
+            if page.locator(row).count() > 0:
+                break
+            toggle = page.locator(".file-item.folder[data-path='Notes'] .folder-toggle")
+            if toggle.count() and toggle.first.inner_text().strip() == "\u25b8":
+                toggle.first.click()
+            page.wait_for_timeout(250)
+        page.click(row)
+
+    def show_second_note_in_tree(present):
+        EXTRA_TREE[:] = [{"path": "Notes/Second note.md", "type": "blob", "sha": "sha-second"}] if present else []
+        page.click("#btn-refresh")
+        page.wait_for_timeout(600)
+
+    # G0. The note from the scenarios above is the only tab.
+    assert tab_labels() == ["Test note.md"], f"expected a single tab, got {tab_labels()}"
+    assert active_tab() == "Test note.md"
+    print("✓ an opened file gets a tab, and it is the active one")
+
+    # G1. Edit the first note, leave a scroll position and cursor behind, open a second one.
+    show_second_note_in_tree(True)
+    CONTENT_WRITES.clear()
+    page.click(".CodeMirror")
+    page.keyboard.type("G_TAB_A_EDIT")
+    page.evaluate(f"{CM}.scrollTo(0, 700)")
+    page.wait_for_timeout(300)
+    cursor_before = page.evaluate(f"JSON.stringify({CM}.getCursor())")
+    scroll_before = page.evaluate(f"{CM}.getScrollInfo().top")
+    assert scroll_before > 300, f"could not scroll the long note for the test: {scroll_before}"
+
+    open_in_tree("Second note.md")
+    wait_until(lambda: active_tab() == "Second note.md", what="the second tab to become active")
+    wait_until(lambda: "SECOND_NOTE_BODY" in editor_text(), what="the second note to load")
+    assert tab_labels() == ["Test note.md", "Second note.md"], tab_labels()
+    print("✓ opening another file adds a tab and shows that file")
+
+    # Leaving the first tab commits it in the background, like switching files always did.
+    wait_until(lambda: any("G_TAB_A_EDIT" in w["text"] for w in CONTENT_WRITES), what="the flush commit of tab A")
+    a_writes = [w for w in CONTENT_WRITES if "G_TAB_A_EDIT" in w["text"]]
+    assert len(a_writes) == 1 and "Test%20note.md" in a_writes[0]["url"], \
+        f"leaving a dirty tab must commit it exactly once: {CONTENT_WRITES}"
+    page.wait_for_timeout(500)  # let the commit land, so the tab is clean again
+    assert page.locator("#tab-bar .tab.dirty").count() == 0, "a committed tab still shows the unsaved dot"
+    print("✓ leaving a dirty tab commits it once")
+
+    # G2. Back to the first tab: it must come back from memory, exactly as it was left.
+    FETCH_LOG.clear()
+    page.click("#tab-bar .tab:has-text('Test note.md') .tab-label")
+    wait_until(lambda: active_tab() == "Test note.md", what="tab A to become active again")
+    assert "G_TAB_A_EDIT" in editor_text(), "tab A lost its text when it was switched away and back"
+    assert not any("Test%20note.md" in u for u in FETCH_LOG), \
+        f"a clean tab must come back from memory, but it was fetched again: {FETCH_LOG}"
+    assert page.evaluate(f"JSON.stringify({CM}.getCursor())") == cursor_before, "the cursor did not survive the switch"
+    scroll_after = page.evaluate(f"{CM}.getScrollInfo().top")
+    assert abs(scroll_after - scroll_before) <= 5, f"scroll position lost: {scroll_before} -> {scroll_after}"
+    assert page.locator("#draft-banner:not(.hidden)").count() == 0, "returning to a saved tab raised a draft banner"
+    print("✓ switching back restores text, cursor and scroll without a request")
+
+    # Undo history is per tab, too: it survived being switched away.
+    page.evaluate(f"{CM}.undo()")
+    assert "G_TAB_A_EDIT" not in editor_text(), "undo history of the tab was lost by the switch"
+    page.evaluate(f"{CM}.redo()")
+    assert "G_TAB_A_EDIT" in editor_text()
+    page.click("#btn-save")
+    wait_until(lambda: page.locator("#tab-bar .tab.dirty").count() == 0, what="tab A to be saved")
+    print("✓ undo history is kept per tab")
+
+    # Clicking the file that is already open must not be treated as "open it again":
+    # that would re-arm autosave from scratch and silently forget the unsaved text.
+    page.click(".CodeMirror")
+    page.keyboard.type("G_CLICK_MARKER")
+    wait_until(lambda: page.locator("#tab-bar .tab.active.dirty").count() == 1, what="the dot before the tree click")
+    FETCH_LOG.clear()
+    open_in_tree("Test note.md")
+    page.wait_for_timeout(600)
+    assert not any("Test%20note.md" in u for u in FETCH_LOG), \
+        f"clicking the already-open file re-fetched it: {FETCH_LOG}"
+    assert "G_CLICK_MARKER" in editor_text(), "clicking the already-open file replaced its text"
+    assert page.locator("#tab-bar .tab.active.dirty").count() == 1, \
+        "clicking the already-open file wiped its unsaved state (autosave was re-opened underneath the text)"
+    CONTENT_WRITES.clear()
+    page.click("#btn-save")
+    wait_until(lambda: any("G_CLICK_MARKER" in w["text"] for w in CONTENT_WRITES), what="the save after the tree click")
+    wait_until(lambda: page.locator("#tab-bar .tab.dirty").count() == 0, what="the dot to clear")
+    print("✓ clicking the file that is already open keeps its unsaved text and state")
+
+    # Preview mode has to follow the active tab. EasyMDE re-renders its Preview pane
+    # from value(), and tab switching goes around value() (swapDoc), so Preview once
+    # kept showing the first document under every other tab's name until a reload.
+    def preview_text():
+        return page.evaluate(
+            "() => { const p = document.querySelector('.editor-preview-active'); return p ? p.innerText : ''; }")
+
+    page.click("button.preview")
+    wait_until(lambda: "Hello world" in preview_text(), what="Preview to show the active note")
+    page.click("#tab-bar .tab:has-text('Second note.md') .tab-label")
+    wait_until(lambda: "SECOND_NOTE_BODY" in preview_text(), what="Preview to follow the switch to the second tab")
+    assert "Hello world" not in preview_text(), "Preview still shows the first note under the second tab"
+    page.click("#tab-bar .tab:has-text('Test note.md') .tab-label")
+    wait_until(lambda: "Hello world" in preview_text() and "SECOND_NOTE_BODY" not in preview_text(),
+               what="Preview to follow the switch back")
+    page.click("button.preview")  # back to the editor
+    wait_until(lambda: page.locator(".editor-preview-active").count() == 0, what="Preview to switch off")
+    print("✓ Preview mode follows the active tab")
+
+    # G3. The dot: typing marks the active tab, a save clears it.
+    page.click("#tab-bar .tab:has-text('Second note.md') .tab-label")
+    wait_until(lambda: active_tab() == "Second note.md", what="tab B to become active")
+    page.click(".CodeMirror")
+    page.keyboard.type("G_TAB_B_EDIT")
+    wait_until(lambda: page.locator("#tab-bar .tab.active.dirty").count() == 1, what="the unsaved dot on tab B")
+    assert page.locator("#tab-bar .tab:not(.active).dirty").count() == 0, "the dot appeared on the wrong tab"
+    page.click("#btn-save")
+    wait_until(lambda: page.locator("#tab-bar .tab.dirty").count() == 0, what="the dot to clear after Save")
+    print("✓ the unsaved dot follows the active file and clears on save")
+
+    # G4. Closing a dirty tab loses nothing: it is committed, and the neighbour takes over.
+    CONTENT_WRITES.clear()
+    page.click(".CodeMirror")  # the Save click left the focus on the button
+    page.keyboard.type("G_TAB_B_MORE")
+    assert "G_TAB_B_MORE" in editor_text(), "the test did not manage to type into the editor"
+    page.click("#tab-bar .tab.active .tab-close")
+    wait_until(lambda: any("G_TAB_B_MORE" in w["text"] for w in CONTENT_WRITES), what="the commit of the closed tab")
+    wait_until(lambda: tab_labels() == ["Test note.md"], what="tab B to disappear")
+    wait_until(lambda: active_tab() == "Test note.md", what="the neighbour to become active")
+    assert "G_TAB_A_EDIT" in editor_text(), "the neighbour tab does not show its own text"
+    print("✓ closing a dirty tab commits it and hands over to the neighbour")
+
+    # G5. Tabs survive a page reload; only the active one is fetched at once.
+    open_in_tree("Second note.md")
+    wait_until(lambda: tab_labels() == ["Test note.md", "Second note.md"], what="two tabs again")
+    page.click("#tab-bar .tab:has-text('Test note.md') .tab-label")
+    wait_until(lambda: active_tab() == "Test note.md", what="tab A active before the reload")
+    page.wait_for_timeout(500)
+    FETCH_LOG.clear()
+    page.reload(wait_until="networkidle")
+    page.wait_for_selector("#app-main:not(.hidden)", timeout=5000)
+    wait_until(lambda: tab_labels() == ["Test note.md", "Second note.md"], what="the tabs to be restored")
+    assert active_tab() == "Test note.md", f"wrong tab active after the reload: {active_tab()}"
+    wait_until(lambda: "# Test note" in editor_text(), what="the active tab to load after the reload")
+    assert not any(SECOND_URL_PART in u for u in FETCH_LOG), \
+        "background tabs must not be fetched until they are opened"
+    page.click("#tab-bar .tab:has-text('Second note.md') .tab-label")
+    wait_until(lambda: "SECOND_NOTE_BODY" in editor_text(), what="a restored background tab to load on first click")
+    print("✓ tabs survive a reload; background tabs load lazily")
+
+    # A file that vanished while the page was closed is not resurrected as a tab.
+    show_second_note_in_tree(False)
+    page.reload(wait_until="networkidle")
+    page.wait_for_selector("#app-main:not(.hidden)", timeout=5000)
+    wait_until(lambda: tab_labels() == ["Test note.md"], what="the vanished file's tab to be dropped")
+    wait_until(lambda: active_tab() == "Test note.md" and "# Test note" in editor_text(),
+               what="the first remaining tab to open in place of the vanished one")
+    print("✓ a tab whose file no longer exists is not restored; the first remaining tab opens instead")
+
+    # G6. Deleting the open file closes its tab and shows the neighbour.
+    show_second_note_in_tree(True)
+    open_in_tree("Second note.md")
+    wait_until(lambda: active_tab() == "Second note.md", what="tab B to open for the delete test")
+    CONTENT_WRITES.clear()
+    EXTRA_TREE[:] = []  # GitHub no longer lists it once it is deleted
+    page.click("#btn-delete")
+    wait_until(lambda: any(w["method"] == "DELETE" and SECOND_URL_PART in w["url"] for w in CONTENT_WRITES),
+               what="the DELETE of the second note")
+    wait_until(lambda: tab_labels() == ["Test note.md"], what="the deleted file's tab to close")
+    wait_until(lambda: active_tab() == "Test note.md", what="the neighbour to take over after the delete")
+    assert "# Test note" in editor_text()
+    print("✓ deleting the open file closes its tab and shows the neighbour")
+
+    # Deleting a file that only has a BACKGROUND tab closes that tab and leaves the active one alone.
+    show_second_note_in_tree(True)
+    open_in_tree("Second note.md")
+    wait_until(lambda: active_tab() == "Second note.md", what="tab B to open again")
+    page.click("#tab-bar .tab:has-text('Test note.md') .tab-label")
+    wait_until(lambda: active_tab() == "Test note.md", what="tab A to be active before the tree delete")
+    CONTENT_WRITES.clear()
+    EXTRA_TREE[:] = []
+    page.click(".file-item:not(.folder):visible >> text=Second note.md", button="right")
+    page.wait_for_selector(".folder-context-menu", timeout=5000)
+    page.click(".folder-context-menu button[data-action='delete']")
+    wait_until(lambda: any(w["method"] == "DELETE" and SECOND_URL_PART in w["url"] for w in CONTENT_WRITES),
+               what="the DELETE from the tree")
+    wait_until(lambda: tab_labels() == ["Test note.md"], what="the background tab to close")
+    assert active_tab() == "Test note.md" and "# Test note" in editor_text(), "the active tab was disturbed"
+    print("✓ deleting a file from the tree closes its background tab only")
+
+    # G7. Closing the LAST tab commits what it holds, then leaves an empty editor that goes nowhere.
+    CONTENT_WRITES.clear()
+    page.click(".CodeMirror")
+    page.keyboard.type("G_LAST_TAB_EDIT")
+    page.click("#tab-bar .tab.active .tab-close")
+    wait_until(lambda: any("G_LAST_TAB_EDIT" in w["text"] for w in CONTENT_WRITES if w["method"] == "PUT"),
+               what="the commit of the last tab as it closed")
+    wait_until(lambda: page.locator("#tab-bar.hidden").count() == 1, what="the tab bar to hide")
+    assert editor_text() == "", "the editor still shows the closed file"
+    assert page.evaluate("document.getElementById('btn-save').disabled") is True
+    page.click(".CodeMirror")
+    page.keyboard.type("G_NOWHERE_MARKER")
+    page.wait_for_timeout(11500)  # past the 10s idle window: a bug would commit by now
+    assert not any("G_NOWHERE_MARKER" in w["text"] for w in CONTENT_WRITES if w["method"] == "PUT"), \
+        f"text typed with no file open was committed: {CONTENT_WRITES}"
+    print("✓ closing the last tab empties the editor; typing there commits nothing")
+
+    # The tabs scenario above ends with no file open. The PDF checks below need
+    # one, so open the note again (the mock's tree still lists it).
+    page.click(".file-item:not(.folder):visible >> text=Test note.md")
     page.wait_for_function(
         "document.getElementById('btn-export-pdf').disabled === false", timeout=5000
     )
