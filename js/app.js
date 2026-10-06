@@ -1461,18 +1461,41 @@ function applyLayoutMode(mode) {
   if (!editorHandle) return;
   const easyMDE = editorHandle.easyMDE;
   try {
-    // EasyMDE: side-by-side = hybrid live; preview = preview-only; neither = source
-    const side = typeof easyMDE.isSideBySideActive === 'function' && easyMDE.isSideBySideActive();
-    const prev = typeof easyMDE.isPreviewActive === 'function' && easyMDE.isPreviewActive();
+    // EasyMDE has two independent toggles:
+    //   side-by-side → .editor-preview-side (50% + source)
+    //   preview      → .editor-preview (full overlay)
+    // Leaving side-by-side without fully exiting leaves a half-width pane —
+    // that is why Preview looked "split in two". Exit the wrong mode first.
+    const sideOn = () => typeof easyMDE.isSideBySideActive === 'function' && easyMDE.isSideBySideActive();
+    const prevOn = () => typeof easyMDE.isPreviewActive === 'function' && easyMDE.isPreviewActive();
+
     if (mode === 'split') {
-      if (prev) easyMDE.togglePreview();
-      if (!side) easyMDE.toggleSideBySide();
+      if (prevOn()) easyMDE.togglePreview();
+      if (!sideOn()) easyMDE.toggleSideBySide();
     } else if (mode === 'preview') {
-      if (side) easyMDE.toggleSideBySide();
-      if (!prev) easyMDE.togglePreview();
+      // Must leave side-by-side completely, then enable full preview
+      if (sideOn()) easyMDE.toggleSideBySide();
+      if (sideOn()) easyMDE.toggleSideBySide(); // belt-and-suspenders
+      if (!prevOn()) easyMDE.togglePreview();
+      // Strip residual sided classes EasyMDE sometimes leaves behind
+      const root = easyMDE.codemirror && easyMDE.codemirror.getWrapperElement()
+        && easyMDE.codemirror.getWrapperElement().closest('.EasyMDEContainer');
+      if (root) {
+        root.classList.remove('sided--no-fullscreen');
+        const cm = root.querySelector('.CodeMirror');
+        if (cm) cm.classList.remove('CodeMirror-sided');
+      }
     } else {
-      if (side) easyMDE.toggleSideBySide();
-      if (prev) easyMDE.togglePreview();
+      // source: both off
+      if (sideOn()) easyMDE.toggleSideBySide();
+      if (prevOn()) easyMDE.togglePreview();
+      const root = easyMDE.codemirror && easyMDE.codemirror.getWrapperElement()
+        && easyMDE.codemirror.getWrapperElement().closest('.EasyMDEContainer');
+      if (root) {
+        root.classList.remove('sided--no-fullscreen');
+        const cm = root.querySelector('.CodeMirror');
+        if (cm) cm.classList.remove('CodeMirror-sided');
+      }
     }
   } catch (_) { /* EasyMDE may not be ready */ }
 
