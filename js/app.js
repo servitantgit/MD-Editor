@@ -138,7 +138,7 @@ let tabBar = null;
 let workingTree = new WorkingTree();
 let commitPanel = null;
 let historyPanel = null;
-let layoutMode = localStorage.getItem('md_layout') || 'split';
+let layoutMode = localStorage.getItem('md_layout') || 'source';
 const tabDocs = new Map();
 // Whether the ACTIVE file differs from GitHub, derived from the autosave label.
 let activeFileUnsaved = false;

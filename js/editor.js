@@ -22,6 +22,9 @@ export function createEditor(textareaEl, deps) {
     element: textareaEl,
     spellChecker: false,
     autosave: { enabled: false },
+    // Keep side-by-side inside .editor-area so the file tree stays clickable
+    // (EasyMDE default is fullscreen fixed overlay that steals all pointer events).
+    sideBySideFullscreen: false,
     placeholder: 'Start writing markdown...',
     toolbar: [
       'bold', 'italic', 'heading', '|',

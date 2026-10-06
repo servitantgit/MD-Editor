@@ -1165,3 +1165,13 @@ button.secondary:hover { background: #21262d; }
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+
+/* EasyMDE side-by-side must stay inside .editor-area (not viewport-fixed) */
+.editor-area .EasyMDEContainer.sided--no-fullscreen {
+  position: relative !important;
+  height: 100% !important;
+}
+.editor-area .EasyMDEContainer .CodeMirror-sided {
+  width: 50% !important;
+}
