@@ -12,6 +12,9 @@
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
   <!-- Markdown -> HTML -->
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <!-- Syntax highlight in markdown/code preview (Notepad++-style readability) -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/styles/github-dark.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/highlight.min.js"></script>
   <!-- Full-text search (UMD build -> window.MiniSearch; there is no bundler) -->
   <script src="https://cdn.jsdelivr.net/npm/minisearch@7.2.0/dist/umd/index.js"></script>
   <!-- PDF export -->
@@ -145,6 +148,8 @@
       <div id="tab-bar" class="tab-bar hidden" role="tablist" aria-label="Open files"></div>
       <div class="editor-toolbar">
         <span class="current-file" id="current-file">No file selected</span>
+        <span class="lang-badge" id="lang-badge" title="Language (from file extension)">—</span>
+        <button class="secondary" id="btn-find" title="Find in file (Ctrl+F)">Find</button>
         <button id="btn-save" disabled title="Quick-save this file (single-file commit)">Save</button>
         <!-- Autosave status, owned by js/autosave.js. Kept separate from
              #save-status on purpose: that one auto-clears after 4s for every
@@ -164,6 +169,13 @@
         <button id="draft-discard" class="draft-discard">Discard</button>
         <button id="draft-reload" class="draft-keep hidden">Reload from GitHub</button>
         <button id="draft-overwrite" class="draft-discard hidden">Overwrite</button>
+      </div>
+      <div id="find-bar" class="find-bar hidden" role="search">
+        <input id="find-input" type="text" placeholder="Find in file…" autocomplete="off" spellcheck="false" />
+        <span id="find-count" class="find-count"></span>
+        <button class="secondary" id="find-prev" title="Previous (Shift+Enter)">↑</button>
+        <button class="secondary" id="find-next" title="Next (Enter)">↓</button>
+        <button class="secondary" id="find-close" title="Close (Esc)">✕</button>
       </div>
       <div id="editor-container">
         <textarea id="editor"></textarea>

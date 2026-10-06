@@ -3,6 +3,7 @@
 // moving" mechanics live in file-mover.js; only DOM here.
 
 import { dirnameOf, basenameOf, extOf, isImagePath, escapeAttr } from './paths.js';
+import { isEditableTextPath, kindFromPath } from './file-kind.js';
 
 /** Turns a flat {path} list into a nested folder/file structure. */
 export function buildTreeStructure(files) {
@@ -167,20 +168,22 @@ export class FileTree {
       const file = node.children[name];
       const isMd = extOf(file.path) === 'md';
       const isImg = isImagePath(file.path);
-      const icon = isMd ? '📄' : isImg ? '🖼️' : '📦';
+      const isText = !isImg && isEditableTextPath(file.path);
+      const kind = kindFromPath(file.path);
+      const icon = isMd ? '📄' : isImg ? '🖼️' : kind.kind === 'html' ? '🌐' : kind.kind === 'code' ? '📜' : '📦';
 
       const el = document.createElement('div');
-      el.className = 'file-item' + (isMd || isImg ? '' : ' other');
+      el.className = 'file-item' + (isMd || isImg || isText ? '' : ' other');
       el.style.paddingLeft = `${12 + (depth + 1) * 14}px`;
       el.dataset.path = file.path;
-      el.title = file.path;
+      el.title = file.path + (kind.label ? ` · ${kind.label}` : '');
       const dirty = this.dirtyMap[file.path];
       const dirtyHtml = dirty
         ? `<span class="dirty-badge ${dirty}">${dirty}</span>`
         : '';
       el.innerHTML = `<span class="icon">${icon}</span><span class="name">${escapeAttr(name)}</span>${dirtyHtml}`;
 
-      if (isMd && this.handlers.onOpenFile) {
+      if ((isMd || isText) && this.handlers.onOpenFile) {
         el.addEventListener('click', () => {
           // Opening a file also makes ITS folder the target for new files/folders.
           this.activeFolder = dirnameOf(file.path);

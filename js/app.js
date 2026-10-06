@@ -24,6 +24,7 @@ import { createTabBar } from './tabs-ui.js';
 import { WorkingTree } from './working-tree.js';
 import { bindCommitPanel, bindHistoryPanel } from './commit-ui.js';
 import { unifiedDiff, renderDiffLines } from './diff-util.js';
+import { kindFromPath, isHtmlPath, isMarkdownPath } from './file-kind.js';
 
 const els = {
   loginScreen: document.getElementById('login-screen'),
@@ -72,6 +73,14 @@ const els = {
 
   tabBar: document.getElementById('tab-bar'),
   currentFileLabel: document.getElementById('current-file'),
+  langBadge: document.getElementById('lang-badge'),
+  btnFind: document.getElementById('btn-find'),
+  findBar: document.getElementById('find-bar'),
+  findInput: document.getElementById('find-input'),
+  findCount: document.getElementById('find-count'),
+  findPrev: document.getElementById('find-prev'),
+  findNext: document.getElementById('find-next'),
+  findClose: document.getElementById('find-close'),
   btnSave: document.getElementById('btn-save'),
   btnExportPdf: document.getElementById('btn-export-pdf'),
   btnDelete: document.getElementById('btn-delete'),
@@ -560,6 +569,7 @@ function showApp(owner, repo) {
   // Hybrid layout + Commit / History panels (idempotent re-bind each showApp)
   applyLayoutMode(layoutMode);
   setupLayoutToggle();
+  setupFindBar();
   setupCommitAndHistory();
   workingTree.clearAll();
   refreshCommitBadge();
@@ -1086,8 +1096,15 @@ async function openFile(path, { reload = false } = {}) {
     renderTabs();
 
     els.btnSave.disabled = false;
-    els.btnExportPdf.disabled = false;
+    const kind = kindFromPath(path);
+    els.btnExportPdf.disabled = kind.kind !== 'markdown';
     els.btnDelete.disabled = false;
+    updateLangBadge(kind);
+    if (editorHandle && typeof editorHandle.setLanguage === 'function') {
+      editorHandle.setLanguage(kind.mode);
+    }
+    // Re-apply layout so HTML/code previews use the right renderer for this file
+    applyLayoutMode(layoutMode);
     setSaveStatus('Ready', false);
 
     if (opened.hasDraft) {
@@ -1444,6 +1461,121 @@ function escapeHtml(s) {
 }
 
 
+
+function updateLangBadge(kind) {
+  if (!els.langBadge) return;
+  if (!kind) {
+    els.langBadge.textContent = '—';
+    els.langBadge.title = 'Language';
+    return;
+  }
+  els.langBadge.textContent = kind.label;
+  els.langBadge.title = `Language: ${kind.label} (${kind.ext || 'no ext'})`;
+}
+
+/** Escape for HTML text content */
+function escapePreview(s) {
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
+/**
+ * Fill Live/Preview pane according to file kind:
+ *  markdown → marked (EasyMDE previewRender)
+ *  html     → sandboxed iframe
+ *  code     → highlighted <pre><code>
+ */
+function fillPreviewPane(node, plain, kind) {
+  if (!node) return;
+  const preview = kind && kind.preview ? kind.preview : 'markdown';
+  if (preview === 'html') {
+    const iframe = document.createElement('iframe');
+    iframe.className = 'html-preview-frame';
+    iframe.setAttribute('sandbox', 'allow-scripts allow-forms allow-modals');
+    iframe.setAttribute('title', 'HTML preview');
+    iframe.srcdoc = plain || '<!-- empty -->';
+    node.innerHTML = '';
+    node.appendChild(iframe);
+    return;
+  }
+  if (preview === 'code') {
+    const lang = (kind && kind.ext) || 'txt';
+    let body = escapePreview(plain || '');
+    let html = `<pre class="code-preview"><code class="language-${escapePreview(lang)}">${body}</code></pre>`;
+    node.innerHTML = html;
+    try {
+      if (typeof globalThis.hljs !== 'undefined') {
+        const block = node.querySelector('code');
+        if (block) globalThis.hljs.highlightElement(block);
+      }
+    } catch (_) { /* optional */ }
+    return;
+  }
+  // markdown (default)
+  if (editorHandle && editorHandle.easyMDE && editorHandle.easyMDE.options.previewRender) {
+    const html = editorHandle.easyMDE.options.previewRender(plain, node);
+    if (html != null) node.innerHTML = html;
+  }
+}
+
+function setupFindBar() {
+  if (!els.findBar || els.findBar.dataset.bound) return;
+  els.findBar.dataset.bound = '1';
+
+  const runFind = (backwards) => {
+    if (!editorHandle) return;
+    const q = els.findInput ? els.findInput.value : '';
+    const count = editorHandle.findInFile(q, { backwards: !!backwards });
+    if (els.findCount) {
+      els.findCount.textContent = q ? (count ? `${count} found` : 'no matches') : '';
+    }
+  };
+
+  const openFind = () => {
+    if (!els.findBar) return;
+    els.findBar.classList.remove('hidden');
+    if (els.findInput) {
+      els.findInput.focus();
+      els.findInput.select();
+    }
+  };
+  const closeFind = () => {
+    if (!els.findBar) return;
+    els.findBar.classList.add('hidden');
+    if (els.findCount) els.findCount.textContent = '';
+    if (editorHandle) editorHandle.easyMDE.codemirror.focus();
+  };
+
+  if (els.btnFind) els.btnFind.addEventListener('click', openFind);
+  if (els.findNext) els.findNext.addEventListener('click', () => runFind(false));
+  if (els.findPrev) els.findPrev.addEventListener('click', () => runFind(true));
+  if (els.findClose) els.findClose.addEventListener('click', closeFind);
+  if (els.findInput) {
+    els.findInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        runFind(!!e.shiftKey);
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        closeFind();
+      }
+    });
+  }
+
+  document.addEventListener('keydown', (e) => {
+    const mod = e.ctrlKey || e.metaKey;
+    if (mod && (e.key === 'f' || e.key === 'F')) {
+      // Only when editor app is visible
+      if (els.appMain && els.appMain.classList.contains('hidden')) return;
+      e.preventDefault();
+      openFind();
+    }
+  });
+}
+
+
 // ====================== HYBRID LAYOUT + COMMIT / HISTORY ======================
 
 function applyLayoutMode(mode) {
@@ -1488,18 +1620,15 @@ function applyLayoutMode(mode) {
       // Side-by-side updates from CodeMirror 'update'; nudge a repaint by
       // re-rendering into .editor-preview-side when Live or Preview is on.
       if (layoutMode === 'split' || layoutMode === 'preview') {
-        if (typeof editorHandle.renderActivePreview === 'function') {
-          // Temporarily treat side-by-side as active for render (isPreviewActive is false)
           const root = document.querySelector('.editor-area .EasyMDEContainer');
           if (root && editorHandle.easyMDE) {
             const plain = editorHandle.easyMDE.value();
             const nodes = root.querySelectorAll('.editor-preview-side, .editor-preview-active-side');
+            const kind = kindFromPath(state.currentPath || '');
             for (const node of nodes) {
-              const html = editorHandle.easyMDE.options.previewRender(plain, node);
-              if (html != null) node.innerHTML = html;
+              fillPreviewPane(node, plain, kind);
             }
           }
-        }
       }
     } catch (_) { /* ignore */ }
   };

@@ -7,6 +7,7 @@
 
 import { markdownToCanonicalHtml } from './markdown-tokens.js';
 import { attachResizeHandles, resolveAllImages } from './image-preview.js';
+import { kindFromPath } from './file-kind.js';
 
 /**
  * @param {HTMLTextAreaElement} textareaEl
@@ -43,17 +44,45 @@ export function createEditor(textareaEl, deps) {
     renderingConfig: { singleLineBreaks: false, codeSyntaxHighlighting: true },
     previewRender(plainText, previewEl) {
       // IMPORTANT: EasyMDE ITSELF runs `previewEl.innerHTML = <what we return here>`
-      // right after this function is called — both when toggling Preview/Side-by-side,
-      // and on easyMDE.value(...). If we synchronously assign previewEl.innerHTML HERE
-      // ourselves, and then (after the network image resolve) asynchronously want to
-      // update these elements — it will be too late: EasyMDE will just overwrite the whole
-      // innerHTML once more (with the same string), and our <img> will end up in nodes that
-      // are no longer attached to the page — the image "loads" forever and invisibly
-      // to the user, even though the network request actually finished long ago.
-      // So previewRender stays PURELY synchronous and assigns nothing itself —
-      // post-processing (scale handles + image resolve) is scheduled on the next
-      // tick via setTimeout(0), when EasyMDE has definitely set the final DOM.
+      // right after this function is called. Post-processing runs on the next tick.
       const myToken = ++previewRenderToken;
+      const path = deps.getCurrentPath ? deps.getCurrentPath() : null;
+      const kind = kindFromPath(path || '');
+
+      // HTML: sandboxed iframe (filled after EasyMDE writes our return value)
+      if (kind.preview === 'html') {
+        setTimeout(() => {
+          if (myToken !== previewRenderToken || !previewEl) return;
+          const iframe = document.createElement('iframe');
+          iframe.className = 'html-preview-frame';
+          iframe.setAttribute('sandbox', 'allow-scripts allow-forms allow-modals');
+          iframe.setAttribute('title', 'HTML preview');
+          iframe.srcdoc = plainText || '<!-- empty -->';
+          previewEl.innerHTML = '';
+          previewEl.appendChild(iframe);
+        }, 0);
+        return '';
+      }
+
+      // Code / plain text: highlighted read-only view
+      if (kind.preview === 'code') {
+        const lang = kind.ext || 'txt';
+        const body = escapeHtml(plainText || '');
+        const html = `<pre class="code-preview"><code class="language-${escapeHtml(lang)}">${body}</code></pre>`;
+        setTimeout(() => {
+          if (myToken !== previewRenderToken || !previewEl) return;
+          try {
+            if (typeof globalThis.hljs !== 'undefined') {
+              previewEl.querySelectorAll('pre code').forEach((block) => {
+                try { globalThis.hljs.highlightElement(block); } catch (_) {}
+              });
+            }
+          } catch (_) {}
+        }, 0);
+        return html;
+      }
+
+      // Markdown (default)
       let html;
       try {
         html = markdownToCanonicalHtml(plainText, deps.marked);
@@ -68,6 +97,14 @@ export function createEditor(textareaEl, deps) {
 
   async function finishPreviewRender(previewEl, myToken) {
     if (myToken !== previewRenderToken) return; // a newer render arrived meanwhile
+    // Notepad++-style readability: highlight fenced code in the rendered preview
+    try {
+      if (typeof globalThis.hljs !== 'undefined' && previewEl) {
+        previewEl.querySelectorAll('pre code').forEach((block) => {
+          try { globalThis.hljs.highlightElement(block); } catch (_) { /* ignore single block */ }
+        });
+      }
+    } catch (_) { /* hljs optional */ }
     attachResizeHandles(previewEl, easyMDE.codemirror);
 
     const failCount = await resolveAllImages(previewEl, deps.imageResolver, deps.getCurrentPath(), () => myToken === previewRenderToken);
@@ -309,7 +346,73 @@ export function createEditor(textareaEl, deps) {
     }
   }
 
-  return { easyMDE, refreshLayout, refreshInlineImages, createDoc, getDoc, showDoc, renderActivePreview, destroy };
+  /**
+   * Switch CodeMirror mode for the open file (Notepad++ language-from-extension).
+   * Modes must be registered on the same CodeMirror build EasyMDE uses; unknown
+   * modes fall back silently to plain text.
+   */
+  function setLanguage(modeName) {
+    try {
+      const cm = easyMDE.codemirror;
+      const mode = modeName && modeName !== 'null' ? modeName : 'text/plain';
+      cm.setOption('mode', mode === 'gfm' || mode === 'markdown' ? 'gfm' : mode);
+      cm.refresh();
+    } catch (_) { /* mode not loaded — plain text still works */ }
+  }
+
+  /** Simple in-file find (no addon dependency). Returns match count. */
+  function findInFile(query, { backwards = false } = {}) {
+    const cm = easyMDE.codemirror;
+    const q = String(query || '');
+    if (!q) return 0;
+    const text = cm.getValue();
+    const lower = text.toLowerCase();
+    const needle = q.toLowerCase();
+    let count = 0;
+    let pos = 0;
+    while ((pos = lower.indexOf(needle, pos)) !== -1) {
+      count++;
+      pos += needle.length;
+    }
+    if (count === 0) return 0;
+
+    const cur = cm.getCursor();
+    const fromIdx = cm.indexFromPos(cur);
+    let idx;
+    if (backwards) {
+      // search before selection start
+      const start = cm.indexFromPos(cm.getCursor('from'));
+      idx = lower.lastIndexOf(needle, Math.max(0, start - 1));
+      if (idx < 0) idx = lower.lastIndexOf(needle);
+    } else {
+      idx = lower.indexOf(needle, fromIdx + (cm.somethingSelected() ? 1 : 0));
+      if (idx < 0) idx = lower.indexOf(needle);
+    }
+    if (idx < 0) return count;
+    const from = cm.posFromIndex(idx);
+    const to = cm.posFromIndex(idx + q.length);
+    cm.setSelection(from, to);
+    cm.scrollIntoView({ from, to }, 80);
+    return count;
+  }
+
+  function clearFind() {
+    // selection stays; nothing to clear without search overlays
+  }
+
+  return {
+    easyMDE,
+    refreshLayout,
+    refreshInlineImages,
+    createDoc,
+    getDoc,
+    showDoc,
+    renderActivePreview,
+    setLanguage,
+    findInFile,
+    clearFind,
+    destroy,
+  };
 }
 
 function escapeHtml(s) {
