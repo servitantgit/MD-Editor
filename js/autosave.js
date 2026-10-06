@@ -411,6 +411,24 @@ export class Autosave {
 
   /** The Save button: immediate commit, both timers cancelled. They stay
    *  cancelled afterwards — the next keystroke arms fresh ones. */
+  /**
+   * Cancel the 400ms debounce and write the draft now (fire-and-forget).
+   * Used on pagehide so a reload milliseconds after the last keystroke still
+   * recovers the text. IndexedDB is async — we cannot block unload, only start
+   * the write as early as possible.
+   */
+  flushDraftSync() {
+    if (this.destroyed || !this.path) return;
+    if (this.state === STATE.CLEAN || this.state === STATE.PUSHING) return;
+    this._cancel(this._draftTimer);
+    this._draftTimer = null;
+    // Keep current text from the editor if available
+    try {
+      if (this.getText) this._text = String(this.getText() || this._text || '');
+    } catch (_) { /* ignore */ }
+    this._writeDraft();
+  }
+
   async saveNow() {
     if (this.destroyed || !this.path) return null;
     if (this.state === STATE.PUSHING) return this._pending;

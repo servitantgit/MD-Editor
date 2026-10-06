@@ -386,6 +386,8 @@ function hideDraftBanner() {
  * everything afterwards. (Closing a tab or deleting the open file only release()s
  * the instance, so in practice this runs once per session.)
  */
+let draftStoreReady = Promise.resolve();
+
 function createAutosave(owner, repo) {
   if (draftStore) draftStore.close();
   draftStore = new DraftStore({
@@ -395,7 +397,8 @@ function createAutosave(owner, repo) {
       setSaveStatus('Local drafts unavailable (browser storage is disabled) — closing the tab will lose unsaved text', true);
     },
   });
-  draftStore.open().catch(() => { /* open() never rejects; it degrades */ });
+  // Keep a promise so openFile can wait for IndexedDB before draft lookup
+  draftStoreReady = draftStore.open().catch(() => { /* open() never rejects; it degrades */ });
 
   return new Autosave({
     client: state.client,
@@ -524,13 +527,16 @@ function showApp(owner, repo) {
     // conflict) from being mistaken for typing.
     onChange: (text) => {
       if (suppressEditorChange) return;
+      // Autosave FIRST — draft recovery depends on every keystroke reaching IndexedDB
       ensureAutosave().onChange(text);
-      // Track multi-file dirty state for Commit panel
-      if (state.currentPath) {
-        workingTree.setDirty(state.currentPath, text, state.currentSha || null);
-        refreshCommitBadge();
-        if (fileTree) fileTree.setDirtyMap(workingTree.statusMap());
-      }
+      // Working-tree badges are best-effort and must never interrupt draft writes
+      try {
+        if (state.currentPath && workingTree) {
+          workingTree.setDirty(state.currentPath, text, state.currentSha || null);
+          refreshCommitBadge();
+          if (fileTree) fileTree.setDirtyMap(workingTree.statusMap());
+        }
+      } catch (_) { /* ignore */ }
     },
     onImagePaste: (file) => uploadImage(file, {
       client: state.client,
@@ -598,6 +604,19 @@ function showApp(owner, repo) {
 /** Draft banner buttons + the two "the user is leaving" hooks. */
 function setupAutosaveUI(owner, repo) {
   autosave = createAutosave(owner, repo);
+
+  // Best-effort: persist the in-memory draft before the tab goes away so a
+  // reload within the 400ms debounce window still recovers the text.
+  if (!window.__mdDraftFlushBound) {
+    window.__mdDraftFlushBound = true;
+    window.addEventListener('pagehide', () => {
+      try {
+        if (autosave && typeof autosave.flushDraftSync === 'function') {
+          autosave.flushDraftSync();
+        }
+      } catch (_) { /* ignore */ }
+    });
+  }
 
   els.draftKeep.onclick = () => {
     const path = state.currentPath;
@@ -927,6 +946,32 @@ function restoreTabsOnce(files) {
   if (!state.currentPath && toOpen) openFile(toOpen);
 }
 
+
+/** If IndexedDB still has a dirty draft for path and the banner is hidden, show it. */
+async function resurfaceDraftBanner(path) {
+  if (!path || !draftStore || !els.draftBanner) return;
+  if (!els.draftBanner.classList.contains('hidden')) return;
+  try {
+    await draftStoreReady;
+    const draft = await draftStore.get({
+      owner: state.client.owner,
+      repo: state.client.repo,
+      branch: state.branch,
+      path,
+    });
+    if (!draft || draft.dirty === false) return;
+    const remoteSha = state.currentSha;
+    const remoteText = editorHandle ? editorHandle.easyMDE.value() : '';
+    const stillDiffers = draft.baseSha !== remoteSha || draft.text !== remoteText;
+    if (!stillDiffers) return;
+    pendingDraft = draft.text;
+    showDraftBanner(
+      `You have unsaved local changes from ${formatAge(Date.now() - (draft.savedAt || Date.now()))}.`,
+      'draft'
+    );
+  } catch (_) { /* ignore */ }
+}
+
 // ====================== OPEN / SAVE ======================
 /**
  * Opens a file in its tab (creating the tab if needed) and makes it active.
@@ -945,6 +990,8 @@ async function openFile(path, { reload = false } = {}) {
   // undo history and cursor by re-fetching it.
   if (!reload && state.currentPath === path && tabDocs.has(path)) {
     editorHandle.easyMDE.codemirror.focus();
+    // Tabs restore / second click must still surface a pending local draft
+    void resurfaceDraftBanner(path);
     return;
   }
 
@@ -1008,6 +1055,8 @@ async function openFile(path, { reload = false } = {}) {
     setAutosaveStatus(null);
     state.currentPath = path;
     state.currentSha = sha;
+    ensureAutosave();
+    try { await draftStoreReady; } catch (_) { /* degraded store */ }
     const opened = await ensureAutosave().onOpen(path, remoteText, sha);
     if (seq !== openSeq) return; // another open won the race
 
@@ -1436,22 +1485,10 @@ function applyLayoutMode(mode) {
       if (typeof editorHandle.renderActivePreview === 'function') {
         editorHandle.renderActivePreview();
       }
-      // Side-by-side listens to CodeMirror "update"; a no-op refresh is enough
-      // to repaint .editor-preview-side after toggle.
       const cm = editorHandle.easyMDE && editorHandle.easyMDE.codemirror;
-      if (cm) {
-        cm.refresh();
-        // Nudge EasyMDE's side-by-side preview by re-setting value when empty pane
-        const sideEl = document.querySelector('.editor-preview-side');
-        const prevEl = document.querySelector('.EasyMDEContainer .editor-preview');
-        const needsFill =
-          (sideEl && !sideEl.innerHTML.trim()) ||
-          (prevEl && prevEl.offsetParent !== null && !prevEl.innerHTML.trim());
-        if (needsFill && typeof editorHandle.easyMDE.value === 'function') {
-          const v = editorHandle.easyMDE.value();
-          editorHandle.easyMDE.value(v);
-        }
-      }
+      if (cm) cm.refresh();
+      // Do NOT call easyMDE.value() here — it fires change handlers and can
+      // race with IndexedDB draft writes (breaks "draft survives reload" e2e).
     } catch (_) { /* ignore */ }
   };
   requestAnimationFrame(() => {
