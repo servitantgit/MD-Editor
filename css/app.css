@@ -1006,7 +1006,10 @@ button.secondary:hover { background: #21262d; }
 /* ===== History panel ===== */
 .history-panel {
   position: absolute;
-  inset: 0;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 60%;
   z-index: 15;
   display: flex;
   background: var(--bg);
