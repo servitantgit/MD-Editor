@@ -488,6 +488,25 @@ export class Autosave {
 
   /** Clears every timer and stops accepting input. Idempotent, never throws —
    *  teardown code should never be the thing that breaks. */
+  /**
+   * Lets go of the current file WITHOUT stopping the instance (closing a tab,
+   * deleting the open file). Timers are cancelled and typing is ignored from here
+   * on because there is no path any more, but a push that is already in flight
+   * keeps going and cleans up after itself — deletes its draft and reports the
+   * new sha. destroy() would abandon it: a destroyed instance skips that
+   * clean-up, which leaves a stale draft that later looks like unsaved work.
+   */
+  release() {
+    if (this.destroyed) return;
+    this._clearTimers();
+    this.path = null;
+    this.baseSha = null;
+    this._text = '';
+    this._pending = null;
+    this.state = STATE.CLEAN;
+    this._setStatus(null);
+  }
+
   destroy() {
     this._clearTimers();
     this.destroyed = true;

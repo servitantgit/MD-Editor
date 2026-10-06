@@ -275,6 +275,74 @@ button.secondary:hover { background: #21262d; }
 .folder-context-menu button.danger { color: #ff7b72; }
 .folder-context-menu button.danger:hover { background: #2d1214; }
 
+/* ===== Tabs: one per open file, above the toolbar ===== */
+.tab-bar {
+  display: flex;
+  align-items: stretch;
+  gap: 1px;
+  flex-shrink: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+  scrollbar-width: thin;
+}
+.tab-bar.hidden { display: none; }
+.tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+  max-width: 220px;
+  padding: 6px 6px 6px 12px;
+  font-size: 13px;
+  color: var(--muted);
+  background: var(--panel);
+  border-right: 1px solid var(--border);
+  border-top: 2px solid transparent;
+  cursor: pointer;
+  user-select: none;
+}
+.tab:hover { color: var(--text); background: #1c222b; }
+.tab.active {
+  color: var(--text);
+  background: var(--bg);
+  border-top-color: var(--accent);
+}
+.tab:focus-visible { outline: 1px solid var(--accent-hover); outline-offset: -2px; }
+.tab-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* The dot and the × share one slot, so a tab does not change width when it gets dirty. */
+.tab-dirty {
+  display: none;
+  color: #d29922;
+  font-size: 10px;
+  line-height: 1;
+}
+.tab.dirty .tab-dirty { display: inline; }
+.tab-close {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  line-height: 16px;
+  font-size: 15px;
+  text-align: center;
+  color: var(--muted);
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  opacity: 0;
+}
+.tab:hover .tab-close,
+.tab.active .tab-close,
+.tab:focus-within .tab-close { opacity: 1; }
+.tab-close:hover { color: var(--text); background: #30363d; }
+
 /* ===== Editor area ===== */
 .editor-area {
   flex: 1;

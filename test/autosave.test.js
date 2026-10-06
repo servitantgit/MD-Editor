@@ -513,3 +513,69 @@ test('destroy() clears both timers and the autosave stops listening', withTimers
   // Teardown must be safe to repeat.
   autosave.destroy();
 }));
+
+test('release() forgets the file, ignores typing, and keeps the instance usable', withTimers(async () => {
+  const { autosave, store, client, statuses } = newAutosave();
+  await autosave.onOpen('a.md', 'REMOTE', 'sha-0');
+  autosave.onChange('v1');
+  assert.equal(autosave.hasUnsavedDraft(), true);
+
+  autosave.release();
+  assert.equal(autosave.hasUnsavedDraft(), false);
+  assert.equal(lastStatus(statuses), null, 'the label is cleared');
+
+  const writesBefore = store.writes;
+  autosave.onChange('typed into the empty editor');
+  await advance(LOCAL_WRITE_DEBOUNCE_MS + IDLE_MS + MAX_MS);
+  assert.equal(client.puts.length, 0, 'with no file open, typing must never reach GitHub');
+  assert.equal(store.writes, writesBefore, '...nor create a draft for a file that is not open');
+
+  // Not destroyed: the next file opens normally.
+  assert.equal(autosave.destroyed, false);
+  await autosave.onOpen('b.md', 'B-REMOTE', 'sha-b');
+  autosave.onChange('b edit');
+  await advance(LOCAL_WRITE_DEBOUNCE_MS + IDLE_MS);
+  assert.deepEqual(client.puts.map((p) => [p.path, p.text]), [['b.md', 'b edit']]);
+}));
+
+test('a push already in flight when release() is called still finishes and deletes its draft', withTimers(async () => {
+  const { autosave, store, client, commits } = newAutosave();
+  await autosave.onOpen('a.md', 'REMOTE', 'sha-0');
+  autosave.onChange('closing now');
+  await advance(LOCAL_WRITE_DEBOUNCE_MS);
+
+  let finish;
+  client.putFile = async (path, b64, message, sha) => {
+    await new Promise((resolve) => { finish = resolve; });
+    return { content: { sha: 'sha-landed' } };
+  };
+
+  await autosave.flushCurrentFile(); // draft on disk, commit in flight
+  autosave.release();                // the tab is closed before the commit lands
+  finish();
+  await drain();
+
+  assert.deepEqual(commits, [{ path: 'a.md', sha: 'sha-landed' }], 'the caller still hears about the new sha');
+  assert.deepEqual(store.deletes, ['a.md'], 'and the draft is gone, so reopening shows no phantom banner');
+}));
+
+test('destroy() abandons an in-flight push without cleaning up (why release() exists)', withTimers(async () => {
+  const { autosave, store, client, commits } = newAutosave();
+  await autosave.onOpen('a.md', 'REMOTE', 'sha-0');
+  autosave.onChange('closing now');
+  await advance(LOCAL_WRITE_DEBOUNCE_MS);
+
+  let finish;
+  client.putFile = async () => {
+    await new Promise((resolve) => { finish = resolve; });
+    return { content: { sha: 'sha-landed' } };
+  };
+
+  await autosave.flushCurrentFile();
+  autosave.destroy();
+  finish();
+  await drain();
+
+  assert.deepEqual(commits, []);
+  assert.deepEqual(store.deletes, [], 'the stale draft stays behind');
+}));

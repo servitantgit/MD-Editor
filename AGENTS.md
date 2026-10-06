@@ -619,6 +619,60 @@ the push result; `#draft-overwrite` in `js/app.js` hides the banner only when
 `result.ok`, and leaves it up if the push conflicts again. Reload hides it through
 `onReloadRemote`. Don't move that logic into `Autosave` — it has no DOM.
 
+## Tabs: who owns what, and the rules that keep them safe
+
+**Split of responsibilities.** `js/tabs.js` is a pure model (ordered paths + the
+active one + rename/delete bookkeeping + persistence); `js/tabs-ui.js` only draws
+the strip and reports clicks; everything heavy lives in `js/app.js`, in
+`tabDocs: Map<path, {doc, sha, unsaved, stale, commitSeen}>`. A path with no entry
+is a restored tab that was never opened — it is fetched on first click, never at
+page load.
+
+**One CodeMirror `Doc` per tab, swapped with `swapDoc()`** (`editorHandle.createDoc`
+/ `showDoc`). Do not load a tab's text with `easyMDE.value()`: that overwrites the
+single shared document and throws away undo history, cursor and scroll. `swapDoc`
+fires no `change` event, so switching tabs is not mistaken for typing, but inline
+image marks belong to a document and are rebuilt by `showDoc()`. `setEditorValue()`
+(which uses `.value()`) is still right for replacing the text of the CURRENT file
+in place — "Reload from GitHub" in the conflict banner.
+
+**When is the cached document trusted?** Only if the tab was clean when left
+(`!unsaved`) and not `stale`. Autosave is a state machine for ONE file; a tab left
+dirty is re-fetched on return, and the draft banner then offers the local text — the
+same path as switching files has always taken, so there is a single code path for
+"what is the truth after a background commit". `unsaved` is computed in `openFile()`
+twice on purpose: once right after the first flush (so the commit overlaps the
+fetch), and again after the fetch, because the old tab stays editable while the new
+file loads and whatever was typed meanwhile must be flushed too. `commitSeen`
+exists because the background commit can land BEFORE we decide `unsaved`; without it
+the tab would stay marked unsaved forever.
+
+**Never `destroy()` the Autosave to leave a file — use `release()`.** A destroyed
+instance skips `_afterCommit`, so a push still in flight leaves its draft behind and
+the file later shows a phantom "unsaved local changes" banner. `release()` drops the
+path (typing is ignored, timers are gone) but lets the in-flight push clean up.
+`closeCurrentFile({flush:false})` is for files that were just DELETED.
+
+**`openFile(path)` on the file that is already open is a no-op** (it only focuses the
+editor). Re-opening it would call `autosave.onOpen()` and reset the state machine under
+the editor's unsaved text. Callers that really need a fresh copy — rename, move, links
+rewritten by a move — pass `{reload: true}`; moving/renaming the open file MUST do so,
+because it also rebinds autosave to the new path.
+
+**`openSeq`** guards the slow-open race: every `openFile()` takes a number and gives up
+after each `await` if a newer one started. Do not move assignments to `state.currentPath`
+above those checks.
+
+**Tabs are only dropped on purpose**: when the user closes one, or when a delete here
+removes its file (`dropTabs`). They are NOT pruned against every `loadTree()` — a tree
+that is momentarily behind a commit would close the editor under the user. The one
+exception is the restore at page load, which discards paths that no longer exist.
+
+**Not done on purpose (v1):** drag-to-reorder, keyboard shortcuts for next/previous tab
+(Ctrl+Tab / Ctrl+W belong to the browser), a "reopen closed tab", pinned tabs, and
+refreshing a clean cached tab when the file changed on GitHub meanwhile (a stale sha
+surfaces as the usual 409 flow on the next commit).
+
 ## General rule before considering a task done
 
 Here CI broke twice in a row right after merge (first `npm ci`, then a

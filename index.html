@@ -133,6 +133,8 @@
     </div>
 
     <div class="editor-area">
+      <!-- Open files, one tab each. Rendered by js/tabs-ui.js; hidden while no file is open. -->
+      <div id="tab-bar" class="tab-bar hidden" role="tablist" aria-label="Open files"></div>
       <div class="editor-toolbar">
         <span class="current-file" id="current-file">No file selected</span>
         <button id="btn-save" disabled>Save</button>
