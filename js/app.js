@@ -1426,7 +1426,38 @@ function applyLayoutMode(mode) {
       if (prev) easyMDE.togglePreview();
     }
   } catch (_) { /* EasyMDE may not be ready */ }
-  requestAnimationFrame(() => editorHandle && editorHandle.refreshLayout());
+
+  // Side-by-side / preview need a layout pass + forced re-render so the pane
+  // is not left empty after CSS height changes.
+  const forcePreview = () => {
+    if (!editorHandle) return;
+    editorHandle.refreshLayout();
+    try {
+      if (typeof editorHandle.renderActivePreview === 'function') {
+        editorHandle.renderActivePreview();
+      }
+      // Side-by-side listens to CodeMirror "update"; a no-op refresh is enough
+      // to repaint .editor-preview-side after toggle.
+      const cm = editorHandle.easyMDE && editorHandle.easyMDE.codemirror;
+      if (cm) {
+        cm.refresh();
+        // Nudge EasyMDE's side-by-side preview by re-setting value when empty pane
+        const sideEl = document.querySelector('.editor-preview-side');
+        const prevEl = document.querySelector('.EasyMDEContainer .editor-preview');
+        const needsFill =
+          (sideEl && !sideEl.innerHTML.trim()) ||
+          (prevEl && prevEl.offsetParent !== null && !prevEl.innerHTML.trim());
+        if (needsFill && typeof editorHandle.easyMDE.value === 'function') {
+          const v = editorHandle.easyMDE.value();
+          editorHandle.easyMDE.value(v);
+        }
+      }
+    } catch (_) { /* ignore */ }
+  };
+  requestAnimationFrame(() => {
+    forcePreview();
+    requestAnimationFrame(forcePreview);
+  });
 }
 
 function setupLayoutToggle() {

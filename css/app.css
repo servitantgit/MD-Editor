@@ -1092,19 +1092,70 @@ button.secondary:hover { background: #21262d; }
   color: var(--muted);
 }
 
-/* Hybrid Live: when side-by-side, give preview a bit more presence */
-.editor-area.mode-split .EasyMDEContainer .editor-preview-side {
-  background: var(--bg);
+/* ===== Hybrid layout modes (Source / Live / Preview) ===== */
+.main { position: relative; }
+
+/*
+ * Side-by-side (Live): EasyMDE with sideBySideFullscreen:false uses floats.
+ * Our default .EasyMDEContainer { display:flex; flex-direction:column } breaks
+ * that and leaves the preview pane empty (zero height). Override while sided.
+ */
+.EasyMDEContainer.sided--no-fullscreen {
+  display: block !important;
+  position: relative !important;
+  flex: 1 !important;
+  min-height: 0 !important;
+  height: 100% !important;
+  overflow: hidden !important;
+}
+.EasyMDEContainer.sided--no-fullscreen .editor-toolbar {
+  position: relative;
+  z-index: 2;
+}
+.EasyMDEContainer.sided--no-fullscreen .CodeMirror.CodeMirror-sided {
+  float: left !important;
+  width: 50% !important;
+  /* toolbar ~40px + statusbar ~28px */
+  height: calc(100% - 68px) !important;
+  border: none !important;
+  border-right: 1px solid var(--border) !important;
+  box-sizing: border-box !important;
+}
+.EasyMDEContainer.sided--no-fullscreen .editor-preview-side {
+  display: block !important;
+  float: left !important;
+  width: 50% !important;
+  height: calc(100% - 68px) !important;
+  overflow: auto !important;
+  box-sizing: border-box !important;
+  padding: 16px 20px !important;
+  background: var(--bg) !important;
+  color: var(--text) !important;
+  border: none !important;
+}
+.EasyMDEContainer.sided--no-fullscreen .editor-statusbar {
+  clear: both;
+}
+
+/* Preview-only: hide source, let .editor-preview fill the area */
+.editor-area.mode-preview .EasyMDEContainer {
+  display: flex !important;
+  flex-direction: column !important;
 }
 .editor-area.mode-preview .CodeMirror {
   display: none !important;
 }
 .editor-area.mode-preview .editor-preview {
   display: block !important;
-  position: static !important;
-  height: 100% !important;
+  position: relative !important;
+  flex: 1 !important;
+  min-height: 0 !important;
+  height: auto !important;
+  overflow: auto !important;
+  padding: 16px 20px !important;
+  background: var(--bg) !important;
+  color: var(--text) !important;
 }
-.main { position: relative; }
 
 /* ===== Diff overlay (pre-commit review) ===== */
 .diff-overlay {
@@ -1167,11 +1218,44 @@ button.secondary:hover { background: #21262d; }
 }
 
 
-/* EasyMDE side-by-side must stay inside .editor-area (not viewport-fixed) */
-.editor-area .EasyMDEContainer.sided--no-fullscreen {
-  position: relative !important;
-  height: 100% !important;
+
+/* Readable typography inside EasyMDE preview panes */
+.editor-preview,
+.editor-preview-side {
+  font-size: 15px;
+  line-height: 1.65;
+  color: var(--text);
 }
-.editor-area .EasyMDEContainer .CodeMirror-sided {
-  width: 50% !important;
+.editor-preview h1, .editor-preview-side h1 { font-size: 1.75em; margin: 0.6em 0 0.4em; border-bottom: 1px solid var(--border); padding-bottom: 0.25em; }
+.editor-preview h2, .editor-preview-side h2 { font-size: 1.35em; margin: 1em 0 0.4em; color: #58a6ff; }
+.editor-preview h3, .editor-preview-side h3 { font-size: 1.15em; margin: 0.9em 0 0.35em; }
+.editor-preview p, .editor-preview-side p { margin: 0 0 0.75em; }
+.editor-preview code, .editor-preview-side code {
+  background: #21262d;
+  padding: 0.15em 0.4em;
+  border-radius: 4px;
+  font-size: 0.9em;
+}
+.editor-preview pre, .editor-preview-side pre {
+  background: #21262d;
+  padding: 12px 14px;
+  border-radius: 6px;
+  overflow-x: auto;
+  margin: 0 0 0.75em;
+}
+.editor-preview pre code, .editor-preview-side pre code { background: none; padding: 0; }
+.editor-preview ul, .editor-preview-side ul,
+.editor-preview ol, .editor-preview-side ol { margin: 0 0 0.75em; padding-left: 1.5em; }
+.editor-preview blockquote, .editor-preview-side blockquote {
+  margin: 0 0 0.75em;
+  padding: 0 0.75em;
+  border-left: 3px solid var(--border);
+  color: var(--muted);
+}
+.editor-preview img, .editor-preview-side img { max-width: 100%; border-radius: 6px; }
+.editor-preview table, .editor-preview-side table { border-collapse: collapse; margin-bottom: 0.75em; }
+.editor-preview th, .editor-preview-side th,
+.editor-preview td, .editor-preview-side td {
+  border: 1px solid var(--border);
+  padding: 6px 10px;
 }

@@ -274,7 +274,7 @@ export function createEditor(textareaEl, deps) {
     }
   }
 
-  return { easyMDE, refreshLayout, refreshInlineImages, createDoc, getDoc, showDoc, destroy };
+  return { easyMDE, refreshLayout, refreshInlineImages, createDoc, getDoc, showDoc, renderActivePreview, destroy };
 }
 
 function escapeHtml(s) {
