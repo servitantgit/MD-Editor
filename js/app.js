@@ -1619,6 +1619,9 @@ function applyLayoutMode(mode) {
     els.editorArea.classList.remove('mode-source', 'mode-split', 'mode-preview');
     els.editorArea.classList.add('mode-' + mode);
   }
+  // EasyMDE fullscreen leaves .editor-area; body classes keep Preview/Live rules alive
+  document.body.classList.remove('md-layout-source', 'md-layout-split', 'md-layout-preview');
+  document.body.classList.add('md-layout-' + mode);
   if (els.layoutToggle) {
     els.layoutToggle.querySelectorAll('.layout-btn').forEach((btn) => {
       btn.classList.toggle('active', btn.dataset.mode === mode);

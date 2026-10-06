@@ -1340,3 +1340,53 @@ button.secondary:hover { background: #21262d; }
   height: calc(100% - 8px);
   min-height: 60vh;
 }
+
+
+/* ===== Fullscreen respects Source / Live / Preview =====
+ * EasyMDE fullscreen uses position:fixed and escapes .editor-area, so
+ * .editor-area.mode-preview rules no longer apply. Mirror them on body.
+ */
+body.md-layout-preview .CodeMirror-fullscreen,
+body.md-layout-preview .CodeMirror.CodeMirror-sided,
+body.md-layout-preview .EasyMDEContainer .CodeMirror-sided {
+  display: none !important;
+  width: 0 !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
+}
+body.md-layout-preview .editor-preview-side,
+body.md-layout-preview .editor-preview-active-side,
+body.md-layout-preview .editor-preview.editor-preview-active {
+  display: block !important;
+  width: 100% !important;
+  max-width: 100% !important;
+  left: 0 !important;
+  right: 0 !important;
+  float: none !important;
+  visibility: visible !important;
+  pointer-events: auto !important;
+}
+body.md-layout-preview .html-preview-frame {
+  width: 100% !important;
+  height: 100% !important;
+  min-height: 100vh !important;
+}
+
+/* Live fullscreen: keep 50/50 if EasyMDE sizes them */
+body.md-layout-split .CodeMirror-fullscreen.CodeMirror-sided,
+body.md-layout-split .CodeMirror.CodeMirror-sided {
+  width: 50% !important;
+  display: block !important;
+  visibility: visible !important;
+}
+body.md-layout-split .editor-preview-side {
+  width: 50% !important;
+  display: block !important;
+  visibility: visible !important;
+}
+
+/* Source fullscreen: no preview pane */
+body.md-layout-source .editor-preview-side,
+body.md-layout-source .editor-preview-active-side {
+  display: none !important;
+}
