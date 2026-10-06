@@ -8,7 +8,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-<<<<<<< HEAD
 - **Hybrid Live + Commit / Push / History** — layout modes (Source/Live/Preview), multi-file Commit panel (Git Data API), History with diffs, dirty M/A badges (`js/working-tree.js`, `js/commit-ui.js`, GitHubClient Git Data methods)
 - **Hybrid Live layout modes** — Source / Live (side-by-side) / Preview toggle in the header; preference stored in `localStorage` (`md_layout`)
 - **Commit panel** — multi-file commits with a message via Git Data API (`commitFiles`: blobs → tree → commit → update ref). Dirty files show **M**/**A** badges in the file tree; header **Commit** button with change count
@@ -18,8 +17,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `GitHubClient` extensions: `getRefSha`, `createBlob`, `createTree`, `createCommitObject`, `updateRef`, `commitFiles`, `listCommits`, `getCommitDetail`
 
 ### Added
-=======
->>>>>>> 211a838a59771ab93bbafcd9d89bc4570c34bf73
 - **Tabs: several documents open at once.** Opening a file from the tree or from search adds a tab above the toolbar (or just activates the one that is already open). Each tab keeps its own CodeMirror document, so **text, undo history, cursor and scroll position survive switching away and back**, and a tab that was saved comes back instantly without a request. A dot on a tab means *not on GitHub yet*; × or middle-click closes it, the arrow keys / Home / End move between tabs, and identically named files are told apart by their parent folder (`a/notes.md`, `b/notes.md`). Tabs survive a page reload (`sessionStorage`, like the token) and only the active one is fetched on load. Moving, renaming or deleting a file or folder keeps the tabs consistent with it (`js/tabs.js`, `js/tabs-ui.js`, `js/app.js`)
   - **Nothing is lost by leaving or closing a tab.** Switching away does what switching files always did — the draft is written at once and the commit continues in the background — and closing a tab does the same, including the last one. A tab left with something GitHub did not have yet is re-fetched on return and the usual draft banner offers the local text, because after a background commit only GitHub and the draft store know the truth
   - `Autosave.release()` lets go of the current file without stopping the instance. Closing the last tab or deleting the open file used to `destroy()` it, and a destroyed instance skips the clean-up of a push still in flight — the draft stayed behind and later looked like unsaved work

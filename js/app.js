@@ -21,12 +21,9 @@ import { DraftStore } from './draft-store.js';
 import { Autosave } from './autosave.js';
 import { TabsModel, tabLabels, tabsStorageKey } from './tabs.js';
 import { createTabBar } from './tabs-ui.js';
-<<<<<<< HEAD
 import { WorkingTree } from './working-tree.js';
 import { bindCommitPanel, bindHistoryPanel } from './commit-ui.js';
 import { unifiedDiff, renderDiffLines } from './diff-util.js';
-=======
->>>>>>> 211a838a59771ab93bbafcd9d89bc4570c34bf73
 
 const els = {
   loginScreen: document.getElementById('login-screen'),
@@ -138,13 +135,10 @@ let syncing = false;
 // A path with no entry here is a tab that was restored but never opened yet.
 let tabs = new TabsModel();
 let tabBar = null;
-<<<<<<< HEAD
 let workingTree = new WorkingTree();
 let commitPanel = null;
 let historyPanel = null;
 let layoutMode = localStorage.getItem('md_layout') || 'split';
-=======
->>>>>>> 211a838a59771ab93bbafcd9d89bc4570c34bf73
 const tabDocs = new Map();
 // Whether the ACTIVE file differs from GitHub, derived from the autosave label.
 let activeFileUnsaved = false;
@@ -557,7 +551,6 @@ function showApp(owner, repo) {
   });
   renderTabs();
 
-<<<<<<< HEAD
   // Hybrid layout + Commit / History panels (idempotent re-bind each showApp)
   applyLayoutMode(layoutMode);
   setupLayoutToggle();
@@ -565,8 +558,6 @@ function showApp(owner, repo) {
   workingTree.clearAll();
   refreshCommitBadge();
 
-=======
->>>>>>> 211a838a59771ab93bbafcd9d89bc4570c34bf73
   // Key fix for "doesn't scroll / not editable": force a CodeMirror layout
   // recalculation right after the container became visible and got its
   // real size (at EasyMDE construction time the container may not yet have had
@@ -873,7 +864,6 @@ function renderTabs() {
 /** A commit for `path` landed (maybe in the background, for a tab the user already left). */
 function noteCommit(path, sha) {
   const tab = tabDocs.get(path);
-<<<<<<< HEAD
   if (tab) {
     if (sha) tab.sha = sha;
     tab.commitSeen = true;
@@ -887,14 +877,6 @@ function noteCommit(path, sha) {
     workingTree.clear(path);
     refreshCommitBadge();
     if (fileTree) fileTree.setDirtyMap(workingTree.statusMap());
-=======
-  if (!tab) return;
-  if (sha) tab.sha = sha;
-  tab.commitSeen = true;
-  if (state.currentPath !== path && tab.unsaved) {
-    tab.unsaved = false;
-    renderTabs();
->>>>>>> 211a838a59771ab93bbafcd9d89bc4570c34bf73
   }
 }
 
