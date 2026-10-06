@@ -1103,8 +1103,12 @@ async function openFile(path, { reload = false } = {}) {
     if (editorHandle && typeof editorHandle.setLanguage === 'function') {
       editorHandle.setLanguage(kind.mode);
     }
-    // Re-apply layout so HTML/code previews use the right renderer for this file
-    applyLayoutMode(layoutMode);
+    // Do NOT call applyLayoutMode here — it would toggle away EasyMDE's toolbar
+    // Preview / side-by-side that the user (or e2e) turned on. showDoc already
+    // re-renders the active preview pane for the new document.
+    if (editorHandle && typeof editorHandle.renderActivePreview === 'function') {
+      editorHandle.renderActivePreview();
+    }
     setSaveStatus('Ready', false);
 
     if (opened.hasDraft) {

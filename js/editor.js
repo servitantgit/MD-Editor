@@ -95,6 +95,39 @@ export function createEditor(textareaEl, deps) {
     },
   });
 
+
+  // Expose EasyMDE's CodeMirror so optional mode scripts can register
+  try {
+    if (typeof globalThis.CodeMirror === 'undefined' && easyMDE.codemirror) {
+      globalThis.CodeMirror = easyMDE.codemirror.constructor;
+    }
+  } catch (_) { /* ignore */ }
+
+  // Lazy-load common CodeMirror modes once (Notepad++ language pack feel)
+  let modesLoadStarted = false;
+  function ensureCodeMirrorModes() {
+    if (modesLoadStarted || typeof globalThis.CodeMirror === 'undefined') return;
+    modesLoadStarted = true;
+    const base = 'https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode';
+    const files = [
+      base + '/xml/xml.min.js',
+      base + '/javascript/javascript.min.js',
+      base + '/css/css.min.js',
+      base + '/htmlmixed/htmlmixed.min.js',
+      base + '/python/python.min.js',
+      base + '/shell/shell.min.js',
+      base + '/yaml/yaml.min.js',
+    ];
+    for (const src of files) {
+      if (document.querySelector(`script[data-cm-mode="${src}"]`)) continue;
+      const s = document.createElement('script');
+      s.src = src;
+      s.async = true;
+      s.dataset.cmMode = src;
+      document.head.appendChild(s);
+    }
+  }
+
   async function finishPreviewRender(previewEl, myToken) {
     if (myToken !== previewRenderToken) return; // a newer render arrived meanwhile
     // Notepad++-style readability: highlight fenced code in the rendered preview
@@ -308,9 +341,16 @@ export function createEditor(textareaEl, deps) {
   function renderActivePreview() {
     const sideOn = typeof easyMDE.isSideBySideActive === 'function' && easyMDE.isSideBySideActive();
     const prevOn = typeof easyMDE.isPreviewActive === 'function' && easyMDE.isPreviewActive();
-    if (!sideOn && !prevOn) return;
-
-    const list = findPreviewElements();
+    // Also treat a visible .editor-preview-active in the DOM as "preview on"
+    // (covers races where the flag lags behind the class).
+    let list = findPreviewElements();
+    if (!sideOn && !prevOn) {
+      list = list.filter((el) =>
+        el.classList.contains('editor-preview-active') ||
+        el.classList.contains('editor-preview-active-side')
+      );
+      if (!list.length) return;
+    }
     if (!list.length) return;
 
     const plain = easyMDE.value();
@@ -353,9 +393,18 @@ export function createEditor(textareaEl, deps) {
    */
   function setLanguage(modeName) {
     try {
+      ensureCodeMirrorModes();
       const cm = easyMDE.codemirror;
       const mode = modeName && modeName !== 'null' ? modeName : 'text/plain';
-      cm.setOption('mode', mode === 'gfm' || mode === 'markdown' ? 'gfm' : mode);
+      const resolved = mode === 'gfm' || mode === 'markdown' ? 'gfm' : mode;
+      cm.setOption('mode', resolved);
+      // Modes may still be downloading — retry once after a short delay
+      setTimeout(() => {
+        try {
+          cm.setOption('mode', resolved);
+          cm.refresh();
+        } catch (_) {}
+      }, 400);
       cm.refresh();
     } catch (_) { /* mode not loaded — plain text still works */ }
   }
