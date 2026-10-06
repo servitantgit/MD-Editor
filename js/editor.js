@@ -246,12 +246,26 @@ export function createEditor(textareaEl, deps) {
    * CodeMirror's lastChild. Writing into lastChild left the visible pane empty.
    */
   function findPreviewElements() {
-    const wrap = easyMDE.codemirror.getWrapperElement();
-    const root = wrap && wrap.closest('.EasyMDEContainer');
-    if (!root) return [];
-    return Array.from(root.querySelectorAll(
-      '.editor-preview-active, .editor-preview-active-side, .editor-preview-side, .editor-preview'
-    ));
+    const wrap = easyMDE.codemirror && easyMDE.codemirror.getWrapperElement
+      ? easyMDE.codemirror.getWrapperElement()
+      : null;
+    if (!wrap) return [];
+
+    const sel = '.editor-preview-active, .editor-preview-active-side, .editor-preview-side, .editor-preview';
+    // Real EasyMDE: preview is a sibling of .CodeMirror under .EasyMDEContainer
+    const root = (typeof wrap.closest === 'function' && wrap.closest('.EasyMDEContainer'))
+      || wrap.parentElement
+      || null;
+    if (root) {
+      const fromRoot = Array.from(root.querySelectorAll(sel));
+      if (fromRoot.length) return fromRoot;
+    }
+    // Unit test / alternate layout: preview is a child of the CodeMirror wrapper
+    const fromWrap = Array.from(wrap.querySelectorAll(sel));
+    if (fromWrap.length) return fromWrap;
+    // Last-resort legacy: whatever is lastChild of the wrapper
+    if (wrap.lastChild && wrap.lastChild.nodeType === 1) return [wrap.lastChild];
+    return [];
   }
 
   function renderActivePreview() {
@@ -259,13 +273,7 @@ export function createEditor(textareaEl, deps) {
     const prevOn = typeof easyMDE.isPreviewActive === 'function' && easyMDE.isPreviewActive();
     if (!sideOn && !prevOn) return;
 
-    const targets = findPreviewElements().filter((el) => {
-      // Skip nodes we explicitly hide in CSS for the other mode
-      const style = window.getComputedStyle(el);
-      return style.display !== 'none' && style.visibility !== 'hidden';
-    });
-    // If filter removed everything (timing), still try every candidate
-    const list = targets.length ? targets : findPreviewElements();
+    const list = findPreviewElements();
     if (!list.length) return;
 
     const plain = easyMDE.value();
