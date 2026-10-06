@@ -1461,81 +1461,51 @@ function applyLayoutMode(mode) {
   if (!editorHandle) return;
   const easyMDE = editorHandle.easyMDE;
   try {
-    // EasyMDE has two independent toggles:
-    //   side-by-side → .editor-preview-side (50% + source)
-    //   preview      → .editor-preview (full overlay)
-    // Leaving side-by-side without fully exiting leaves a half-width pane —
-    // that is why Preview looked "split in two". Exit the wrong mode first.
-    const sideOn = () => typeof easyMDE.isSideBySideActive === 'function' && easyMDE.isSideBySideActive();
-    const prevOn = () => typeof easyMDE.isPreviewActive === 'function' && easyMDE.isPreviewActive();
+    // One engine only: EasyMDE side-by-side (.editor-preview-side).
+    // Live  = side-by-side on, CSS shows 50% | 50%
+    // Preview = side-by-side on, CSS hides source and stretches preview to 100%
+    // Source = side-by-side off
+    // Never use togglePreview — that path left an empty pane.
+    const sideOn = typeof easyMDE.isSideBySideActive === 'function' && easyMDE.isSideBySideActive();
+    const prevOn = typeof easyMDE.isPreviewActive === 'function' && easyMDE.isPreviewActive();
 
-    if (mode === 'split') {
-      if (prevOn()) easyMDE.togglePreview();
-      if (!sideOn()) easyMDE.toggleSideBySide();
-    } else if (mode === 'preview') {
-      // Must leave side-by-side completely, then enable full preview
-      if (sideOn()) easyMDE.toggleSideBySide();
-      if (sideOn()) easyMDE.toggleSideBySide(); // belt-and-suspenders
-      if (!prevOn()) easyMDE.togglePreview();
-      // Strip residual sided classes EasyMDE sometimes leaves behind
-      const root = easyMDE.codemirror && easyMDE.codemirror.getWrapperElement()
-        && easyMDE.codemirror.getWrapperElement().closest('.EasyMDEContainer');
-      if (root) {
-        root.classList.remove('sided--no-fullscreen');
-        const cm = root.querySelector('.CodeMirror');
-        if (cm) cm.classList.remove('CodeMirror-sided');
-      }
+    // Always leave full-preview mode if somehow active
+    if (prevOn) easyMDE.togglePreview();
+
+    if (mode === 'split' || mode === 'preview') {
+      if (!sideOn) easyMDE.toggleSideBySide();
     } else {
-      // source: both off
-      if (sideOn()) easyMDE.toggleSideBySide();
-      if (prevOn()) easyMDE.togglePreview();
-      const root = easyMDE.codemirror && easyMDE.codemirror.getWrapperElement()
-        && easyMDE.codemirror.getWrapperElement().closest('.EasyMDEContainer');
-      if (root) {
-        root.classList.remove('sided--no-fullscreen');
-        const cm = root.querySelector('.CodeMirror');
-        if (cm) cm.classList.remove('CodeMirror-sided');
-      }
+      if (sideOn) easyMDE.toggleSideBySide();
     }
   } catch (_) { /* EasyMDE may not be ready */ }
 
-  // Side-by-side / preview need a layout pass + forced re-render so the pane
-  // is not left empty after CSS height changes.
-  const forcePreview = () => {
+  const forceLayout = () => {
     if (!editorHandle) return;
-    editorHandle.refreshLayout();
     try {
+      editorHandle.refreshLayout();
       const cm = editorHandle.easyMDE && editorHandle.easyMDE.codemirror;
       if (cm) cm.refresh();
-      if (typeof editorHandle.renderActivePreview === 'function') {
-        editorHandle.renderActivePreview();
-      }
-      // Fallback: if Preview mode is on but the pane is still empty, render HTML
-      // directly into EasyMDE's preview node (avoids relying on isPreviewActive timing).
-      if (layoutMode === 'preview' || layoutMode === 'split') {
-        const root = document.querySelector('.editor-area .EasyMDEContainer');
-        if (root && editorHandle.easyMDE) {
-          const plain = editorHandle.easyMDE.value();
-          const nodes = root.querySelectorAll(
-            layoutMode === 'split'
-              ? '.editor-preview-side, .editor-preview-active-side'
-              : '.editor-preview-active, .editor-preview'
-          );
-          for (const node of nodes) {
-            if (!node.innerHTML || !node.innerHTML.trim()) {
+      // Side-by-side updates from CodeMirror 'update'; nudge a repaint by
+      // re-rendering into .editor-preview-side when Live or Preview is on.
+      if (layoutMode === 'split' || layoutMode === 'preview') {
+        if (typeof editorHandle.renderActivePreview === 'function') {
+          // Temporarily treat side-by-side as active for render (isPreviewActive is false)
+          const root = document.querySelector('.editor-area .EasyMDEContainer');
+          if (root && editorHandle.easyMDE) {
+            const plain = editorHandle.easyMDE.value();
+            const nodes = root.querySelectorAll('.editor-preview-side, .editor-preview-active-side');
+            for (const node of nodes) {
               const html = editorHandle.easyMDE.options.previewRender(plain, node);
               if (html != null) node.innerHTML = html;
             }
           }
         }
       }
-      // Do NOT call easyMDE.value() here — it fires change handlers and can
-      // race with IndexedDB draft writes (breaks "draft survives reload" e2e).
     } catch (_) { /* ignore */ }
   };
   requestAnimationFrame(() => {
-    forcePreview();
-    requestAnimationFrame(forcePreview);
+    forceLayout();
+    requestAnimationFrame(forceLayout);
   });
 }
 

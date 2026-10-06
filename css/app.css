@@ -1137,48 +1137,34 @@ button.secondary:hover { background: #21262d; }
   clear: both;
 }
 
-/* Preview-only: ONE full-width pane (not a leftover 50% side-by-side half) */
-.editor-area.mode-preview .EasyMDEContainer {
-  display: flex !important;
-  flex-direction: column !important;
-  /* drop EasyMDE sided float layout if class was not cleaned up yet */
-}
-.editor-area.mode-preview .EasyMDEContainer.sided--no-fullscreen {
-  display: flex !important;
-  flex-direction: column !important;
-  overflow: hidden !important;
-}
-.editor-area.mode-preview .CodeMirror,
-.editor-area.mode-preview .CodeMirror-sided,
-.editor-area.mode-preview .editor-preview-side {
+/*
+ * Preview = same Live side-by-side engine, but source is hidden and the
+ * working .editor-preview-side pane is stretched to 100%. No EasyMDE
+ * togglePreview — that path was unreliable / empty.
+ */
+.editor-area.mode-preview .EasyMDEContainer.sided--no-fullscreen .CodeMirror,
+.editor-area.mode-preview .EasyMDEContainer.sided--no-fullscreen .CodeMirror-sided {
   display: none !important;
   width: 0 !important;
-  height: 0 !important;
   float: none !important;
   visibility: hidden !important;
   pointer-events: none !important;
+  border: none !important;
 }
-.editor-area.mode-preview .editor-preview,
-.editor-area.mode-preview .editor-preview-active {
+.editor-area.mode-preview .EasyMDEContainer.sided--no-fullscreen .editor-preview-side {
   display: block !important;
-  position: relative !important;
   float: none !important;
-  top: auto !important;
-  left: auto !important;
-  right: auto !important;
-  bottom: auto !important;
   width: 100% !important;
   max-width: 100% !important;
-  flex: 1 1 auto !important;
-  min-height: 0 !important;
-  height: auto !important;
+  height: calc(100% - 68px) !important;
   overflow: auto !important;
+  box-sizing: border-box !important;
   padding: 16px 20px !important;
   background: var(--bg) !important;
   color: var(--text) !important;
-  box-sizing: border-box !important;
   border: none !important;
-  z-index: 1 !important;
+  visibility: visible !important;
+  pointer-events: auto !important;
 }
 
 /* ===== Diff overlay (pre-commit review) ===== */
