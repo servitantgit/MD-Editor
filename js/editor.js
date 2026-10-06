@@ -240,13 +240,40 @@ export function createEditor(textareaEl, deps) {
    * does not. (Side-by-side re-renders itself from CodeMirror's 'update' event.)
    * This mirrors what EasyMDE's own value() does for the full Preview pane.
    */
+  /**
+   * EasyMDE puts the full-preview pane as a SIBLING of .CodeMirror inside
+   * .EasyMDEContainer (class .editor-preview / .editor-preview-active), NOT as
+   * CodeMirror's lastChild. Writing into lastChild left the visible pane empty.
+   */
+  function findPreviewElements() {
+    const wrap = easyMDE.codemirror.getWrapperElement();
+    const root = wrap && wrap.closest('.EasyMDEContainer');
+    if (!root) return [];
+    return Array.from(root.querySelectorAll(
+      '.editor-preview-active, .editor-preview-active-side, .editor-preview-side, .editor-preview'
+    ));
+  }
+
   function renderActivePreview() {
-    if (typeof easyMDE.isPreviewActive !== 'function' || !easyMDE.isPreviewActive()) return;
-    const preview = easyMDE.codemirror.getWrapperElement().lastChild;
-    if (!preview) return;
-    const html = easyMDE.options.previewRender(easyMDE.value(), preview);
-    if (html !== null && html !== undefined) preview.innerHTML = html;
-    preview.scrollTop = 0;
+    const sideOn = typeof easyMDE.isSideBySideActive === 'function' && easyMDE.isSideBySideActive();
+    const prevOn = typeof easyMDE.isPreviewActive === 'function' && easyMDE.isPreviewActive();
+    if (!sideOn && !prevOn) return;
+
+    const targets = findPreviewElements().filter((el) => {
+      // Skip nodes we explicitly hide in CSS for the other mode
+      const style = window.getComputedStyle(el);
+      return style.display !== 'none' && style.visibility !== 'hidden';
+    });
+    // If filter removed everything (timing), still try every candidate
+    const list = targets.length ? targets : findPreviewElements();
+    if (!list.length) return;
+
+    const plain = easyMDE.value();
+    for (const preview of list) {
+      const html = easyMDE.options.previewRender(plain, preview);
+      if (html !== null && html !== undefined) preview.innerHTML = html;
+      preview.scrollTop = 0;
+    }
   }
 
   /**

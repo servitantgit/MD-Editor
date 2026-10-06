@@ -1505,11 +1505,30 @@ function applyLayoutMode(mode) {
     if (!editorHandle) return;
     editorHandle.refreshLayout();
     try {
+      const cm = editorHandle.easyMDE && editorHandle.easyMDE.codemirror;
+      if (cm) cm.refresh();
       if (typeof editorHandle.renderActivePreview === 'function') {
         editorHandle.renderActivePreview();
       }
-      const cm = editorHandle.easyMDE && editorHandle.easyMDE.codemirror;
-      if (cm) cm.refresh();
+      // Fallback: if Preview mode is on but the pane is still empty, render HTML
+      // directly into EasyMDE's preview node (avoids relying on isPreviewActive timing).
+      if (layoutMode === 'preview' || layoutMode === 'split') {
+        const root = document.querySelector('.editor-area .EasyMDEContainer');
+        if (root && editorHandle.easyMDE) {
+          const plain = editorHandle.easyMDE.value();
+          const nodes = root.querySelectorAll(
+            layoutMode === 'split'
+              ? '.editor-preview-side, .editor-preview-active-side'
+              : '.editor-preview-active, .editor-preview'
+          );
+          for (const node of nodes) {
+            if (!node.innerHTML || !node.innerHTML.trim()) {
+              const html = editorHandle.easyMDE.options.previewRender(plain, node);
+              if (html != null) node.innerHTML = html;
+            }
+          }
+        }
+      }
       // Do NOT call easyMDE.value() here — it fires change handlers and can
       // race with IndexedDB draft writes (breaks "draft survives reload" e2e).
     } catch (_) { /* ignore */ }

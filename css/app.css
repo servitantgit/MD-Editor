@@ -1158,10 +1158,15 @@ button.secondary:hover { background: #21262d; }
   visibility: hidden !important;
   pointer-events: none !important;
 }
-.editor-area.mode-preview .editor-preview {
+.editor-area.mode-preview .editor-preview,
+.editor-area.mode-preview .editor-preview-active {
   display: block !important;
   position: relative !important;
   float: none !important;
+  top: auto !important;
+  left: auto !important;
+  right: auto !important;
+  bottom: auto !important;
   width: 100% !important;
   max-width: 100% !important;
   flex: 1 1 auto !important;
@@ -1173,6 +1178,7 @@ button.secondary:hover { background: #21262d; }
   color: var(--text) !important;
   box-sizing: border-box !important;
   border: none !important;
+  z-index: 1 !important;
 }
 
 /* ===== Diff overlay (pre-commit review) ===== */
