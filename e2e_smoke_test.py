@@ -844,6 +844,25 @@ with sync_playwright() as p:
     wait_until(lambda: page.locator("#tab-bar .tab.dirty").count() == 0, what="the dot to clear")
     print("✓ clicking the file that is already open keeps its unsaved text and state")
 
+    # Preview mode has to follow the active tab. EasyMDE re-renders its Preview pane
+    # from value(), and tab switching goes around value() (swapDoc), so Preview once
+    # kept showing the first document under every other tab's name until a reload.
+    def preview_text():
+        return page.evaluate(
+            "() => { const p = document.querySelector('.editor-preview-active'); return p ? p.innerText : ''; }")
+
+    page.click("button.preview")
+    wait_until(lambda: "Hello world" in preview_text(), what="Preview to show the active note")
+    page.click("#tab-bar .tab:has-text('Second note.md') .tab-label")
+    wait_until(lambda: "SECOND_NOTE_BODY" in preview_text(), what="Preview to follow the switch to the second tab")
+    assert "Hello world" not in preview_text(), "Preview still shows the first note under the second tab"
+    page.click("#tab-bar .tab:has-text('Test note.md') .tab-label")
+    wait_until(lambda: "Hello world" in preview_text() and "SECOND_NOTE_BODY" not in preview_text(),
+               what="Preview to follow the switch back")
+    page.click("button.preview")  # back to the editor
+    wait_until(lambda: page.locator(".editor-preview-active").count() == 0, what="Preview to switch off")
+    print("✓ Preview mode follows the active tab")
+
     # G3. The dot: typing marks the active tab, a save clears it.
     page.click("#tab-bar .tab:has-text('Second note.md') .tab-label")
     wait_until(lambda: active_tab() == "Second note.md", what="tab B to become active")

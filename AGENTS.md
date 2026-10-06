@@ -636,6 +636,15 @@ image marks belong to a document and are rebuilt by `showDoc()`. `setEditorValue
 (which uses `.value()`) is still right for replacing the text of the CURRENT file
 in place — "Reload from GitHub" in the conflict banner.
 
+**Going around `value()` has a price: whatever EasyMDE hangs on `value()` no longer
+happens.** The one that matters is the full **Preview** pane, which EasyMDE re-renders
+only from `value()`; `showDoc()` re-renders it by hand (`renderActivePreview()`),
+mirroring EasyMDE's own code. Without it the tab and file name change and Preview keeps
+showing the first document. Side-by-side needs nothing (it re-renders on CodeMirror's
+`update` event, which `swapDoc` fires) and cannot be combined with switching tabs anyway:
+EasyMDE puts it in fullscreen, over the tab bar. Any new editor mode or EasyMDE upgrade
+is a reason to re-run the Preview scenario in `e2e_smoke_test.py` (group G).
+
 **When is the cached document trusted?** Only if the tab was clean when left
 (`!unsaved`) and not `stale`. Autosave is a state machine for ONE file; a tab left
 dirty is re-fetched on return, and the draft banner then offers the local text — the

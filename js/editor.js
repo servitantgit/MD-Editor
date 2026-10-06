@@ -225,8 +225,25 @@ export function createEditor(textareaEl, deps) {
   function showDoc(doc) {
     const previous = easyMDE.codemirror.swapDoc(doc);
     refreshLayout();
+    renderActivePreview();
     refreshInlineImages();
     return previous;
+  }
+
+  /**
+   * `easyMDE.value(text)` re-renders the Preview pane when it is showing; swapDoc()
+   * goes around value(), so without this Preview keeps displaying the document that
+   * was open when it was switched on: the tab and the file name change, the page
+   * does not. (Side-by-side re-renders itself from CodeMirror's 'update' event.)
+   * This mirrors what EasyMDE's own value() does for the full Preview pane.
+   */
+  function renderActivePreview() {
+    if (typeof easyMDE.isPreviewActive !== 'function' || !easyMDE.isPreviewActive()) return;
+    const preview = easyMDE.codemirror.getWrapperElement().lastChild;
+    if (!preview) return;
+    const html = easyMDE.options.previewRender(easyMDE.value(), preview);
+    if (html !== null && html !== undefined) preview.innerHTML = html;
+    preview.scrollTop = 0;
   }
 
   /**
