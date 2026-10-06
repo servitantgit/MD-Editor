@@ -1390,3 +1390,11 @@ body.md-layout-source .editor-preview-side,
 body.md-layout-source .editor-preview-active-side {
   display: none !important;
 }
+
+/* Markdown actions disabled for HTML/JS/CSS files */
+.editor-toolbar button.disabled,
+.editor-toolbar button:disabled {
+  opacity: 0.35 !important;
+  pointer-events: none !important;
+  cursor: not-allowed !important;
+}

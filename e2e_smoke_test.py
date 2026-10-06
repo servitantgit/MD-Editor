@@ -848,10 +848,16 @@ with sync_playwright() as p:
     # from value(), and tab switching goes around value() (swapDoc), so Preview once
     # kept showing the first document under every other tab's name until a reload.
     def preview_text():
+        # App layout uses EasyMDE side-by-side (.editor-preview-side), not the
+        # legacy full-preview pane (.editor-preview-active).
         return page.evaluate(
-            "() => { const p = document.querySelector('.editor-preview-active'); return p ? p.innerText : ''; }")
+            """() => {
+              const p = document.querySelector('.editor-preview-side')
+                || document.querySelector('.editor-preview-active');
+              return p ? p.innerText : '';
+            }""")
 
-    page.click("button.preview")
+    page.click('#layout-toggle .layout-btn[data-mode="preview"]')
     wait_until(lambda: "Hello world" in preview_text(), what="Preview to show the active note")
     page.click("#tab-bar .tab:has-text('Second note.md') .tab-label")
     wait_until(lambda: "SECOND_NOTE_BODY" in preview_text(), what="Preview to follow the switch to the second tab")
@@ -859,8 +865,8 @@ with sync_playwright() as p:
     page.click("#tab-bar .tab:has-text('Test note.md') .tab-label")
     wait_until(lambda: "Hello world" in preview_text() and "SECOND_NOTE_BODY" not in preview_text(),
                what="Preview to follow the switch back")
-    page.click("button.preview")  # back to the editor
-    wait_until(lambda: page.locator(".editor-preview-active").count() == 0, what="Preview to switch off")
+    page.click('#layout-toggle .layout-btn[data-mode="source"]')  # back to the editor
+    wait_until(lambda: page.locator(".editor-preview-side").count() == 0, what="Preview to switch off")
     print("✓ Preview mode follows the active tab")
 
     # G3. The dot: typing marks the active tab, a save clears it.

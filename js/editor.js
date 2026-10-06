@@ -26,7 +26,10 @@ export function createEditor(textareaEl, deps) {
     // Keep side-by-side inside .editor-area so the file tree stays clickable
     // (EasyMDE default is fullscreen fixed overlay that steals all pointer events).
     sideBySideFullscreen: false,
-    placeholder: 'Start writing markdown...',
+    placeholder: 'Start writing…',
+    // Layout (Source / Live / Preview) is owned by the app header — do NOT put
+    // EasyMDE's preview / side-by-side here: they fight our modes and only work
+    // cleanly in Source. Fullscreen stays; F9/F10 EasyMDE shortcuts are disabled.
     toolbar: [
       'bold', 'italic', 'heading', '|',
       'quote', 'unordered-list', 'ordered-list', '|',
@@ -37,9 +40,14 @@ export function createEditor(textareaEl, deps) {
         className: 'fa fa-image',
         title: 'Add an image to the repository',
       }, '|',
-      'preview', 'side-by-side', 'fullscreen', '|',
+      'fullscreen', '|',
       'guide',
     ],
+    shortcuts: {
+      toggleSideBySide: null,
+      togglePreview: null,
+      // keep toggleFullScreen default (F11 / toolbar button)
+    },
     status: ['lines', 'words', 'cursor'],
     renderingConfig: { singleLineBreaks: false, codeSyntaxHighlighting: true },
     previewRender(plainText, previewEl) {
@@ -404,6 +412,48 @@ export function createEditor(textareaEl, deps) {
     } catch (_) { /* mode not loaded — plain text still works */ }
   }
 
+  /**
+   * Markdown-only toolbar actions (bold, headings, image, guide) are useless or
+   * harmful in HTML/JS/CSS. Disable them when the open file is not markdown.
+   */
+  function setToolbarForKind(kind) {
+    const isMd = !kind || kind.kind === 'markdown';
+    const toolbar = document.querySelector('.editor-toolbar');
+    if (!toolbar) return;
+    const mdOnly = new Set([
+      'bold', 'italic', 'heading', 'quote', 'unordered-list', 'ordered-list',
+      'link', 'image', 'guide',
+    ]);
+    toolbar.querySelectorAll('button').forEach((btn) => {
+      const name = btn.className || '';
+      // EasyMDE buttons: class contains the action name, e.g. "bold", "fa fa-bold"
+      let action = null;
+      for (const a of mdOnly) {
+        if (name.split(/\s+/).includes(a) || btn.title && btn.title.toLowerCase().includes(a)) {
+          action = a;
+          break;
+        }
+      }
+      // Match by title keywords EasyMDE uses
+      const title = (btn.title || '').toLowerCase();
+      const isMdBtn =
+        /bold|italic|heading|quote|list|link|image|guide|markdown/i.test(title) &&
+        !/fullscreen|full screen/i.test(title);
+      if (!isMdBtn) return; // fullscreen etc. stay active
+      if (isMd) {
+        btn.classList.remove('disabled');
+        btn.removeAttribute('disabled');
+        btn.style.opacity = '';
+        btn.style.pointerEvents = '';
+      } else {
+        btn.classList.add('disabled');
+        btn.setAttribute('disabled', 'disabled');
+        btn.style.opacity = '0.35';
+        btn.style.pointerEvents = 'none';
+      }
+    });
+  }
+
   /** Simple in-file find (no addon dependency). Returns match count. */
   function findInFile(query, { backwards = false } = {}) {
     const cm = easyMDE.codemirror;
@@ -453,6 +503,7 @@ export function createEditor(textareaEl, deps) {
     showDoc,
     renderActivePreview,
     setLanguage,
+    setToolbarForKind,
     findInFile,
     clearFind,
     destroy,

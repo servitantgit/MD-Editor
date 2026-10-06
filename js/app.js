@@ -1103,6 +1103,9 @@ async function openFile(path, { reload = false } = {}) {
     if (editorHandle && typeof editorHandle.setLanguage === 'function') {
       editorHandle.setLanguage(kind.mode);
     }
+    if (editorHandle && typeof editorHandle.setToolbarForKind === 'function') {
+      editorHandle.setToolbarForKind(kind);
+    }
     // Do NOT call applyLayoutMode here — it would toggle away EasyMDE's toolbar
     // Preview / side-by-side that the user (or e2e) turned on. showDoc already
     // re-renders the active preview pane for the new document.
