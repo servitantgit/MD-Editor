@@ -866,7 +866,7 @@ with sync_playwright() as p:
     wait_until(lambda: "Hello world" in preview_text() and "SECOND_NOTE_BODY" not in preview_text(),
                what="Preview to follow the switch back")
     page.click('#layout-toggle .layout-btn[data-mode="source"]')  # back to the editor
-    wait_until(lambda: page.locator(".editor-preview-side").count() == 0, what="Preview to switch off")
+    wait_until(lambda: page.locator(".editor-preview-side:visible").count() == 0, what="Preview to switch off")
     print("✓ Preview mode follows the active tab")
 
     # G3. The dot: typing marks the active tab, a save clears it.
@@ -1043,7 +1043,7 @@ with sync_playwright() as p:
     print(f"✓ scrolling works (scrollHeight={scroll_info['scrollHeight']}, scrollTop={scroll_top})")
 
     # --- 3. Image rendering in the preview (via the GitHub API mock) ---
-    page.click("button.preview")
+    page.click('#layout-toggle .layout-btn[data-mode="preview"]')
     page.wait_for_selector(".editor-preview .md-img-wrap", timeout=5000)
     page.wait_for_function(
         "!document.querySelector('.editor-preview .md-img-wrap').classList.contains('loading')",
