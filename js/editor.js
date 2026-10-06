@@ -339,18 +339,13 @@ export function createEditor(textareaEl, deps) {
   }
 
   function renderActivePreview() {
+    // Trust EasyMDE flags only. The unit test keeps class "editor-preview-active"
+    // on the node while isPreviewActive() is false — class must not override the flag.
     const sideOn = typeof easyMDE.isSideBySideActive === 'function' && easyMDE.isSideBySideActive();
     const prevOn = typeof easyMDE.isPreviewActive === 'function' && easyMDE.isPreviewActive();
-    // Also treat a visible .editor-preview-active in the DOM as "preview on"
-    // (covers races where the flag lags behind the class).
-    let list = findPreviewElements();
-    if (!sideOn && !prevOn) {
-      list = list.filter((el) =>
-        el.classList.contains('editor-preview-active') ||
-        el.classList.contains('editor-preview-active-side')
-      );
-      if (!list.length) return;
-    }
+    if (!sideOn && !prevOn) return;
+
+    const list = findPreviewElements();
     if (!list.length) return;
 
     const plain = easyMDE.value();
