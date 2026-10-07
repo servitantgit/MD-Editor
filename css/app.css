@@ -1295,7 +1295,8 @@ button.secondary:hover { background: #21262d; }
 .diff-overlay {
   position: absolute;
   inset: 0;
-  z-index: 12;
+  /* Above editor (0), below Commit(16)/History(15) drawers so drawers stay clickable */
+  z-index: 14;
   background: var(--bg);
   display: flex;
   flex-direction: column;
@@ -1425,12 +1426,19 @@ button.secondary:hover { background: #21262d; }
 .find-bar input {
   flex: 1;
   min-width: 0;
+  max-width: 220px;
   background: var(--bg);
   color: var(--text);
   border: 1px solid var(--border);
   border-radius: 6px;
   padding: 4px 10px;
   font-size: 13px;
+}
+#btn-wrap.active-panel,
+#btn-fold.active-panel {
+  background: #1f6feb33;
+  border-color: #58a6ff;
+  color: #58a6ff;
 }
 .find-count {
   font-size: 11px;

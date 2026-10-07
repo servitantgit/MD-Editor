@@ -80,10 +80,15 @@ const els = {
   btnFind: document.getElementById('btn-find'),
   findBar: document.getElementById('find-bar'),
   findInput: document.getElementById('find-input'),
+  replaceInput: document.getElementById('replace-input'),
   findCount: document.getElementById('find-count'),
   findPrev: document.getElementById('find-prev'),
   findNext: document.getElementById('find-next'),
+  findReplace: document.getElementById('find-replace'),
+  findReplaceAll: document.getElementById('find-replace-all'),
   findClose: document.getElementById('find-close'),
+  btnWrap: document.getElementById('btn-wrap'),
+  btnFold: document.getElementById('btn-fold'),
   btnSave: document.getElementById('btn-save'),
   btnExportPdf: document.getElementById('btn-export-pdf'),
   btnDelete: document.getElementById('btn-delete'),
@@ -1638,6 +1643,30 @@ function setupFindBar() {
   if (els.findNext) els.findNext.addEventListener('click', () => runFind(false));
   if (els.findPrev) els.findPrev.addEventListener('click', () => runFind(true));
   if (els.findClose) els.findClose.addEventListener('click', closeFind);
+
+  if (els.findReplace) {
+    els.findReplace.addEventListener('click', () => {
+      if (!editorHandle) return;
+      const q = els.findInput ? els.findInput.value : '';
+      const r = els.replaceInput ? els.replaceInput.value : '';
+      const count = editorHandle.replaceInFile(q, r);
+      if (els.findCount) {
+        els.findCount.textContent = q ? (count ? `${count} left` : 'done') : '';
+      }
+    });
+  }
+  if (els.findReplaceAll) {
+    els.findReplaceAll.addEventListener('click', () => {
+      if (!editorHandle) return;
+      const q = els.findInput ? els.findInput.value : '';
+      const r = els.replaceInput ? els.replaceInput.value : '';
+      const n = editorHandle.replaceAllInFile(q, r);
+      if (els.findCount) {
+        els.findCount.textContent = n ? `replaced ${n}` : (q ? 'no matches' : '');
+      }
+    });
+  }
+
   if (els.findInput) {
     els.findInput.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') {
@@ -1649,14 +1678,44 @@ function setupFindBar() {
       }
     });
   }
+  if (els.replaceInput) {
+    els.replaceInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        if (els.findReplace) els.findReplace.click();
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        closeFind();
+      }
+    });
+  }
+
+  if (els.btnWrap) {
+    els.btnWrap.addEventListener('click', () => {
+      if (!editorHandle) return;
+      const on = editorHandle.toggleLineWrapping();
+      els.btnWrap.classList.toggle('active-panel', on);
+    });
+  }
+  if (els.btnFold) {
+    els.btnFold.addEventListener('click', () => {
+      if (!editorHandle) return;
+      const on = editorHandle.toggleHeadingFolds();
+      els.btnFold.classList.toggle('active-panel', on);
+    });
+  }
 
   document.addEventListener('keydown', (e) => {
     const mod = e.ctrlKey || e.metaKey;
+    if (els.appMain && els.appMain.classList.contains('hidden')) return;
     if (mod && (e.key === 'f' || e.key === 'F')) {
-      // Only when editor app is visible
-      if (els.appMain && els.appMain.classList.contains('hidden')) return;
       e.preventDefault();
       openFind();
+    }
+    if (mod && (e.key === 'h' || e.key === 'H')) {
+      e.preventDefault();
+      openFind();
+      if (els.replaceInput) els.replaceInput.focus();
     }
   });
 }

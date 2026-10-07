@@ -546,16 +546,13 @@ export function createEditor(textareaEl, deps) {
     }
     if (count === 0) return 0;
 
-    const cur = cm.getCursor();
-    const fromIdx = cm.indexFromPos(cur);
+    const fromIdx = cm.indexFromPos(cm.getCursor(backwards ? 'from' : 'to'));
     let idx;
     if (backwards) {
-      // search before selection start
-      const start = cm.indexFromPos(cm.getCursor('from'));
-      idx = lower.lastIndexOf(needle, Math.max(0, start - 1));
+      idx = lower.lastIndexOf(needle, Math.max(0, fromIdx - 1));
       if (idx < 0) idx = lower.lastIndexOf(needle);
     } else {
-      idx = lower.indexOf(needle, fromIdx + (cm.somethingSelected() ? 1 : 0));
+      idx = lower.indexOf(needle, fromIdx);
       if (idx < 0) idx = lower.indexOf(needle);
     }
     if (idx < 0) return count;
@@ -566,8 +563,111 @@ export function createEditor(textareaEl, deps) {
     return count;
   }
 
+  /** Replace the current selection if it matches query; otherwise find next and stop. */
+  function replaceInFile(query, replacement) {
+    const cm = easyMDE.codemirror;
+    const q = String(query || '');
+    if (!q) return 0;
+    const sel = cm.getSelection();
+    if (sel && sel.toLowerCase() === q.toLowerCase()) {
+      cm.replaceSelection(String(replacement ?? ''), 'around');
+    }
+    return findInFile(q, { backwards: false });
+  }
+
+  /** Replace every occurrence. Returns number of replacements. */
+  function replaceAllInFile(query, replacement) {
+    const cm = easyMDE.codemirror;
+    const q = String(query || '');
+    if (!q) return 0;
+    const text = cm.getValue();
+    const lower = text.toLowerCase();
+    const needle = q.toLowerCase();
+    const parts = [];
+    let last = 0;
+    let pos = 0;
+    let n = 0;
+    while ((pos = lower.indexOf(needle, pos)) !== -1) {
+      parts.push(text.slice(last, pos));
+      parts.push(String(replacement ?? ''));
+      pos += needle.length;
+      last = pos;
+      n++;
+    }
+    if (!n) return 0;
+    parts.push(text.slice(last));
+    const scroll = cm.getScrollInfo();
+    const cursor = cm.getCursor();
+    cm.setValue(parts.join(''));
+    try {
+      cm.setCursor(cursor);
+      cm.scrollTo(scroll.left, scroll.top);
+    } catch (_) {}
+    return n;
+  }
+
   function clearFind() {
-    // selection stays; nothing to clear without search overlays
+    // selection stays
+  }
+
+  /** Toggle CodeMirror line wrapping. Returns new state. */
+  function toggleLineWrapping() {
+    const cm = easyMDE.codemirror;
+    const next = !cm.getOption('lineWrapping');
+    cm.setOption('lineWrapping', next);
+    cm.refresh();
+    return next;
+  }
+
+  let headingFoldMarks = [];
+  let headingsFolded = false;
+
+  /** Fold bodies under ATx headings (collapsed marks). Toggle on repeat. */
+  function toggleHeadingFolds() {
+    const cm = easyMDE.codemirror;
+    for (const m of headingFoldMarks) {
+      try { m.clear(); } catch (_) {}
+    }
+    headingFoldMarks = [];
+    if (headingsFolded) {
+      headingsFolded = false;
+      return false;
+    }
+
+    const lineCount = cm.lineCount();
+    const headers = [];
+    for (let i = 0; i < lineCount; i++) {
+      const line = cm.getLine(i) || '';
+      const m = /^(#{1,6})\s+\S/.exec(line);
+      if (m) headers.push({ line: i, level: m[1].length });
+    }
+    for (let h = 0; h < headers.length; h++) {
+      const start = headers[h].line;
+      const level = headers[h].level;
+      let end = lineCount - 1;
+      for (let j = h + 1; j < headers.length; j++) {
+        if (headers[j].level <= level) {
+          end = headers[j].line - 1;
+          break;
+        }
+      }
+      if (end <= start) continue;
+      try {
+        const mark = cm.markText(
+          { line: start, ch: (cm.getLine(start) || '').length },
+          { line: end, ch: (cm.getLine(end) || '').length },
+          {
+            collapsed: true,
+            clearOnEnter: true,
+            inclusiveLeft: false,
+            inclusiveRight: true,
+          }
+        );
+        headingFoldMarks.push(mark);
+      } catch (_) { /* ignore bad ranges */ }
+    }
+    headingsFolded = headingFoldMarks.length > 0;
+    return headingsFolded;
   }
 
   return {
@@ -581,7 +681,11 @@ export function createEditor(textareaEl, deps) {
     setLanguage,
     setToolbarForKind,
     findInFile,
+    replaceInFile,
+    replaceAllInFile,
     clearFind,
+    toggleLineWrapping,
+    toggleHeadingFolds,
     destroy,
   };
 }

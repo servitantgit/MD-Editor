@@ -176,7 +176,9 @@
       <div class="editor-toolbar">
         <span class="current-file" id="current-file">No file selected</span>
         <span class="lang-badge" id="lang-badge" title="Language (from file extension)">—</span>
-        <button class="secondary" id="btn-find" title="Find in file (Ctrl+F)">Find</button>
+        <button class="secondary" id="btn-find" title="Find / Replace in file (Ctrl+F)">Find</button>
+        <button class="secondary" id="btn-wrap" title="Toggle word wrap">Wrap</button>
+        <button class="secondary" id="btn-fold" title="Fold / unfold markdown headings">Fold</button>
         <button id="btn-save" disabled title="Save: push only this file to GitHub now (single-file). Idle autosave does the same after ~10s.">Save</button>
         <!-- Autosave status, owned by js/autosave.js. Kept separate from
              #save-status on purpose: that one auto-clears after 4s for every
@@ -198,10 +200,13 @@
         <button id="draft-overwrite" class="draft-discard hidden">Overwrite</button>
       </div>
       <div id="find-bar" class="find-bar hidden" role="search">
-        <input id="find-input" type="text" placeholder="Find in file…" autocomplete="off" spellcheck="false" />
+        <input id="find-input" type="text" placeholder="Find…" autocomplete="off" spellcheck="false" />
+        <input id="replace-input" type="text" placeholder="Replace…" autocomplete="off" spellcheck="false" />
         <span id="find-count" class="find-count"></span>
         <button class="secondary" id="find-prev" title="Previous (Shift+Enter)">↑</button>
         <button class="secondary" id="find-next" title="Next (Enter)">↓</button>
+        <button class="secondary" id="find-replace" title="Replace current">Replace</button>
+        <button class="secondary" id="find-replace-all" title="Replace all in file">All</button>
         <button class="secondary" id="find-close" title="Close (Esc)">✕</button>
       </div>
       <div id="editor-container">
