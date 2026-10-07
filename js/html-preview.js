@@ -2,6 +2,7 @@
 // Build a self-contained srcdoc for the HTML Live/Preview iframe:
 // relative <img src>, <link href>, <script src> are resolved against the open
 // file path via the same ImageResolver / Contents API used for markdown images.
+// Relative <a href> to repo files post a message to the parent so the app can open them.
 
 import { dirnameOf, resolveRelativePath, isExternalOrAnchor } from './paths.js';
 
@@ -51,15 +52,20 @@ export async function buildHtmlSrcdoc(html, currentPath, resolver) {
 
   await Promise.all(jobs);
 
-  // Hint for relative <a href="note.md"> — show resolved path in title
+  // Relative links → open in the parent editor (not navigate the iframe)
   const dir = dirnameOf(base);
   doc.querySelectorAll('a[href]').forEach((a) => {
     const href = a.getAttribute('href');
     if (!href || isExternalOrAnchor(href)) return;
+    let abs = href.replace(/^\//, '');
     try {
-      const abs = resolveRelativePath(dir, href);
-      a.setAttribute('title', abs);
-    } catch (_) { /* ignore */ }
+      if (!href.startsWith('/')) abs = resolveRelativePath(dir, href);
+    } catch (_) { /* keep abs */ }
+    abs = String(abs || '').split('#')[0].split('?')[0];
+    if (!abs) return;
+    a.setAttribute('data-md-path', abs);
+    a.setAttribute('title', abs);
+    a.setAttribute('href', '#md-open');
   });
 
   // Ensure a charset meta so Cyrillic/etc. render correctly in srcdoc
@@ -68,6 +74,19 @@ export async function buildHtmlSrcdoc(html, currentPath, resolver) {
     meta.setAttribute('charset', 'utf-8');
     doc.head.insertBefore(meta, doc.head.firstChild);
   }
+
+  // Bridge: clicks on data-md-path links ask the parent to open that path
+  const bridge = doc.createElement('script');
+  bridge.textContent = [
+    'document.addEventListener("click",function(e){',
+    '  var a=e.target&&e.target.closest&&e.target.closest("a[data-md-path]");',
+    '  if(!a)return;',
+    '  e.preventDefault();',
+    '  try{parent.postMessage({type:"md-editor-open",path:a.getAttribute("data-md-path")},"*");}catch(_){}',
+    '},true);',
+  ].join('');
+  if (doc.body) doc.body.appendChild(bridge);
+  else doc.documentElement.appendChild(bridge);
 
   return '<!DOCTYPE html>\n' + doc.documentElement.outerHTML;
 }

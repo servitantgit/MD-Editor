@@ -8,6 +8,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Hybrid **Source / Live / Preview** layouts (constrained EasyMDE side-by-side)
+- **Commit** and **History** right drawers (multi-file commit, diff, restore)
+- Multi-language files (HTML/JS/CSS/…) with kind-aware toolbar and preview
+- HTML Live/Preview iframe with relative asset resolution
+- Internal link navigation from markdown preview **and HTML iframe** (`postMessage`)
+- Find / Replace, heading fold, document outline, canvas **minimap**
+- Full-text search extended beyond `.md` (html, txt, code, …)
+- PDF export for HTML as well as Markdown
+- Regression checklist: [REGRESSION.md](./REGRESSION.md)
+
+### Fixed
+- Preview pane empty / wrong split; tab switch not updating Preview
+- Inline-image cursor jumps on Space/Backspace
+- History / Commit panel positioning; ResizeObserver scroll jitter
+- `titleFromPath` must only strip markdown extensions (unit test)
+
+## [Unreleased]
+
+### Added
 - **Hybrid Live + Commit / Push / History** — layout modes (Source/Live/Preview), multi-file Commit panel (Git Data API), History with diffs, dirty M/A badges (`js/working-tree.js`, `js/commit-ui.js`, GitHubClient Git Data methods)
 - **Hybrid Live layout modes** — Source / Live (side-by-side) / Preview toggle in the header; preference stored in `localStorage` (`md_layout`)
 - **Commit panel** — multi-file commits with a message via Git Data API (`commitFiles`: blobs → tree → commit → update ref). Dirty files show **M**/**A** badges in the file tree; header **Commit** button with change count

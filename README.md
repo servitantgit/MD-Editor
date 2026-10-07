@@ -10,17 +10,16 @@
 ![Open issues](https://img.shields.io/github/issues/servitantgit/MD-Editor)
 ![License](https://img.shields.io/github/license/servitantgit/MD-Editor)
 
-A lightweight browser editor for `.md` files in a GitHub repository. The
-editor talks to the GitHub REST API after signing in with **"Sign in with
-GitHub"** (OAuth) — the access token is issued by GitHub and lives only in
-`sessionStorage`; our server only ever sees the one-time code-for-token
-exchange (details and setup in [README-CLOUDFLARE.md](./README-CLOUDFLARE.md)).
+A lightweight browser editor for Markdown and related text files in a GitHub
+repository. Sign in with **"Sign in with GitHub"** (OAuth) — the access token
+is issued by GitHub and lives only in `sessionStorage`; our server only ever
+sees the one-time code-for-token exchange (setup:
+[README-CLOUDFLARE.md](./README-CLOUDFLARE.md)).
 
-Works with no backend and no build step: renders and edits Markdown, resolves
-images in the preview, supports drag & drop for files and images,
-**folder management**, **multi-tab editing**, **full-text search**,
-**autosave with local drafts**, **Commit / Push / History**, and exports the
-active page to PDF.
+No build step: plain ES modules. Edit **Markdown**, **HTML**, **JS/CSS** and
+other text files with three layouts (**Source / Live / Preview**), multi-tab
+editing, full-text search, autosave + local drafts, **Commit / History**
+drawers, find/replace, outline, minimap, and PDF export.
 
 ## Screenshots
 
@@ -79,6 +78,12 @@ js/
   search-store.js          IndexedDB persistence for search index
   search-sync.js           background sync: diff tree, fetch bodies, update index
   search-ui.js             search box + results list DOM helpers
+  file-kind.js             extension → language / preview strategy
+  html-preview.js          HTML iframe srcdoc + relative assets + link bridge
+  minimap.js               canvas document minimap
+  commit-ui.js             Commit + History drawers
+  working-tree.js          multi-file dirty set for Commit
+  diff-util.js             unified diff helpers
   app.js                   assembly point: login (incl. the OAuth redirect),
                             state, wiring up the modules
 test/                      unit tests (node:test) for the pure logic
@@ -119,7 +124,7 @@ to be served over http(s). Options:
 | Check | Status | What it covers |
 |---|---|---|
 | Unit tests | 🧪 **`npm test`** | paths, markdown-tokens, reference-rewriter, file-mover, autosave state machine, draft/search stores, search sync, tabs (model + strip), editor teardown, git client CORS |
-| Browser smoke test | 🧪 **CI** | real Chromium: editing, autosave + 409 handling, tabs, create/delete, search, PDF export, image previews |
+| Browser smoke test | 🧪 **CI** | real Chromium: editing, autosave + 409, tabs, create/delete, search, PDF, images, History toggle, HTML Live preview, Space near inline image |
 | GitHub Actions | 🔄 **automatic** | runs both checks on `push` and `pull_request` |
 
 Current CI status is shown by the **Tests** badge at the top of this README.

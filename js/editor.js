@@ -244,6 +244,17 @@ export function createEditor(textareaEl, deps) {
   };
   easyMDE.codemirror.on('change', onChange);
 
+  function onParentMessage(ev) {
+    const data = ev && ev.data;
+    if (!data || data.type !== 'md-editor-open' || !data.path) return;
+    if (typeof deps.onOpenInternalLink === 'function') {
+      deps.onOpenInternalLink(String(data.path));
+    }
+  }
+  window.addEventListener('message', onParentMessage);
+
+
+
   // First resize in a quiet window refreshes immediately (unit tests + initial
   // layout). Bursts (opening drawers, split mode) are coalesced to one refresh.
   let resizeLayoutTimer = null;
@@ -498,6 +509,7 @@ export function createEditor(textareaEl, deps) {
    */
   function destroy() {
     resizeObserver.disconnect();
+    try { window.removeEventListener('message', onParentMessage); } catch (_) {}
     clearTimeout(inlineImageTimer);
     inlineImageTimer = null;
     inputField.removeEventListener('paste', onPaste);
