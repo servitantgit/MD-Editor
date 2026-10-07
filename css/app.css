@@ -899,17 +899,28 @@ button.secondary:hover { background: #21262d; }
   background: #23863622;
 }
 
-/* ===== Commit panel ===== */
+/* ===== Commit panel (right drawer, same model as History) ===== */
 .commit-panel {
-  width: 320px;
-  flex-shrink: 0;
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(360px, 96vw);
+  z-index: 16;
   background: var(--panel);
   border-left: 1px solid var(--border);
+  box-shadow: -12px 0 32px rgba(0, 0, 0, 0.45);
   display: flex;
   flex-direction: column;
   min-height: 0;
+  overflow: hidden;
 }
 .commit-panel.hidden { display: none; }
+#btn-commit.active-panel {
+  background: #1f6feb33;
+  border-color: #58a6ff;
+  color: #58a6ff;
+}
 .cp-h {
   padding: 10px 14px;
   border-bottom: 1px solid var(--border);
@@ -1013,7 +1024,7 @@ button.secondary:hover { background: #21262d; }
   top: 0;
   right: 0;
   bottom: 0;
-  z-index: 15;
+  z-index: 15; /* below commit drawer (16) */
   display: flex;
   flex-direction: row-reverse; /* list stays on the right edge; detail grows left */
   width: 320px;

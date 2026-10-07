@@ -1744,6 +1744,13 @@ function setupCommitAndHistory() {
   if (!els.btnCommit.dataset.bound) {
     els.btnCommit.dataset.bound = '1';
     els.btnCommit.addEventListener('click', () => {
+      // Toggle: second click closes the drawer (same UX as History)
+      if (commitPanel && typeof commitPanel.isOpen === 'function' && commitPanel.isOpen()) {
+        commitPanel.close();
+        els.btnCommit.classList.remove('active-panel');
+        hideDiffOverlay();
+        return;
+      }
       // Flush current editor text into working tree before opening panel
       if (state.currentPath && editorHandle) {
         workingTree.setDirty(
@@ -1757,7 +1764,6 @@ function setupCommitAndHistory() {
         if (path === state.currentPath) continue;
         const entry = tabDocs.get(path);
         if (entry && entry.unsaved) {
-          // Prefer CodeMirror doc text if available
           let text = null;
           try {
             if (entry.doc && typeof entry.doc.getValue === 'function') text = entry.doc.getValue();
@@ -1767,8 +1773,13 @@ function setupCommitAndHistory() {
       }
       refreshCommitBadge();
       if (fileTree) fileTree.setDirtyMap(workingTree.statusMap());
+      if (historyPanel) {
+        historyPanel.close();
+        if (els.btnHistory) els.btnHistory.classList.remove('active-panel');
+      }
+      hideDiffOverlay();
       commitPanel.open(workingTree.listChanges());
-      if (historyPanel) historyPanel.close();
+      els.btnCommit.classList.add('active-panel');
     });
   }
 
@@ -1781,7 +1792,10 @@ function setupCommitAndHistory() {
         els.btnHistory.classList.remove('active-panel');
         return;
       }
-      if (commitPanel) commitPanel.close();
+      if (commitPanel) {
+        commitPanel.close();
+        if (els.btnCommit) els.btnCommit.classList.remove('active-panel');
+      }
       hideDiffOverlay();
       historyPanel.open();
       els.btnHistory.classList.add('active-panel');
@@ -1901,7 +1915,21 @@ async function doCommit(message, andPush) {
 
     commitPanel.clearMessage();
     commitPanel.close();
+    if (els.btnCommit) els.btnCommit.classList.remove('active-panel');
     hideDiffOverlay();
+    // Keep draft store + tab/autosave state aligned with workingTree
+    // (single-file Save already goes through noteCommit → workingTree.clear)
+    for (const c of latest) {
+      noteCommit(c.path, null); // blob sha refreshed from tree below; do not store commit sha as file sha
+      if (draftStore && state.client) {
+        draftStore.delete({
+          owner: state.client.owner,
+          repo: state.client.repo,
+          branch: state.branch,
+          path: c.path,
+        }).catch(() => {});
+      }
+    }
     const short = result.commit.sha.slice(0, 7);
     setSaveStatus(
       (andPush ? 'Committed & pushed ' : 'Committed ') + short + ' · ' + latest.length + ' file(s)',

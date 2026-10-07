@@ -1,4 +1,8 @@
 // working-tree.js
+// Source of truth for the Commit badge / multi-file drawer.
+// Single-file Save and idle autosave also clear entries via noteCommit() so the
+// badge does not stay "dirty" after a file was already pushed alone.
+
 // Tracks local dirty files (modified / added) relative to the last known GitHub SHA.
 // Pure state — no DOM. UI reads snapshots via listChanges() / getChangeCount().
 

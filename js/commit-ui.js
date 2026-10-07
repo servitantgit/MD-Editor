@@ -81,6 +81,9 @@ export function bindCommitPanel(opts) {
     close() {
       panelEl.classList.add('hidden');
     },
+    isOpen() {
+      return panelEl && !panelEl.classList.contains('hidden');
+    },
     setBusy(busy) {
       btnCommit.disabled = busy;
       btnCommitPush.disabled = busy;

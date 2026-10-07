@@ -197,12 +197,28 @@ export function createEditor(textareaEl, deps) {
   };
   easyMDE.codemirror.on('change', onChange);
 
-  const resizeObserver = new ResizeObserver(() => refreshLayout());
+  // Debounce: opening History/Commit, split mode, etc. fire many resizes;
+  // refreshing CM on every one jerks scroll (worse with inline images).
+  let resizeLayoutTimer = null;
+  let lastRefreshW = 0;
+  let lastRefreshH = 0;
+  const resizeObserver = new ResizeObserver((entries) => {
+    const entry = entries && entries[0];
+    const w = entry && entry.contentRect ? entry.contentRect.width : 0;
+    const h = entry && entry.contentRect ? entry.contentRect.height : 0;
+    if (Math.abs(w - lastRefreshW) < 2 && Math.abs(h - lastRefreshH) < 2) return;
+    clearTimeout(resizeLayoutTimer);
+    resizeLayoutTimer = setTimeout(() => {
+      lastRefreshW = w;
+      lastRefreshH = h;
+      refreshLayout();
+    }, 80);
+  });
   resizeObserver.observe(textareaEl.closest('.editor-area') || document.body);
 
   function scheduleInlineImages() {
     clearTimeout(inlineImageTimer);
-    inlineImageTimer = setTimeout(() => renderInlineImages(), 200);
+    inlineImageTimer = setTimeout(() => renderInlineImages(), 250);
   }
 
   async function renderInlineImages() {

@@ -134,8 +134,8 @@
       <button class="secondary layout-btn" data-mode="split" title="Hybrid live: source + preview">Live</button>
       <button class="secondary layout-btn" data-mode="preview" title="Preview only">Preview</button>
     </div>
-    <button class="secondary" id="btn-history" title="Commit history">History</button>
-    <button id="btn-commit" title="Commit local changes" disabled>Commit <span id="commit-badge" class="changes-badge hidden">0</span></button>
+    <button class="secondary" id="btn-history" title="History: recent commits (drawer from the right). Click again to close.">History</button>
+    <button id="btn-commit" title="Commit: package all local changes into one Git commit (drawer). Click again to close." disabled>Commit <span id="commit-badge" class="changes-badge hidden">0</span></button>
     <button class="secondary" id="btn-refresh" title="Refresh tree">↻</button>
     <button class="secondary" id="btn-logout">Sign out</button>
   </header>
@@ -170,7 +170,7 @@
         <span class="current-file" id="current-file">No file selected</span>
         <span class="lang-badge" id="lang-badge" title="Language (from file extension)">—</span>
         <button class="secondary" id="btn-find" title="Find in file (Ctrl+F)">Find</button>
-        <button id="btn-save" disabled title="Quick-save this file (single-file commit)">Save</button>
+        <button id="btn-save" disabled title="Save: push only this file to GitHub now (single-file). Idle autosave does the same after ~10s.">Save</button>
         <!-- Autosave status, owned by js/autosave.js. Kept separate from
              #save-status on purpose: that one auto-clears after 4s for every
              other operation (moves, deletes, folder ops), while these states
