@@ -128,31 +128,34 @@ test('switching files mid-render leaves no orphaned inline-image marks behind', 
 
   const settle = () => new Promise((r) => setTimeout(r, 0));
 
-  // A.md: run 1 marks the first image, then parks on resolve().
+  // A.md: run 1 marks both images immediately, then the resolves park.
   currentPath = 'A.md';
   handle.refreshInlineImages();
   await settle();
-  assert.equal(created.length, 1, 'run 1 should have marked A.md’s first image');
+  assert.equal(created.length, 2, 'run 1 should have marked A.md’s both images');
   const firstMark = created[0];
+  const secondMark = created[1];
 
-  // The user opens B.md before run 1 finished.
+  // The user opens B.md before any resolve fires.
   currentPath = 'B.md';
   handle.refreshInlineImages();
   await settle();
-  assert.equal(created.length, 2, 'run 2 should have marked B.md’s image');
+  assert.equal(created.length, 3, 'run 2 should have marked B.md’s image');
   assert.equal(firstMark.cleared, true, 'run 2 must clear the marks of the previous file');
+  assert.equal(secondMark.cleared, true, 'run 2 must clear every mark of the previous file');
 
-  // Let run 2 finish completely, then resume run 1 at its parked await.
+  // Let run 2 finish completely, then resume run 1 at its parked awaits.
   pending[1]('blob:b');
   await settle();
   pending[0]('blob:a');
   await settle();
 
   // A.md has TWO images, so a run 1 that ignored the generation guard would have
-  // created its second mark here — after run 2 had already reset the registry.
-  assert.equal(created.length, 2, 'the superseded run must not create further marks');
-  assert.equal(created[0].cleared, true);
-  assert.equal(created[1].cleared, false, 'the live run’s mark must survive');
+  // created further marks here — after run 2 had already reset the registry.
+  assert.equal(created.length, 3, 'the superseded run must not create further marks');
+  assert.equal(firstMark.cleared, true);
+  assert.equal(secondMark.cleared, true);
+  assert.equal(created[2].cleared, false, 'the live run’s mark must survive');
 });
 
 test('showDoc() swaps the document, refreshes layout, and re-renders the Preview pane when it is showing', async () => {

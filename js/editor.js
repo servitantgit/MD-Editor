@@ -18,6 +18,7 @@ export function createEditor(textareaEl, deps) {
   let inlineImageGeneration = 0;
   let inlineImageMarks = [];
   let inlineImageTimer = null;
+  let lastInlineImageKey = '';
 
   const easyMDE = new EasyMDE({
     element: textareaEl,
@@ -201,16 +202,13 @@ export function createEditor(textareaEl, deps) {
 
   function scheduleInlineImages() {
     clearTimeout(inlineImageTimer);
-    inlineImageTimer = setTimeout(() => renderInlineImages(), 120);
+    inlineImageTimer = setTimeout(() => renderInlineImages(), 200);
   }
 
   async function renderInlineImages() {
     const cm = easyMDE.codemirror;
     const currentPath = deps.getCurrentPath();
     const generation = ++inlineImageGeneration;
-
-    for (const mark of inlineImageMarks) mark.clear();
-    inlineImageMarks = [];
 
     if (!currentPath) return;
 
@@ -227,11 +225,23 @@ export function createEditor(textareaEl, deps) {
       });
     }
 
+    const key = matches.map(m => `${m.fromIndex}:${m.toIndex}:${m.src}`).join('|');
+    if (key === lastInlineImageKey && inlineImageMarks.length === matches.length) {
+      return;
+    }
+    lastInlineImageKey = key;
+
+    const cursor = typeof cm.getCursor === 'function' ? cm.getCursor() : null;
+    const scroll = typeof cm.getScrollInfo === 'function' ? cm.getScrollInfo() : null;
+
+    for (const mark of inlineImageMarks) mark.clear();
+    inlineImageMarks = [];
+
     for (const item of matches) {
       if (generation !== inlineImageGeneration) return;
 
-      const from = cm.posFromIndex(item.fromIndex);
-      const to = cm.posFromIndex(item.toIndex);
+      const from = typeof cm.posFromIndex === 'function' ? cm.posFromIndex(item.fromIndex) : { line: 0, ch: item.fromIndex };
+      const to = typeof cm.posFromIndex === 'function' ? cm.posFromIndex(item.toIndex) : { line: 0, ch: item.toIndex };
       const wrapper = document.createElement('span');
       wrapper.className = 'cm-inline-image';
       wrapper.title = item.src;
@@ -249,25 +259,31 @@ export function createEditor(textareaEl, deps) {
       loading.textContent = '⏳';
       wrapper.append(img, loading);
 
-      const mark = cm.markText(from, to, { replacedWith: wrapper, clearOnEnter: false });
+      const mark = cm.markText(from, to, { replacedWith: wrapper, clearOnEnter: false, atomic: true });
       inlineImageMarks.push(mark);
 
-      try {
-        const url = await deps.imageResolver.resolve(item.src, currentPath);
-        if (generation !== inlineImageGeneration || mark.find() == null) return;
-        img.src = url;
-        img.onload = () => loading.remove();
-        img.onerror = () => {
-          if (mark.find() != null) mark.clear();
-        };
-        loading.remove();
-      } catch (err) {
-        if (generation !== inlineImageGeneration || mark.find() == null) return;
-        // If GitHub didn't return the file, don't hide the Markdown from the user.
-        mark.clear();
-        console.warn('Failed to show inline image:', item.src, err);
-      }
+      const loadImage = async () => {
+        try {
+          const url = await deps.imageResolver.resolve(item.src, currentPath);
+          if (generation !== inlineImageGeneration || mark.find() == null) return;
+          img.src = url;
+          img.onload = () => loading.remove();
+          img.onerror = () => {
+            if (mark.find() != null) mark.clear();
+          };
+          loading.remove();
+        } catch (err) {
+          if (generation !== inlineImageGeneration || mark.find() == null) return;
+          mark.clear();
+          console.warn('Failed to show inline image:', item.src, err);
+        }
+      };
+
+      loadImage();
     }
+
+    if (cursor && typeof cm.setCursor === 'function') cm.setCursor(cursor);
+    if (scroll && typeof cm.scrollTo === 'function') cm.scrollTo(scroll.left, scroll.top);
   }
 
   function refreshInlineImages() {
