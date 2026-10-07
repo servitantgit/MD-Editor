@@ -143,10 +143,16 @@
   <div class="main hidden" id="app-main">
     <div class="sidebar">
       <div class="sidebar-header">
-        <span>Files</span>
-        <div style="display:flex; gap:4px">
-          <button class="secondary" id="btn-new-folder" style="padding:2px 8px;font-size:12px" title="Create a folder inside the folder selected in the tree">+ folder</button>
-          <button class="secondary" id="btn-new-file" style="padding:2px 8px;font-size:12px" title="Create a text file (.md, .html, .js, …) in the selected folder">+ file</button>
+        <div class="sidebar-path-block" title="Target folder for New file / New folder">
+          <span class="sidebar-path-label">Files</span>
+          <span class="sidebar-path" id="active-folder-path">/</span>
+        </div>
+        <div class="add-menu-wrap">
+          <button type="button" class="secondary" id="btn-add-menu" title="Create in the folder shown on the left">+ Add ▾</button>
+          <div id="add-menu" class="add-menu hidden" role="menu">
+            <button type="button" id="btn-new-file" role="menuitem">📄 New file…</button>
+            <button type="button" id="btn-new-folder" role="menuitem">📁 New folder…</button>
+          </div>
         </div>
       </div>
       <div class="sidebar-search">
@@ -156,10 +162,11 @@
           <button class="secondary" id="btn-reindex" title="Rebuild the search index from scratch">↻</button>
         </div>
       </div>
+      <!-- Dropzone wraps the tree: no empty strip above the list -->
       <div class="folder-dropzone" id="folder-dropzone">
         <div id="folder-dropzone-overlay" class="hidden">Drop a folder here to upload</div>
+        <div class="file-tree" id="file-tree"></div>
       </div>
-      <div class="file-tree" id="file-tree"></div>
       <div class="search-results hidden" id="search-results"></div>
     </div>
 

@@ -77,9 +77,15 @@ export class FileTree {
   }
 
   /** Sets the "create here" folder; an already-known folder is expanded so the user sees the result. */
-  setActiveFolder(folderPath, { expand = false } = {}) {
-    this.activeFolder = folderPath;
-    if (expand && folderPath && this.collapsedFolders.delete(folderPath)) this.render();
+  setActiveFolder(folderPath, { expand = false, render = true } = {}) {
+    const prev = this.activeFolder;
+    this.activeFolder = folderPath || '';
+    if (expand && folderPath) this.collapsedFolders.delete(folderPath);
+    if (render && (prev !== this.activeFolder || expand)) {
+      this.render(); // also notifies onActiveFolderChange
+    } else if (typeof this.handlers?.onActiveFolderChange === 'function') {
+      try { this.handlers.onActiveFolderChange(this.activeFolder || ''); } catch (_) {}
+    }
   }
 
   setFiles(files) {
@@ -113,14 +119,29 @@ export class FileTree {
       this.collapsedFolders = collectFolderPaths(files);
     }
 
-    const rootDrop = document.createElement('div');
-    rootDrop.className = 'tree-root-drop';
-    rootDrop.textContent = '⬆ drag here to move to the root';
-    this.containerEl.appendChild(rootDrop);
-    this._wireDropTarget(rootDrop, '');
+    // Drop strip: moves a file into the *current target folder* (activeFolder),
+    // not only the repo root. Label updates with the selection.
+    const targetFolder = this.activeFolder || '';
+    const dropStrip = document.createElement('div');
+    dropStrip.className = 'tree-root-drop';
+    dropStrip.dataset.targetFolder = targetFolder;
+    if (targetFolder) {
+      const short = targetFolder.length > 42 ? '…' + targetFolder.slice(-40) : targetFolder;
+      dropStrip.textContent = `⬆ drag here to move into «${short}»`;
+      dropStrip.title = `Drop to move into ${targetFolder}`;
+    } else {
+      dropStrip.textContent = '⬆ drag here to move to the root';
+      dropStrip.title = 'Drop to move to the repository root';
+    }
+    this.containerEl.appendChild(dropStrip);
+    this._wireDropTarget(dropStrip, targetFolder);
 
     const root = buildTreeStructure(files);
     this._renderLevel(root, this.containerEl, 0);
+
+    if (typeof this.handlers?.onActiveFolderChange === 'function') {
+      try { this.handlers.onActiveFolderChange(this.activeFolder || ''); } catch (_) {}
+    }
   }
 
   /** Flips the collapsed state of a folder and re-renders the tree. */
@@ -146,7 +167,7 @@ export class FileTree {
       // Any click on the row (arrow, icon or name) toggles the folder and makes it
       // the target for "new file"/"new folder".
       el.addEventListener('click', () => {
-        this.activeFolder = folder.path;
+        this.setActiveFolder(folder.path, { render: false });
         this._toggleFolder(folder.path);
       });
       el.addEventListener('keydown', (e) => {
@@ -186,12 +207,12 @@ export class FileTree {
       if ((isMd || isText) && this.handlers.onOpenFile) {
         el.addEventListener('click', () => {
           // Opening a file also makes ITS folder the target for new files/folders.
-          this.activeFolder = dirnameOf(file.path);
+          this.setActiveFolder(dirnameOf(file.path));
           this.handlers.onOpenFile(file.path);
         });
       } else if (isImg && this.handlers.onPreviewImage) {
         el.addEventListener('click', () => {
-          this.activeFolder = dirnameOf(file.path);
+          this.setActiveFolder(dirnameOf(file.path));
           this.handlers.onPreviewImage(file.path);
         });
       }

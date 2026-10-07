@@ -70,6 +70,9 @@ const els = {
   folderDropOverlay: document.getElementById('folder-dropzone-overlay'),
   btnNewFolder: document.getElementById('btn-new-folder'),
   btnNewFile: document.getElementById('btn-new-file'),
+  btnAddMenu: document.getElementById('btn-add-menu'),
+  addMenu: document.getElementById('add-menu'),
+  activeFolderPath: document.getElementById('active-folder-path'),
 
   tabBar: document.getElementById('tab-bar'),
   currentFileLabel: document.getElementById('current-file'),
@@ -189,8 +192,15 @@ async function init() {
   els.btnRefresh.onclick = () => loadTree();
   // Wrap in arrows: assigning the handler directly would hand it the click
   // event as `folderPath`, creating "[object PointerEvent]/name.md".
-  els.btnNewFile.onclick = () => onCreateNewFile();
-  els.btnNewFolder.onclick = () => onCreateNewFolder();
+  els.btnNewFile.onclick = () => {
+    closeAddMenu();
+    onCreateNewFile();
+  };
+  els.btnNewFolder.onclick = () => {
+    closeAddMenu();
+    onCreateNewFolder();
+  };
+  setupAddMenu();
   els.btnSave.onclick = onSaveFile;
   els.btnExportPdf.onclick = onExportPdf;
   els.btnDelete.onclick = onDeleteFile;
@@ -524,7 +534,9 @@ function showApp(owner, repo) {
     onCreateFolderIn,
     onRenameFile: onRenameFile,
     onDeleteFileAt: onDeleteFileAt,
+    onActiveFolderChange: (folderPath) => updateActiveFolderPathLabel(folderPath),
   });
+  updateActiveFolderPathLabel(fileTree.getActiveFolder());
 
   editorHandle = createEditor(els.editorTextarea, {
     marked: window.marked,
@@ -1277,6 +1289,43 @@ function toFolderPath(value) {
  * Creates a new text file (.md, .html, .js, .css, …). folderPath defaults to the
  * tree's active folder so the file lands where the user is looking.
  */
+
+function formatActiveFolderPath(folderPath) {
+  const p = (folderPath || '').replace(/^\/+|\/+$/g, '');
+  return p ? p : '/';
+}
+
+function updateActiveFolderPathLabel(folderPath) {
+  if (!els.activeFolderPath) return;
+  const label = formatActiveFolderPath(folderPath);
+  els.activeFolderPath.textContent = label;
+  els.activeFolderPath.title = label === '/'
+    ? 'Target: repository root'
+    : 'Target folder: ' + label;
+}
+
+function closeAddMenu() {
+  if (els.addMenu) els.addMenu.classList.add('hidden');
+}
+
+function setupAddMenu() {
+  if (!els.btnAddMenu || els.btnAddMenu.dataset.bound) return;
+  els.btnAddMenu.dataset.bound = '1';
+  els.btnAddMenu.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (!els.addMenu) return;
+    els.addMenu.classList.toggle('hidden');
+  });
+  document.addEventListener('click', (e) => {
+    if (!els.addMenu || els.addMenu.classList.contains('hidden')) return;
+    if (els.addMenu.contains(e.target) || (els.btnAddMenu && els.btnAddMenu.contains(e.target))) return;
+    closeAddMenu();
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') closeAddMenu();
+  });
+}
+
 async function onCreateNewFile(folderPath = fileTree.getActiveFolder()) {
   folderPath = toFolderPath(folderPath);
   const name = prompt(
