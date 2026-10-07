@@ -45,9 +45,9 @@ export function isSearchablePath(path) {
   return SEARCHABLE_EXT.has(extOf(path));
 }
 
-/** "Notes/Ideas.md" -> "Ideas". */
+/** "Notes/Ideas.md" -> "Ideas". Non-markdown names keep their extension. */
 export function titleFromPath(path) {
-  return basenameOf(path).replace(/\.(md|markdown|html|htm|txt)$/i, '');
+  return basenameOf(path).replace(/\.(md|markdown|mdown)$/i, '');
 }
 
 /** The first `# ...` heading, or the file name when the note has none. */
