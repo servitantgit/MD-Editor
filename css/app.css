@@ -1585,3 +1585,27 @@ body.md-layout-source .editor-preview-active-side {
   border-color: #58a6ff;
   color: #58a6ff;
 }
+
+
+/* ===== Document minimap ===== */
+.minimap-wrap {
+  width: 96px;
+  flex-shrink: 0;
+  align-self: stretch;
+  overflow: hidden;
+  border-left: 1px solid var(--border);
+  background: #0d1117;
+  cursor: crosshair;
+  position: relative;
+}
+.minimap-wrap.hidden { display: none; }
+.minimap-wrap canvas {
+  display: block;
+  width: 96px;
+  height: 100%;
+}
+#btn-minimap.active-panel {
+  background: #1f6feb33;
+  border-color: #58a6ff;
+  color: #58a6ff;
+}

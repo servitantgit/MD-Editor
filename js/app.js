@@ -26,6 +26,7 @@ import { bindCommitPanel, bindHistoryPanel } from './commit-ui.js';
 import { unifiedDiff, renderDiffLines } from './diff-util.js';
 import { kindFromPath, isHtmlPath, isMarkdownPath, isEditableTextPath } from './file-kind.js';
 import { buildHtmlSrcdoc } from './html-preview.js';
+import { createMinimap } from './minimap.js';
 
 const els = {
   loginScreen: document.getElementById('login-screen'),
@@ -92,6 +93,9 @@ const els = {
   btnFold: document.getElementById('btn-fold'),
   btnOutline: document.getElementById('btn-outline'),
   docOutline: document.getElementById('doc-outline'),
+  btnMinimap: document.getElementById('btn-minimap'),
+  minimapWrap: document.getElementById('minimap-wrap'),
+  minimapCanvas: document.getElementById('minimap'),
   btnSave: document.getElementById('btn-save'),
   btnExportPdf: document.getElementById('btn-export-pdf'),
   btnDelete: document.getElementById('btn-delete'),
@@ -491,7 +495,7 @@ function showApp(owner, repo) {
   // CodeMirror 'change' handler, and re-wrapping an already-wrapped textarea
   // stacks a second editor. Tear the previous one down before building again.
   if (editorHandle) {
-    editorHandle.destroy();
+    destroyMinimap(); editorHandle.destroy();
     editorHandle = null;
   }
   // Same reason: an in-flight sync holds a GitHubClient and an index belonging to
@@ -591,6 +595,10 @@ function showApp(owner, repo) {
   setupLayoutToggle();
   setupFindBar();
   setupDocOutline();
+  setupMinimap();
+  if (els.minimapWrap && !els.minimapWrap.classList.contains('hidden')) {
+    ensureMinimap();
+  }
   setupCommitAndHistory();
   workingTree.clearAll();
   refreshCommitBadge();
@@ -1135,6 +1143,9 @@ async function openFile(path, { reload = false } = {}) {
     }
     if (els.docOutline && !els.docOutline.classList.contains('hidden')) {
       renderDocOutline();
+    }
+    if (els.minimapWrap && !els.minimapWrap.classList.contains('hidden')) {
+      ensureMinimap();
     }
     setSaveStatus('Ready', false);
 
@@ -1770,6 +1781,50 @@ function renderDocOutline() {
     });
     els.docOutline.appendChild(btn);
   }
+}
+
+
+/** @type {{ refresh: () => void, destroy: () => void }|null} */
+let minimapHandle = null;
+
+function destroyMinimap() {
+  if (minimapHandle) {
+    try { minimapHandle.destroy(); } catch (_) {}
+    minimapHandle = null;
+  }
+}
+
+function ensureMinimap() {
+  if (!editorHandle || !els.minimapCanvas) return;
+  destroyMinimap();
+  minimapHandle = createMinimap(editorHandle.easyMDE.codemirror, els.minimapCanvas);
+}
+
+function setupMinimap() {
+  if (!els.btnMinimap || els.btnMinimap.dataset.bound) return;
+  els.btnMinimap.dataset.bound = '1';
+  // Restore preference
+  const pref = localStorage.getItem('md_minimap');
+  if (pref === '1' && els.minimapWrap) {
+    els.minimapWrap.classList.remove('hidden');
+    els.btnMinimap.classList.add('active-panel');
+  }
+  els.btnMinimap.addEventListener('click', () => {
+    if (!els.minimapWrap) return;
+    const open = els.minimapWrap.classList.toggle('hidden') === false;
+    els.btnMinimap.classList.toggle('active-panel', open);
+    localStorage.setItem('md_minimap', open ? '1' : '0');
+    if (open) {
+      ensureMinimap();
+      requestAnimationFrame(() => {
+        if (minimapHandle) minimapHandle.refresh();
+        if (editorHandle) editorHandle.refreshLayout();
+      });
+    } else {
+      destroyMinimap();
+      if (editorHandle) editorHandle.refreshLayout();
+    }
+  });
 }
 
 function setupDocOutline() {

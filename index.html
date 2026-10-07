@@ -180,6 +180,7 @@
         <button class="secondary" id="btn-wrap" title="Toggle word wrap">Wrap</button>
         <button class="secondary" id="btn-fold" title="Fold / unfold markdown headings">Fold</button>
         <button class="secondary" id="btn-outline" title="Document outline (headings)">Outline</button>
+        <button class="secondary" id="btn-minimap" title="Document minimap">Map</button>
         <button id="btn-save" disabled title="Save: push only this file to GitHub now (single-file). Idle autosave does the same after ~10s.">Save</button>
         <!-- Autosave status, owned by js/autosave.js. Kept separate from
              #save-status on purpose: that one auto-clears after 4s for every
@@ -215,6 +216,9 @@
         <div id="editor-container">
           <textarea id="editor"></textarea>
           <div id="editor-dropzone-overlay" class="hidden">Drop to add an image to the file</div>
+        </div>
+        <div id="minimap-wrap" class="minimap-wrap hidden" title="Click or drag to scroll">
+          <canvas id="minimap" aria-label="Document minimap"></canvas>
         </div>
       </div>
     </div>
