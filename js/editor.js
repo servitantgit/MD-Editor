@@ -9,6 +9,7 @@ import { markdownToCanonicalHtml } from './markdown-tokens.js';
 import { attachResizeHandles, resolveAllImages } from './image-preview.js';
 import { kindFromPath } from './file-kind.js';
 import { dirnameOf, resolveRelativePath, isExternalOrAnchor, isImagePath } from './paths.js';
+import { buildHtmlSrcdoc } from './html-preview.js';
 
 /**
  * @param {HTMLTextAreaElement} textareaEl
