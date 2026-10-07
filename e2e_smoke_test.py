@@ -1088,12 +1088,16 @@ with sync_playwright() as p:
 
     # --- History drawer toggle ---
     page.click("#btn-history")
+    # Playwright's default wait is "visible"; :not(.hidden) is correct for open.
     page.wait_for_selector("#history-panel:not(.hidden)", timeout=8000)
     assert page.locator("#history-panel:not(.hidden)").count() == 1, "History panel did not open"
-    # list may show mock commit or empty/loading; panel itself must be visible
     page.click("#btn-history")  # second click closes
-    page.wait_for_selector("#history-panel.hidden", timeout=5000)
-    assert page.locator("#history-panel.hidden").count() == 1, "History panel did not close on toggle"
+    # .hidden means display:none — must wait for attached + class, NOT visible
+    page.wait_for_function(
+        "() => document.getElementById('history-panel')?.classList.contains('hidden') === true",
+        timeout=5000,
+    )
+    assert "hidden" in (page.get_attribute("#history-panel", "class") or ""),         "History panel did not close on toggle"
     print("✓ History panel toggles open and closed")
 
     # --- HTML Preview in Live mode ---
