@@ -110,9 +110,18 @@ export function bindHistoryPanel(opts) {
   return {
     open() {
       panelEl.classList.remove('hidden');
+      panelEl.classList.remove('with-detail');
+      if (detailEl) {
+        detailEl.innerHTML = '<div class="hist-empty">Select a commit</div>';
+      }
     },
     close() {
       panelEl.classList.add('hidden');
+      panelEl.classList.remove('with-detail');
+      if (detailEl) detailEl.innerHTML = '';
+    },
+    isOpen() {
+      return panelEl && !panelEl.classList.contains('hidden');
     },
     renderList(commits) {
       listEl.innerHTML = '';
@@ -138,6 +147,7 @@ export function bindHistoryPanel(opts) {
       }
     },
     renderDetail(detail) {
+      panelEl.classList.add('with-detail');
       detailEl.innerHTML = '';
       const head = document.createElement('div');
       head.className = 'hist-detail-h';
@@ -199,7 +209,9 @@ export function bindHistoryPanel(opts) {
       }
     },
     setLoading(msg) {
-      detailEl.innerHTML = `<div class="hist-empty">${escapeAttr(msg || 'Loading…')}</div>`;
+      const text = msg || 'Loading…';
+      if (/loading diff/i.test(text)) panelEl.classList.add('with-detail');
+      detailEl.innerHTML = `<div class="hist-empty">${escapeAttr(text)}</div>`;
     },
   };
 }

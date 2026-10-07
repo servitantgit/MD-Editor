@@ -1003,27 +1003,42 @@ button.secondary:hover { background: #21262d; }
   text-align: center;
 }
 
-/* ===== History panel ===== */
+/* ===== History panel (right drawer) =====
+ * Closed → hidden.
+ * Open → commit list ~320px from the right.
+ * Commit selected → detail expands further left (toward center).
+ */
 .history-panel {
   position: absolute;
   top: 0;
   right: 0;
   bottom: 0;
-  width: 60%;
   z-index: 15;
   display: flex;
+  flex-direction: row-reverse; /* list stays on the right edge; detail grows left */
+  width: 320px;
+  max-width: min(96vw, 960px);
   background: var(--bg);
   border-left: 1px solid var(--border);
+  box-shadow: -12px 0 32px rgba(0, 0, 0, 0.45);
+  transition: width 0.22s ease;
+  overflow: hidden;
 }
-.history-panel.hidden { display: none; }
+.history-panel.hidden {
+  display: none;
+}
+.history-panel.with-detail {
+  width: min(72vw, 920px);
+}
 .hist-side {
-  width: 300px;
+  width: 320px;
   flex-shrink: 0;
   background: var(--panel);
-  border-right: 1px solid var(--border);
+  border-left: 1px solid var(--border);
   display: flex;
   flex-direction: column;
   min-height: 0;
+  min-width: 0;
 }
 .hist-list {
   flex: 1;
@@ -1057,7 +1072,14 @@ button.secondary:hover { background: #21262d; }
   flex: 1;
   overflow-y: auto;
   min-height: 0;
+  min-width: 0;
   padding: 0;
+  background: var(--bg);
+  display: none; /* only when with-detail */
+}
+.history-panel.with-detail .hist-detail {
+  display: block;
+  border-right: 1px solid var(--border);
 }
 .hist-detail-h {
   padding: 12px 16px;
@@ -1067,6 +1089,18 @@ button.secondary:hover { background: #21262d; }
   position: sticky;
   top: 0;
   z-index: 1;
+}
+.hist-empty {
+  padding: 24px 16px;
+  color: var(--muted);
+  font-size: 13px;
+  text-align: center;
+}
+/* Active header button when panel is open */
+#btn-history.active-panel {
+  background: #1f6feb33;
+  border-color: #58a6ff;
+  color: #58a6ff;
 }
 .diff-file { border-bottom: 1px solid var(--border); }
 .diff-file-h {

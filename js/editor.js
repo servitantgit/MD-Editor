@@ -208,9 +208,15 @@ export function createEditor(textareaEl, deps) {
   async function renderInlineImages() {
     const cm = easyMDE.codemirror;
     const currentPath = deps.getCurrentPath();
-    const generation = ++inlineImageGeneration;
 
-    if (!currentPath) return;
+    if (!currentPath) {
+      for (const mark of inlineImageMarks) {
+        try { mark.clear(); } catch (_) {}
+      }
+      inlineImageMarks = [];
+      lastInlineImageKey = '';
+      return;
+    }
 
     const text = cm.getValue();
     const re = /!\[([^\]]*)\]\(\s*(\S+?)(?:\s+"([^"]*)")?\s*\)/g;
@@ -222,20 +228,41 @@ export function createEditor(textareaEl, deps) {
         toIndex: match.index + match[0].length,
         alt: match[1] || '',
         src: match[2],
+        raw: match[0],
       });
     }
 
-    const key = matches.map(m => `${m.fromIndex}:${m.toIndex}:${m.src}`).join('|');
+    // Key by image *content*, not absolute indices. CodeMirror marks already
+    // track document edits; rebuilding on every Space/Backspace (index shift)
+    // was jumping the viewport to the end of the page.
+    const key = matches.map((m) => m.raw).join('\0');
     if (key === lastInlineImageKey && inlineImageMarks.length === matches.length) {
-      return;
+      const alive = inlineImageMarks.every((m) => {
+        try { return m.find() != null; } catch (_) { return false; }
+      });
+      if (alive) return;
     }
+
+    const scroll = typeof cm.getScrollInfo === 'function' ? cm.getScrollInfo() : null;
+    const selections = typeof cm.listSelections === 'function' ? cm.listSelections() : null;
+    const generation = ++inlineImageGeneration;
     lastInlineImageKey = key;
 
-    const cursor = typeof cm.getCursor === 'function' ? cm.getCursor() : null;
-    const scroll = typeof cm.getScrollInfo === 'function' ? cm.getScrollInfo() : null;
-
-    for (const mark of inlineImageMarks) mark.clear();
+    for (const mark of inlineImageMarks) {
+      try { mark.clear(); } catch (_) {}
+    }
     inlineImageMarks = [];
+
+    const restoreView = () => {
+      try {
+        if (selections && selections.length && typeof cm.setSelections === 'function') {
+          cm.setSelections(selections);
+        }
+        if (scroll && typeof cm.scrollTo === 'function') {
+          cm.scrollTo(scroll.left, scroll.top);
+        }
+      } catch (_) { /* ignore */ }
+    };
 
     for (const item of matches) {
       if (generation !== inlineImageGeneration) return;
@@ -245,6 +272,9 @@ export function createEditor(textareaEl, deps) {
       const wrapper = document.createElement('span');
       wrapper.className = 'cm-inline-image';
       wrapper.title = item.src;
+      wrapper.style.display = 'inline-block';
+      wrapper.style.verticalAlign = 'middle';
+      wrapper.style.minHeight = '24px';
 
       const img = document.createElement('img');
       img.alt = item.alt;
@@ -259,36 +289,49 @@ export function createEditor(textareaEl, deps) {
       loading.textContent = '⏳';
       wrapper.append(img, loading);
 
-      const mark = cm.markText(from, to, { replacedWith: wrapper, clearOnEnter: false, atomic: true });
+      let mark;
+      try {
+        mark = cm.markText(from, to, {
+          replacedWith: wrapper,
+          clearOnEnter: false,
+          atomic: true,
+          handleMouseEvents: true,
+        });
+      } catch (_) {
+        continue;
+      }
       inlineImageMarks.push(mark);
 
-      const loadImage = async () => {
-        try {
-          const url = await deps.imageResolver.resolve(item.src, currentPath);
-          if (generation !== inlineImageGeneration || mark.find() == null) return;
+      Promise.resolve()
+        .then(() => deps.imageResolver.resolve(item.src, currentPath))
+        .then((url) => {
+          if (generation !== inlineImageGeneration) return;
+          try { if (!mark.find()) return; } catch (_) { return; }
           img.src = url;
-          img.onload = () => loading.remove();
-          img.onerror = () => {
-            if (mark.find() != null) mark.clear();
+          img.onload = () => {
+            try { loading.remove(); } catch (_) {}
+            // Image height change must not yank the viewport
+            restoreView();
           };
-          loading.remove();
-        } catch (err) {
-          if (generation !== inlineImageGeneration || mark.find() == null) return;
-          mark.clear();
+          img.onerror = () => {
+            try { if (mark.find()) mark.clear(); } catch (_) {}
+          };
+        })
+        .catch((err) => {
+          if (generation !== inlineImageGeneration) return;
+          try { if (mark.find()) mark.clear(); } catch (_) {}
           console.warn('Failed to show inline image:', item.src, err);
-        }
-      };
-
-      loadImage();
+        });
     }
 
-    if (cursor && typeof cm.setCursor === 'function') cm.setCursor(cursor);
-    if (scroll && typeof cm.scrollTo === 'function') cm.scrollTo(scroll.left, scroll.top);
+    restoreView();
+    requestAnimationFrame(restoreView);
   }
 
   function refreshInlineImages() {
     clearTimeout(inlineImageTimer);
     inlineImageTimer = null;
+    lastInlineImageKey = ''; // force rebuild (tab switch / explicit refresh)
     renderInlineImages();
   }
 

@@ -1728,6 +1728,7 @@ function setupCommitAndHistory() {
       btnClose: els.btnHistoryClose,
       onClose: () => {
         historyPanel.close();
+        if (els.btnHistory) els.btnHistory.classList.remove('active-panel');
         hideDiffOverlay();
       },
       onSelect: loadCommitDetail,
@@ -1774,10 +1775,17 @@ function setupCommitAndHistory() {
   if (!els.btnHistory.dataset.bound) {
     els.btnHistory.dataset.bound = '1';
     els.btnHistory.addEventListener('click', async () => {
+      // Toggle: second click closes the drawer
+      if (historyPanel && typeof historyPanel.isOpen === 'function' && historyPanel.isOpen()) {
+        historyPanel.close();
+        els.btnHistory.classList.remove('active-panel');
+        return;
+      }
       if (commitPanel) commitPanel.close();
       hideDiffOverlay();
       historyPanel.open();
-      historyPanel.setLoading('Loading commits…');
+      els.btnHistory.classList.add('active-panel');
+      historyPanel.setLoading('Select a commit');
       try {
         const list = await state.client.listCommits({ branch: state.branch, perPage: 40 });
         const items = list.map((c) => ({
@@ -1788,9 +1796,10 @@ function setupCommitAndHistory() {
           stats: c.stats ? `+${c.stats.additions || 0} −${c.stats.deletions || 0}` : '',
         }));
         historyPanel.renderList(items);
+        if (!historyPanel.isOpen()) return; // closed while loading
         historyPanel.setLoading('Select a commit');
       } catch (e) {
-        historyPanel.setLoading('Error: ' + e.message);
+        if (historyPanel.isOpen()) historyPanel.setLoading('Error: ' + e.message);
       }
     });
   }
