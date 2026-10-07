@@ -8,6 +8,7 @@
 import { markdownToCanonicalHtml } from './markdown-tokens.js';
 import { attachResizeHandles, resolveAllImages } from './image-preview.js';
 import { kindFromPath } from './file-kind.js';
+import { dirnameOf, resolveRelativePath, isExternalOrAnchor, isImagePath } from './paths.js';
 
 /**
  * @param {HTMLTextAreaElement} textareaEl
@@ -169,6 +170,36 @@ export function createEditor(textareaEl, deps) {
     if (myToken === previewRenderToken && failCount > 0 && deps.onImageResolveFailures) {
       deps.onImageResolveFailures(failCount);
     }
+    if (myToken === previewRenderToken) wirePreviewLinks(previewEl);
+  }
+
+  /** Click relative .md/.html links in the preview pane to open that file. */
+  function wirePreviewLinks(previewEl) {
+    if (!previewEl || previewEl.dataset.linkNav === '1') return;
+    previewEl.dataset.linkNav = '1';
+    previewEl.addEventListener('click', (e) => {
+      const a = e.target && e.target.closest && e.target.closest('a[href]');
+      if (!a) return;
+      const href = a.getAttribute('href') || '';
+      if (!href || isExternalOrAnchor(href)) return;
+      // leave pure image links alone
+      if (isImagePath(href.split('?')[0])) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const cur = deps.getCurrentPath ? deps.getCurrentPath() : null;
+      let target = href.replace(/^\//, '');
+      try {
+        if (!href.startsWith('/')) {
+          target = resolveRelativePath(dirnameOf(cur || ''), href);
+        }
+      } catch (_) { /* keep target */ }
+      // drop hash/query
+      target = target.split('#')[0].split('?')[0];
+      if (!target) return;
+      if (typeof deps.onOpenInternalLink === 'function') {
+        deps.onOpenInternalLink(target);
+      }
+    });
   }
 
   /**

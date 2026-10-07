@@ -554,6 +554,11 @@ function showApp(owner, repo) {
     marked: window.marked,
     imageResolver,
     getCurrentPath: () => state.currentPath,
+    onOpenInternalLink: (path) => {
+      if (path && typeof openFile === 'function') openFile(path).catch(() => {
+        setSaveStatus('Link target not found: ' + path, true);
+      });
+    },
     onImageUploadRequest: () => els.imageFileInput.click(),
     // Every keystroke arms the autosave timers. `suppressEditorChange` is what
     // keeps a programmatic .value() (opening a file, reloading after a
@@ -1126,7 +1131,7 @@ async function openFile(path, { reload = false } = {}) {
 
     els.btnSave.disabled = false;
     const kind = kindFromPath(path);
-    els.btnExportPdf.disabled = kind.kind !== 'markdown';
+    els.btnExportPdf.disabled = !(kind.kind === 'markdown' || kind.kind === 'html');
     els.btnDelete.disabled = false;
     updateLangBadge(kind);
     if (editorHandle && typeof editorHandle.setLanguage === 'function') {

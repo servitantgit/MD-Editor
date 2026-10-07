@@ -72,15 +72,20 @@ export async function exportCurrentPageToPdf(deps) {
 
   try {
     const text = deps.getMarkdownText();
-    container.innerHTML = markdownToCanonicalHtml(text, deps.marked);
+    const isHtml = /\.(html?|htm)$/i.test(currentPath);
+    if (isHtml) {
+      // Print the HTML document as-is (relative assets already resolved when possible)
+      container.innerHTML = text || '<p></p>';
+    } else {
+      container.innerHTML = markdownToCanonicalHtml(text, deps.marked);
+      await resolveAllImages(container, deps.imageResolver, currentPath, () => true);
+      container.querySelectorAll('img[data-md-src]').forEach((img) => img.removeAttribute('data-md-src'));
+      // Images must be measured after they load, otherwise every height reads 0.
+      clampImagesToPage(container);
+    }
 
-    await resolveAllImages(container, deps.imageResolver, currentPath, () => true);
-    container.querySelectorAll('img[data-md-src]').forEach((img) => img.removeAttribute('data-md-src'));
-
-    // Images must be measured after they load, otherwise every height reads 0.
-    clampImagesToPage(container);
-
-    const filename = (basenameOf(currentPath) || 'document').replace(/\.md$/i, '') + '.pdf';
+    const filename = (basenameOf(currentPath) || 'document')
+      .replace(/\.(md|markdown|html?|htm)$/i, '') + '.pdf';
 
     await window.html2pdf().set({
       margin: 10,

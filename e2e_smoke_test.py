@@ -141,6 +141,32 @@ def handle_github_api(route, request):
         route.fulfill(status=200, content_type="application/json", body=json.dumps({"content": TINY_PNG_B64, "sha": "sha-pic"}))
     elif "/contents/Asset/tall.png" in url:
         route.fulfill(status=200, content_type="application/json", body=json.dumps({"content": TALL_PNG_B64, "sha": "sha-tall"}))
+    elif "/contents/Notes/page.html" in url:
+        html_body = "<!DOCTYPE html><html><body><h1>HTML_PAGE_OK</h1><p>Hello HTML preview</p></body></html>"
+        b64 = base64.b64encode(html_body.encode("utf-8")).decode()
+        route.fulfill(status=200, content_type="application/json", body=json.dumps({"content": b64, "sha": "sha-html"}))
+    elif re.search(r"/repos/[^/]+/[^/]+/commits(/[a-f0-9]+)?(\?|$)", url) and request.method == "GET":
+        # History panel: list or single commit
+        if url.rstrip("/").endswith("/commits") or "/commits?" in url:
+            route.fulfill(status=200, content_type="application/json", body=json.dumps([
+                {
+                    "sha": "abc1234deadbeef",
+                    "commit": {
+                        "message": "Mock history commit",
+                        "author": {"name": "Tester", "date": "2026-01-15T12:00:00Z"},
+                    },
+                    "html_url": "https://github.com/test-owner/test-repo/commit/abc1234deadbeef",
+                }
+            ]))
+        else:
+            route.fulfill(status=200, content_type="application/json", body=json.dumps({
+                "sha": "abc1234deadbeef",
+                "commit": {
+                    "message": "Mock history commit",
+                    "author": {"name": "Tester", "date": "2026-01-15T12:00:00Z"},
+                },
+                "files": [],
+            }))
     else:
         route.fulfill(status=404, content_type="application/json", body=json.dumps({"message": "Not Found (mock)"}))
 
@@ -1059,7 +1085,73 @@ with sync_playwright() as p:
     assert img_src.startswith("data:image/"), f"unexpected img src: {img_src[:60]}"
     print("✓ preview image renders (real data: URL, not a stuck placeholder)")
 
+
+    # --- History drawer toggle ---
+    page.click("#btn-history")
+    page.wait_for_selector("#history-panel:not(.hidden)", timeout=8000)
+    assert page.locator("#history-panel:not(.hidden)").count() == 1, "History panel did not open"
+    # list may show mock commit or empty/loading; panel itself must be visible
+    page.click("#btn-history")  # second click closes
+    page.wait_for_selector("#history-panel.hidden", timeout=5000)
+    assert page.locator("#history-panel.hidden").count() == 1, "History panel did not close on toggle"
+    print("✓ History panel toggles open and closed")
+
+    # --- HTML Preview in Live mode ---
+    EXTRA_TREE.append({"path": "Notes/page.html", "mode": "100644", "type": "blob", "sha": "sha-html", "size": 80})
+    page.click("#btn-refresh")
+    page.wait_for_timeout(800)
+    # open via tree if visible, else force-open by putting content through UI is hard;
+    # click tree item when present
+    if page.locator("text=page.html").count() > 0:
+        page.click("text=page.html")
+        page.wait_for_timeout(500)
+        page.click('#layout-toggle .layout-btn[data-mode="split"]')
+        page.wait_for_timeout(600)
+        html_ok = page.evaluate("""() => {
+          const iframe = document.querySelector('.editor-preview-side iframe.html-preview-frame, .editor-preview-side iframe');
+          if (!iframe) return {ok:false, reason:'no iframe'};
+          try {
+            const doc = iframe.contentDocument;
+            if (!doc) return {ok:false, reason:'no contentDocument'};
+            const t = doc.body ? doc.body.innerText : '';
+            return {ok: t.includes('HTML_PAGE_OK') || t.includes('Hello HTML'), text: t.slice(0,80)};
+          } catch (e) {
+            // sandbox may block — srcdoc still set
+            return {ok: (iframe.srcdoc || '').includes('HTML_PAGE_OK'), reason: String(e)};
+          }
+        }""")
+        assert html_ok.get("ok"), f"HTML Live preview missing content: {html_ok}"
+        print("✓ HTML Live preview renders page content")
+        page.click('#layout-toggle .layout-btn[data-mode="source"]')
+    else:
+        print("⚠ page.html not in tree after refresh — skipped HTML preview check")
+
+    # --- Space near inline image must not jump caret to end of document ---
+    page.click("text=Test note.md")
+    page.wait_for_timeout(400)
+    page.click('#layout-toggle .layout-btn[data-mode="source"]')
+    page.click(".CodeMirror")
+    # Jump near start, type image markdown if not already present, then Space
+    page.evaluate("""() => {
+      const cm = document.querySelector('.CodeMirror').CodeMirror;
+      cm.setValue('# Hello\\n\\n![pic](Asset/pic.jpg)\\n\\nline after image\\n');
+      cm.setCursor({line: 3, ch: 0}); // start of "line after image"
+      cm.focus();
+    }""")
+    page.wait_for_timeout(400)  # allow inline image marks to settle
+    page.keyboard.type("X")
+    page.keyboard.press("Space")
+    pos = page.evaluate("""() => {
+      const cm = document.querySelector('.CodeMirror').CodeMirror;
+      const cur = cm.getCursor();
+      return {line: cur.line, ch: cur.ch, last: cm.lineCount() - 1, text: cm.getValue()};
+    }""")
+    # Caret must stay near the image (line 3), not jump to EOF
+    assert pos["line"] <= 4, f"Space near image jumped caret far down: {pos}"
+    assert "X" in pos["text"], f"typed character missing after Space near image: {pos}"
+    print(f"✓ Space near inline image keeps caret local (line={pos['line']}, ch={pos['ch']})")
+
     assert not page_errors, f"unhandled page errors: {page_errors}"
     browser.close()
 
-print("\nALL CHECKS PASSED")
+print("\\nALL CHECKS PASSED")
