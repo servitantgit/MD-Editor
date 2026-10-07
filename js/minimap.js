@@ -1,24 +1,25 @@
 // minimap.js
 // Canvas document minimap for CodeMirror 5 (EasyMDE).
-// Shows a scaled overview of the file; click / drag scrolls the editor.
+// Entire file is scaled to the panel height (VS Code–style), so the map never
+// looks like the document "ended early" while the editor still has content.
 
 /**
  * @param {object} cm CodeMirror instance
  * @param {HTMLCanvasElement} canvasEl
- * @param {{ width?: number, scale?: number, colors?: object }} [opts]
+ * @param {{ width?: number, colors?: object }} [opts]
  */
 export function createMinimap(cm, canvasEl, opts = {}) {
   const width = opts.width || 96;
-  const lineH = opts.lineH || 2; // px per source line in the map
   const colors = {
-    bg: opts.colors?.bg || '#0d1117',
-    text: opts.colors?.text || '#8b949e',
-    heading: opts.colors?.heading || '#58a6ff',
-    code: opts.colors?.code || '#3fb950',
-    viewport: opts.colors?.viewport || 'rgba(88, 166, 255, 0.22)',
-    viewportBorder: opts.colors?.viewportBorder || 'rgba(88, 166, 255, 0.55)',
-    cursor: opts.colors?.cursor || '#f0883e',
-    ...opts.colors,
+    bg: '#0d1117',
+    text: '#8b949e',
+    heading: '#58a6ff',
+    code: '#3fb950',
+    list: '#a371f7',
+    viewport: 'rgba(88, 166, 255, 0.20)',
+    viewportBorder: 'rgba(88, 166, 255, 0.65)',
+    cursor: '#f0883e',
+    ...(opts.colors || {}),
   };
 
   let destroyed = false;
@@ -26,8 +27,20 @@ export function createMinimap(cm, canvasEl, opts = {}) {
   let raf = 0;
   let paintTimer = 0;
 
-  canvasEl.width = width;
-  canvasEl.style.width = width + 'px';
+  const dpr = () => Math.min(2, window.devicePixelRatio || 1);
+
+  function resizeCanvas(cssW, cssH) {
+    const ratio = dpr();
+    const bw = Math.max(1, Math.floor(cssW * ratio));
+    const bh = Math.max(1, Math.floor(cssH * ratio));
+    if (canvasEl.width !== bw || canvasEl.height !== bh) {
+      canvasEl.width = bw;
+      canvasEl.height = bh;
+    }
+    canvasEl.style.width = cssW + 'px';
+    canvasEl.style.height = cssH + 'px';
+    return ratio;
+  }
 
   function schedulePaint() {
     if (destroyed) return;
@@ -37,14 +50,15 @@ export function createMinimap(cm, canvasEl, opts = {}) {
 
   function schedulePaintDebounced() {
     clearTimeout(paintTimer);
-    paintTimer = setTimeout(schedulePaint, 40);
+    paintTimer = setTimeout(schedulePaint, 50);
   }
 
   function lineStyle(lineText) {
     const t = lineText || '';
     if (/^\s*#{1,6}\s/.test(t)) return colors.heading;
-    if (/^\s*```/.test(t) || /^\s{4,}\S/.test(t)) return colors.code;
-    if (/^\s*([-*+]|\d+\.)\s/.test(t)) return colors.text;
+    if (/^\s*```/.test(t)) return colors.code;
+    if (/^\s{4,}\S/.test(t)) return colors.code;
+    if (/^\s*([-*+]|\d+\.)\s/.test(t)) return colors.list;
     return colors.text;
   }
 
@@ -53,91 +67,103 @@ export function createMinimap(cm, canvasEl, opts = {}) {
     const ctx = canvasEl.getContext('2d');
     if (!ctx) return;
 
-    const lineCount = cm.lineCount();
-    const mapH = Math.max(1, Math.ceil(lineCount * lineH));
-    const viewH = canvasEl.parentElement
-      ? Math.max(1, canvasEl.parentElement.clientHeight)
-      : mapH;
-
-    // Canvas height = max(viewport, content) so short docs still fill the strip
-    const cssH = Math.max(viewH, Math.min(mapH, viewH * 4));
-    if (canvasEl.height !== cssH) {
-      canvasEl.height = cssH;
-      canvasEl.style.height = cssH + 'px';
-    }
+    const parent = canvasEl.parentElement;
+    const cssW = width;
+    const cssH = Math.max(1, parent ? parent.clientHeight : 200);
+    const ratio = resizeCanvas(cssW, cssH);
 
     const w = canvasEl.width;
     const h = canvasEl.height;
+    const lineCount = Math.max(1, cm.lineCount());
 
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.fillStyle = colors.bg;
     ctx.fillRect(0, 0, w, h);
 
-    // Scale so the whole document fits in the canvas height when possible
-    const scaleY = mapH > h ? h / mapH : 1;
-    const drawnLineH = lineH * scaleY;
+    // Fit ALL lines into the panel height — never leave a false "empty tail".
+    const rowH = h / lineCount;
 
     for (let i = 0; i < lineCount; i++) {
       const text = cm.getLine(i) || '';
       if (!text.trim()) continue;
-      const y = i * drawnLineH;
-      if (y > h) break;
-      // Approximate line width by non-space density
-      const density = Math.min(1, text.trim().length / 80);
-      const barW = Math.max(2, Math.floor(w * 0.15 + density * w * 0.75));
+      const density = Math.min(1, text.trim().length / 72);
+      const barW = Math.max(2 * ratio, Math.floor((0.12 + density * 0.78) * w));
+      const y = i * rowH;
+      const bh = Math.max(ratio, rowH * 0.9);
       ctx.fillStyle = lineStyle(text);
-      ctx.globalAlpha = 0.55 + density * 0.35;
-      ctx.fillRect(4, y, barW, Math.max(1, drawnLineH * 0.85));
+      ctx.globalAlpha = 0.5 + density * 0.4;
+      ctx.fillRect(3 * ratio, y, barW, bh);
     }
     ctx.globalAlpha = 1;
 
-    // Viewport rectangle
-    const scroll = cm.getScrollInfo();
-    const totalH = Math.max(1, scroll.height);
-    const visible = scroll.clientHeight;
-    const topRatio = scroll.top / totalH;
-    const heightRatio = visible / totalH;
-    const vpTop = topRatio * h;
-    const vpH = Math.max(8, heightRatio * h);
+    // Viewport from visible lines (works with wrap + partial scrolls)
+    let first = 0;
+    let last = lineCount - 1;
+    try {
+      const scroll = cm.getScrollInfo();
+      first = cm.lineAtHeight(scroll.top, 'local');
+      last = cm.lineAtHeight(scroll.top + scroll.clientHeight, 'local');
+      if (typeof first !== 'number' || first < 0) first = 0;
+      if (typeof last !== 'number' || last < first) last = Math.min(lineCount - 1, first + 20);
+    } catch (_) {
+      first = 0;
+      last = Math.min(lineCount - 1, 30);
+    }
+
+    const vpTop = (first / lineCount) * h;
+    const vpH = Math.max(6 * ratio, ((last - first + 1) / lineCount) * h);
 
     ctx.fillStyle = colors.viewport;
     ctx.fillRect(0, vpTop, w, vpH);
     ctx.strokeStyle = colors.viewportBorder;
-    ctx.lineWidth = 1;
-    ctx.strokeRect(0.5, vpTop + 0.5, w - 1, Math.max(1, vpH - 1));
+    ctx.lineWidth = Math.max(1, ratio);
+    ctx.strokeRect(0.5 * ratio, vpTop, w - ratio, Math.max(ratio, vpH));
 
-    // Cursor line
+    // Cursor
     try {
       const cur = cm.getCursor();
-      const cy = (cur.line / Math.max(1, lineCount)) * h;
+      const cy = ((cur.line + 0.5) / lineCount) * h;
       ctx.fillStyle = colors.cursor;
-      ctx.fillRect(0, cy, w, 2);
+      ctx.fillRect(0, cy - ratio, w, 2 * ratio);
     } catch (_) { /* ignore */ }
   }
 
-  function scrollToY(clientY) {
+  /** Map pointer Y on the canvas to a document line and centre the viewport there. */
+  function scrollToClientY(clientY) {
     const rect = canvasEl.getBoundingClientRect();
     const y = clientY - rect.top;
-    const h = canvasEl.height || 1;
-    const ratio = Math.max(0, Math.min(1, y / h));
-    const scroll = cm.getScrollInfo();
-    const maxTop = Math.max(0, scroll.height - scroll.clientHeight);
-    cm.scrollTo(null, ratio * maxTop);
+    const cssH = Math.max(1, rect.height);
+    const ratioY = Math.max(0, Math.min(1, y / cssH));
+    const lineCount = Math.max(1, cm.lineCount());
+    const line = Math.min(lineCount - 1, Math.floor(ratioY * lineCount));
+
+    try {
+      const scroll = cm.getScrollInfo();
+      const lineTop = cm.heightAtLine(line, 'local');
+      const target = lineTop - scroll.clientHeight / 3;
+      cm.scrollTo(null, Math.max(0, target));
+    } catch (_) {
+      try {
+        cm.setCursor({ line, ch: 0 });
+        cm.scrollIntoView({ line, ch: 0 }, 80);
+      } catch (__) {}
+    }
     schedulePaint();
   }
 
   function onPointerDown(e) {
     e.preventDefault();
     dragging = true;
-    canvasEl.setPointerCapture?.(e.pointerId);
-    scrollToY(e.clientY);
+    try { canvasEl.setPointerCapture(e.pointerId); } catch (_) {}
+    scrollToClientY(e.clientY);
   }
   function onPointerMove(e) {
     if (!dragging) return;
-    scrollToY(e.clientY);
+    scrollToClientY(e.clientY);
   }
   function onPointerUp(e) {
     dragging = false;
-    try { canvasEl.releasePointerCapture?.(e.pointerId); } catch (_) {}
+    try { canvasEl.releasePointerCapture(e.pointerId); } catch (_) {}
   }
 
   canvasEl.addEventListener('pointerdown', onPointerDown);
