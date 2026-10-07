@@ -25,6 +25,7 @@ import { WorkingTree } from './working-tree.js';
 import { bindCommitPanel, bindHistoryPanel } from './commit-ui.js';
 import { unifiedDiff, renderDiffLines } from './diff-util.js';
 import { kindFromPath, isHtmlPath, isMarkdownPath, isEditableTextPath } from './file-kind.js';
+import { buildHtmlSrcdoc } from './html-preview.js';
 
 const els = {
   loginScreen: document.getElementById('login-screen'),
@@ -89,6 +90,8 @@ const els = {
   findClose: document.getElementById('find-close'),
   btnWrap: document.getElementById('btn-wrap'),
   btnFold: document.getElementById('btn-fold'),
+  btnOutline: document.getElementById('btn-outline'),
+  docOutline: document.getElementById('doc-outline'),
   btnSave: document.getElementById('btn-save'),
   btnExportPdf: document.getElementById('btn-export-pdf'),
   btnDelete: document.getElementById('btn-delete'),
@@ -587,6 +590,7 @@ function showApp(owner, repo) {
   applyLayoutMode(layoutMode);
   setupLayoutToggle();
   setupFindBar();
+  setupDocOutline();
   setupCommitAndHistory();
   workingTree.clearAll();
   refreshCommitBadge();
@@ -1129,6 +1133,9 @@ async function openFile(path, { reload = false } = {}) {
     if (editorHandle && typeof editorHandle.renderActivePreview === 'function') {
       editorHandle.renderActivePreview();
     }
+    if (els.docOutline && !els.docOutline.classList.contains('hidden')) {
+      renderDocOutline();
+    }
     setSaveStatus('Ready', false);
 
     if (opened.hasDraft) {
@@ -1589,6 +1596,13 @@ function fillPreviewPane(node, plain, kind) {
     iframe.srcdoc = plain || '<!-- empty -->';
     node.innerHTML = '';
     node.appendChild(iframe);
+    const path = state.currentPath;
+    const resolver = imageResolver;
+    buildHtmlSrcdoc(plain || '', path, resolver)
+      .then((srcdoc) => {
+        if (iframe.isConnected) iframe.srcdoc = srcdoc;
+      })
+      .catch(() => {});
     return;
   }
   if (preview === 'code') {
@@ -1716,6 +1730,62 @@ function setupFindBar() {
       e.preventDefault();
       openFind();
       if (els.replaceInput) els.replaceInput.focus();
+    }
+  });
+}
+
+
+
+function parseHeadingOutline(text) {
+  const lines = String(text || '').split('\n');
+  const items = [];
+  for (let i = 0; i < lines.length; i++) {
+    const m = /^(#{1,6})\s+(.+?)\s*$/.exec(lines[i]);
+    if (!m) continue;
+    items.push({ line: i, level: m[1].length, text: m[2].replace(/#+\s*$/, '').trim() });
+  }
+  return items;
+}
+
+function renderDocOutline() {
+  if (!els.docOutline || !editorHandle) return;
+  const text = editorHandle.easyMDE.value();
+  const items = parseHeadingOutline(text);
+  els.docOutline.innerHTML = '';
+  if (!items.length) {
+    els.docOutline.innerHTML = '<div class="outline-empty">No headings</div>';
+    return;
+  }
+  for (const it of items) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'outline-item level-' + it.level;
+    btn.textContent = it.text;
+    btn.title = 'Line ' + (it.line + 1);
+    btn.addEventListener('click', () => {
+      const cm = editorHandle.easyMDE.codemirror;
+      cm.setCursor({ line: it.line, ch: 0 });
+      cm.scrollIntoView({ line: it.line, ch: 0 }, 80);
+      cm.focus();
+    });
+    els.docOutline.appendChild(btn);
+  }
+}
+
+function setupDocOutline() {
+  if (!els.btnOutline || els.btnOutline.dataset.bound) return;
+  els.btnOutline.dataset.bound = '1';
+  els.btnOutline.addEventListener('click', () => {
+    if (!els.docOutline) return;
+    const open = els.docOutline.classList.toggle('hidden') === false;
+    els.btnOutline.classList.toggle('active-panel', open);
+    if (open) renderDocOutline();
+  });
+  // Refresh outline when typing (debounced via existing change is heavy — only when open)
+  document.addEventListener('keydown', (e) => {
+    if (!els.docOutline || els.docOutline.classList.contains('hidden')) return;
+    if (e.key === 'Escape' && els.docOutline && !els.docOutline.classList.contains('hidden')) {
+      // don't steal Esc from find bar
     }
   });
 }

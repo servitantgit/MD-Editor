@@ -1530,3 +1530,58 @@ body.md-layout-source .editor-preview-active-side {
   pointer-events: none !important;
   cursor: not-allowed !important;
 }
+
+
+/* ===== Document outline (heading map) ===== */
+.editor-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: row;
+  position: relative;
+}
+.editor-body #editor-container {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+.doc-outline {
+  width: 200px;
+  flex-shrink: 0;
+  overflow-y: auto;
+  border-right: 1px solid var(--border);
+  background: var(--panel);
+  padding: 8px 0;
+  font-size: 12px;
+}
+.doc-outline.hidden { display: none; }
+.outline-empty {
+  padding: 12px;
+  color: var(--muted);
+  text-align: center;
+}
+.outline-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  padding: 4px 10px;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.outline-item:hover { background: #21262d; color: #58a6ff; }
+.outline-item.level-1 { font-weight: 600; padding-left: 10px; }
+.outline-item.level-2 { padding-left: 18px; }
+.outline-item.level-3 { padding-left: 26px; color: var(--muted); }
+.outline-item.level-4,
+.outline-item.level-5,
+.outline-item.level-6 { padding-left: 34px; color: var(--muted); font-size: 11px; }
+#btn-outline.active-panel {
+  background: #1f6feb33;
+  border-color: #58a6ff;
+  color: #58a6ff;
+}

@@ -8,7 +8,7 @@
 // stays thin and no request can bypass its cache-busting / CORS rules.
 
 import { b64ToUtf8 } from './github-client.js';
-import { createSearchIndex, diffTree, isMarkdownPath } from './search-index.js';
+import { createSearchIndex, diffTree, isSearchablePath } from './search-index.js';
 import { recordKey } from './search-store.js';
 
 /** Parallel getFileB64 calls. Enough to be quick, far below the rate limit. */
@@ -89,7 +89,7 @@ export class SearchSync {
       this.manifest = {};
     }
 
-    const files = tree.filter((f) => isMarkdownPath(f.path));
+    const files = tree.filter((f) => isSearchablePath(f.path));
     const { added, removed, changed } = diffTree(files, this.manifest);
 
     // Removed and changed paths must leave the index BEFORE their new versions

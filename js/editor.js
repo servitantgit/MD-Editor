@@ -69,6 +69,14 @@ export function createEditor(textareaEl, deps) {
           iframe.srcdoc = plainText || '<!-- empty -->';
           previewEl.innerHTML = '';
           previewEl.appendChild(iframe);
+          // Resolve relative assets after EasyMDE writes our empty return
+          const path = deps.getCurrentPath ? deps.getCurrentPath() : null;
+          buildHtmlSrcdoc(plainText || '', path, deps.imageResolver)
+            .then((srcdoc) => {
+              if (myToken !== previewRenderToken || !iframe.isConnected) return;
+              iframe.srcdoc = srcdoc;
+            })
+            .catch(() => { /* keep raw srcdoc */ });
         }, 0);
         return '';
       }
@@ -108,7 +116,14 @@ export function createEditor(textareaEl, deps) {
   // Expose EasyMDE's CodeMirror so optional mode scripts can register
   try {
     if (typeof globalThis.CodeMirror === 'undefined' && easyMDE.codemirror) {
-      globalThis.CodeMirror = easyMDE.codemirror.constructor;
+      // CM5: instance.constructor is usually the CodeMirror function
+      const cand = easyMDE.codemirror.constructor;
+      if (cand && typeof cand.defineMode === 'function') {
+        globalThis.CodeMirror = cand;
+      } else if (cand && cand.Doc && typeof easyMDE.codemirror.getOption === 'function') {
+        // Some builds put defineMode only on the library root; still assign constructor
+        globalThis.CodeMirror = cand;
+      }
     }
   } catch (_) { /* ignore */ }
 
@@ -126,6 +141,7 @@ export function createEditor(textareaEl, deps) {
       base + '/python/python.min.js',
       base + '/shell/shell.min.js',
       base + '/yaml/yaml.min.js',
+      base + '/markdown/markdown.min.js',
     ];
     for (const src of files) {
       if (document.querySelector(`script[data-cm-mode="${src}"]`)) continue;

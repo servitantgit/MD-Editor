@@ -34,14 +34,20 @@ export function createSearcherOptions() {
   };
 }
 
-/** Only markdown is indexed — no images, PDFs or other binary blobs. */
+/** Markdown notes (legacy name kept for callers). */
 export function isMarkdownPath(path) {
   return extOf(path) === 'md';
 }
 
+/** Text files indexed for full-text search (md, html, plain text, …). */
+const SEARCHABLE_EXT = new Set(['md', 'markdown', 'mdown', 'html', 'htm', 'txt', 'text', 'csv', 'tsv', 'json', 'xml', 'yml', 'yaml', 'css', 'js', 'mjs', 'cjs', 'ts', 'tsx', 'jsx', 'py', 'sh', 'bash']);
+export function isSearchablePath(path) {
+  return SEARCHABLE_EXT.has(extOf(path));
+}
+
 /** "Notes/Ideas.md" -> "Ideas". */
 export function titleFromPath(path) {
-  return basenameOf(path).replace(/\.md$/i, '');
+  return basenameOf(path).replace(/\.(md|markdown|html|htm|txt)$/i, '');
 }
 
 /** The first `# ...` heading, or the file name when the note has none. */
