@@ -494,8 +494,10 @@ with sync_playwright() as p:
     page.route(re.compile(r"https://api\.github\.com/.*/contents/.*"),
                lambda route, request: (write_urls.append(request.url), route.abort()))
 
+    page.click("#btn-add-menu")
     page.click("#btn-new-file")
     page.wait_for_timeout(1000)
+    page.click("#btn-add-menu")
     page.click("#btn-new-folder")
     page.wait_for_timeout(1000)
 
@@ -531,6 +533,7 @@ with sync_playwright() as p:
     page.click(".file-item.folder:has-text('Notes')")
     page.wait_for_timeout(200)
     CONTENT_WRITES.clear()
+    page.click("#btn-add-menu")
     page.click("#btn-new-file")
     page.wait_for_timeout(1000)
     # Dialog handler will accept with "new-file-in-notes.md"
@@ -543,6 +546,7 @@ with sync_playwright() as p:
 
     # --- B. Create folder in selected folder (via toolbar) ---
     CONTENT_WRITES.clear()
+    page.click("#btn-add-menu")
     page.click("#btn-new-folder")
     page.wait_for_timeout(1000)
     # Dialog handler will accept with "new-folder-in-notes"

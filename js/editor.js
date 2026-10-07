@@ -197,22 +197,23 @@ export function createEditor(textareaEl, deps) {
   };
   easyMDE.codemirror.on('change', onChange);
 
-  // Debounce: opening History/Commit, split mode, etc. fire many resizes;
-  // refreshing CM on every one jerks scroll (worse with inline images).
+  // First resize in a quiet window refreshes immediately (unit tests + initial
+  // layout). Bursts (opening drawers, split mode) are coalesced to one refresh.
   let resizeLayoutTimer = null;
-  let lastRefreshW = 0;
-  let lastRefreshH = 0;
-  const resizeObserver = new ResizeObserver((entries) => {
-    const entry = entries && entries[0];
-    const w = entry && entry.contentRect ? entry.contentRect.width : 0;
-    const h = entry && entry.contentRect ? entry.contentRect.height : 0;
-    if (Math.abs(w - lastRefreshW) < 2 && Math.abs(h - lastRefreshH) < 2) return;
-    clearTimeout(resizeLayoutTimer);
-    resizeLayoutTimer = setTimeout(() => {
-      lastRefreshW = w;
-      lastRefreshH = h;
-      refreshLayout();
-    }, 80);
+  let lastResizeRefreshAt = 0;
+  const RESIZE_DEBOUNCE_MS = 80;
+  const resizeObserver = new ResizeObserver(() => {
+    const now = Date.now();
+    if (now - lastResizeRefreshAt < RESIZE_DEBOUNCE_MS) {
+      clearTimeout(resizeLayoutTimer);
+      resizeLayoutTimer = setTimeout(() => {
+        lastResizeRefreshAt = Date.now();
+        refreshLayout();
+      }, RESIZE_DEBOUNCE_MS);
+      return;
+    }
+    lastResizeRefreshAt = now;
+    refreshLayout();
   });
   resizeObserver.observe(textareaEl.closest('.editor-area') || document.body);
 
