@@ -6,7 +6,6 @@
 ![Vanilla JS](https://img.shields.io/badge/vanilla-JS-f7df1e?logo=javascript&logoColor=black)
 ![Last commit](https://img.shields.io/github/last-commit/servitantgit/MD-Editor)
 ![Code size](https://img.shields.io/github/languages/code-size/servitantgit/MD-Editor)
-![Top language](https://img.shields.io/github/languages/top-language/servitantgit/MD-Editor)
 ![Open issues](https://img.shields.io/github/issues/servitantgit/MD-Editor)
 ![License](https://img.shields.io/github/license/servitantgit/MD-Editor)
 
