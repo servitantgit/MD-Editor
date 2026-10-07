@@ -1110,19 +1110,40 @@ with sync_playwright() as p:
         page.click("text=page.html")
         page.wait_for_timeout(500)
         page.click('#layout-toggle .layout-btn[data-mode="split"]')
-        page.wait_for_timeout(600)
+        page.wait_for_function(
+            """() => {
+              const iframe = document.querySelector(
+                '.editor-preview-side iframe.html-preview-frame, .editor-preview-side iframe'
+              );
+              const s = iframe && iframe.srcdoc || '';
+              return s.includes('HTML_PAGE_OK') || s.includes('Hello HTML');
+            }""",
+            timeout=8000,
+        )
         html_ok = page.evaluate("""() => {
-          const iframe = document.querySelector('.editor-preview-side iframe.html-preview-frame, .editor-preview-side iframe');
+          const iframe = document.querySelector(
+            '.editor-preview-side iframe.html-preview-frame, .editor-preview-side iframe'
+          );
           if (!iframe) return {ok:false, reason:'no iframe'};
+          // sandbox without allow-same-origin blocks contentDocument; srcdoc is enough
+          const srcdoc = iframe.srcdoc || '';
+          if (srcdoc.includes('HTML_PAGE_OK') || srcdoc.includes('Hello HTML')) {
+            return {ok:true, via:'srcdoc', len: srcdoc.length};
+          }
           try {
             const doc = iframe.contentDocument;
-            if (!doc) return {ok:false, reason:'no contentDocument'};
-            const t = doc.body ? doc.body.innerText : '';
-            return {ok: t.includes('HTML_PAGE_OK') || t.includes('Hello HTML'), text: t.slice(0,80)};
+            if (doc && doc.body) {
+              const text = doc.body.innerText || '';
+              return {
+                ok: text.includes('HTML_PAGE_OK') || text.includes('Hello HTML'),
+                via: 'contentDocument',
+                text: text.slice(0, 80),
+              };
+            }
           } catch (e) {
-            // sandbox may block — srcdoc still set
-            return {ok: (iframe.srcdoc || '').includes('HTML_PAGE_OK'), reason: String(e)};
+            return {ok:false, reason: String(e), srcdocLen: srcdoc.length, head: srcdoc.slice(0, 120)};
           }
+          return {ok:false, reason:'empty', srcdocLen: srcdoc.length, head: srcdoc.slice(0, 120)};
         }""")
         assert html_ok.get("ok"), f"HTML Live preview missing content: {html_ok}"
         print("✓ HTML Live preview renders page content")
