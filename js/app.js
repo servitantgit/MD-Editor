@@ -931,6 +931,8 @@ function renderTabs() {
     if (isActive ? activeFileUnsaved : (tabDocs.get(path) || {}).unsaved) dirty.add(path);
   }
   tabBar.render({ paths: tabs.paths, active: tabs.active, labels: tabLabels(tabs.paths), dirty });
+  // Landscape mobile hides the tab strip when only one file is open (saves a row).
+  document.body.classList.toggle('mobile-single-tab', (tabs.paths || []).length <= 1);
 }
 
 /** A commit for `path` landed (maybe in the background, for a tab the user already left). */

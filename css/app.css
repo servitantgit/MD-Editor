@@ -2185,3 +2185,92 @@ body.md-layout-source .editor-preview-active-side {
     max-width: 100% !important;
   }
 }
+
+
+/* ===== Phone landscape: reclaim vertical space for content =====
+   Browser chrome already eats the top; our header+tabs+toolbar left ~1 line.
+   Collapse chrome aggressively; keep ☰, Source/Preview, Save, Delete. */
+@media (orientation: landscape) and (max-height: 560px) {
+  header#app-header {
+    padding: 2px 6px !important;
+    gap: 4px !important;
+    min-height: 0 !important;
+  }
+  header#app-header h1 {
+    display: none !important;
+  }
+  #btn-logout {
+    display: none !important;
+  }
+  #btn-mobile-files {
+    min-width: 32px !important;
+    min-height: 32px !important;
+    padding: 4px 6px !important;
+    font-size: 15px !important;
+  }
+  .layout-toggle .layout-btn {
+    min-height: 28px !important;
+    padding: 2px 8px !important;
+    font-size: 12px !important;
+  }
+
+  /* Single-row tabs, or hide when only one tab is open (JS adds class) */
+  .tab-bar {
+    min-height: 0 !important;
+    padding: 0 4px !important;
+    max-height: 28px !important;
+  }
+  body.mobile-single-tab .tab-bar {
+    display: none !important;
+  }
+  .tab {
+    padding: 2px 8px !important;
+    font-size: 12px !important;
+    min-height: 0 !important;
+  }
+
+  /* File toolbar: no filename duplicate, tiny icons only */
+  .editor-toolbar {
+    padding: 2px 6px !important;
+    gap: 4px !important;
+    min-height: 0 !important;
+  }
+  .editor-toolbar .current-file,
+  .editor-toolbar #autosave-status,
+  .editor-toolbar #save-status,
+  .editor-toolbar #lang-badge {
+    display: none !important;
+  }
+  #btn-save,
+  #btn-delete,
+  #btn-mobile-fmt {
+    min-width: 32px !important;
+    min-height: 32px !important;
+    padding: 4px 6px !important;
+    font-size: 14px !important;
+  }
+
+  /* Reading mode: drop the whole app toolbar row — content is the point */
+  body.md-layout-preview .editor-toolbar {
+    display: none !important;
+  }
+  body.md-layout-preview .tab-bar {
+    display: none !important;
+  }
+
+  /* EasyMDE status (lines/words) — pure noise on a phone in landscape */
+  .EasyMDEContainer .editor-statusbar {
+    display: none !important;
+  }
+
+  /* Formatting strip, if opened, must not eat half the height */
+  body.mobile-fmt-open .EasyMDEContainer > .editor-toolbar {
+    max-height: 28vh !important;
+  }
+
+  /* Draft banner compact */
+  .draft-banner {
+    padding: 4px 8px !important;
+    font-size: 12px !important;
+  }
+}
