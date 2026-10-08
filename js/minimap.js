@@ -6,7 +6,10 @@
 /**
  * @param {object} cm CodeMirror instance
  * @param {HTMLCanvasElement} canvasEl
- * @param {{ width?: number, colors?: object }} [opts]
+ * @param {{ width?: number, colors?: object, getPreviewEl?: () => HTMLElement|null, isPreviewActive?: () => boolean }} [opts]
+ * getPreviewEl/isPreviewActive let the map follow the visible preview pane in
+ * Preview layout, where CodeMirror itself is display:none (all its heights and
+ * scroll metrics read 0, so the map would freeze and clicks would do nothing).
  */
 export function createMinimap(cm, canvasEl, opts = {}) {
   const width = opts.width || 96;
@@ -26,8 +29,41 @@ export function createMinimap(cm, canvasEl, opts = {}) {
   let dragging = false;
   let raf = 0;
   let paintTimer = 0;
+  let boundPreview = null;
+  const ro = typeof ResizeObserver !== 'undefined'
+    ? new ResizeObserver(() => schedulePaint())
+    : null;
 
   const dpr = () => Math.min(2, window.devicePixelRatio || 1);
+
+  // In Preview layout CodeMirror is display:none (all its heights/scroll read
+  // 0) while .editor-preview-side is the visible scroller. The map then follows
+  // that pane for viewport + click-to-scroll instead of the hidden editor.
+  const getPreviewEl = typeof opts.getPreviewEl === 'function' ? opts.getPreviewEl : () => null;
+  const isPreviewActive = typeof opts.isPreviewActive === 'function' ? opts.isPreviewActive : () => false;
+  function previewEl() {
+    try {
+      const el = getPreviewEl();
+      return el && el.isConnected ? el : null;
+    } catch (_) { return null; }
+  }
+  function inPreviewMode() {
+    try { return !!isPreviewActive() && !!previewEl(); }
+    catch (_) { return false; }
+  }
+  function bindPreview() {
+    const el = previewEl();
+    if (el === boundPreview) return;
+    if (boundPreview) {
+      try { boundPreview.removeEventListener('scroll', schedulePaint); } catch (_) {}
+      try { if (ro) ro.unobserve(boundPreview); } catch (_) {}
+    }
+    boundPreview = el;
+    if (boundPreview) {
+      boundPreview.addEventListener('scroll', schedulePaint, { passive: true });
+      try { if (ro) ro.observe(boundPreview); } catch (_) {}
+    }
+  }
 
   function resizeCanvas(cssW, cssH) {
     const ratio = dpr();
@@ -96,22 +132,37 @@ export function createMinimap(cm, canvasEl, opts = {}) {
     }
     ctx.globalAlpha = 1;
 
-    // Viewport from visible lines (works with wrap + partial scrolls)
-    let first = 0;
-    let last = lineCount - 1;
-    try {
-      const scroll = cm.getScrollInfo();
-      first = cm.lineAtHeight(scroll.top, 'local');
-      last = cm.lineAtHeight(scroll.top + scroll.clientHeight, 'local');
-      if (typeof first !== 'number' || first < 0) first = 0;
-      if (typeof last !== 'number' || last < first) last = Math.min(lineCount - 1, first + 20);
-    } catch (_) {
-      first = 0;
-      last = Math.min(lineCount - 1, 30);
+    // Viewport: in Preview mode CodeMirror is hidden (its scroll metrics read
+    // 0), so derive the rectangle from the visible preview pane instead.
+    bindPreview();
+    let vpTop;
+    let vpH;
+    if (inPreviewMode()) {
+      const pv = previewEl();
+      const max = Math.max(1, pv.scrollHeight - pv.clientHeight);
+      const frac = max > 0 ? Math.max(0, Math.min(1, pv.scrollTop / max)) : 0;
+      const visFrac = pv.scrollHeight > 0
+        ? Math.max(0.02, Math.min(1, pv.clientHeight / pv.scrollHeight))
+        : 1;
+      vpH = Math.max(6 * ratio, visFrac * h);
+      vpTop = frac * Math.max(0, h - vpH);
+    } else {
+      // Viewport from visible lines (works with wrap + partial scrolls)
+      let first = 0;
+      let last = lineCount - 1;
+      try {
+        const scroll = cm.getScrollInfo();
+        first = cm.lineAtHeight(scroll.top, 'local');
+        last = cm.lineAtHeight(scroll.top + scroll.clientHeight, 'local');
+        if (typeof first !== 'number' || first < 0) first = 0;
+        if (typeof last !== 'number' || last < first) last = Math.min(lineCount - 1, first + 20);
+      } catch (_) {
+        first = 0;
+        last = Math.min(lineCount - 1, 30);
+      }
+      vpTop = (first / lineCount) * h;
+      vpH = Math.max(6 * ratio, ((last - first + 1) / lineCount) * h);
     }
-
-    const vpTop = (first / lineCount) * h;
-    const vpH = Math.max(6 * ratio, ((last - first + 1) / lineCount) * h);
 
     ctx.fillStyle = colors.viewport;
     ctx.fillRect(0, vpTop, w, vpH);
@@ -134,6 +185,26 @@ export function createMinimap(cm, canvasEl, opts = {}) {
     const y = clientY - rect.top;
     const cssH = Math.max(1, rect.height);
     const ratioY = Math.max(0, Math.min(1, y / cssH));
+    // In Preview the visible pane wins; CodeMirror is hidden and cm.scrollTo
+    // would move nothing on screen. Scroll both: the preview for display and
+    // the editor (best effort) so Source/Live land where the user pointed.
+    if (inPreviewMode()) {
+      const pv = previewEl();
+      if (pv) {
+        const max = Math.max(0, pv.scrollHeight - pv.clientHeight);
+        pv.scrollTop = ratioY * max;
+      }
+      try {
+        const lineCount = Math.max(1, cm.lineCount());
+        const line = Math.min(lineCount - 1, Math.floor(ratioY * lineCount));
+        const scroll = cm.getScrollInfo();
+        const lineTop = cm.heightAtLine(line, 'local');
+        const target = lineTop - scroll.clientHeight / 3;
+        cm.scrollTo(null, Math.max(0, target));
+      } catch (_) { /* hidden editor — preview scroll is what matters */ }
+      schedulePaint();
+      return;
+    }
     const lineCount = Math.max(1, cm.lineCount());
     const line = Math.min(lineCount - 1, Math.floor(ratioY * lineCount));
 
@@ -176,15 +247,16 @@ export function createMinimap(cm, canvasEl, opts = {}) {
   cm.on('change', schedulePaintDebounced);
   cm.on('cursorActivity', schedulePaintDebounced);
 
-  const ro = typeof ResizeObserver !== 'undefined'
-    ? new ResizeObserver(() => schedulePaint())
-    : null;
   if (ro && canvasEl.parentElement) ro.observe(canvasEl.parentElement);
+  bindPreview();
 
   schedulePaint();
 
   return {
-    refresh: schedulePaint,
+    refresh() {
+      bindPreview();
+      schedulePaint();
+    },
     destroy() {
       destroyed = true;
       cancelAnimationFrame(raf);
@@ -197,6 +269,11 @@ export function createMinimap(cm, canvasEl, opts = {}) {
       try { cm.off('viewportChange', schedulePaint); } catch (_) {}
       try { cm.off('change', schedulePaintDebounced); } catch (_) {}
       try { cm.off('cursorActivity', schedulePaintDebounced); } catch (_) {}
+      if (boundPreview) {
+        try { boundPreview.removeEventListener('scroll', schedulePaint); } catch (_) {}
+        try { if (ro) ro.unobserve(boundPreview); } catch (_) {}
+        boundPreview = null;
+      }
       if (ro) ro.disconnect();
     },
   };

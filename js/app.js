@@ -1802,7 +1802,12 @@ function destroyMinimap() {
 function ensureMinimap() {
   if (!editorHandle || !els.minimapCanvas) return;
   destroyMinimap();
-  minimapHandle = createMinimap(editorHandle.easyMDE.codemirror, els.minimapCanvas);
+  minimapHandle = createMinimap(editorHandle.easyMDE.codemirror, els.minimapCanvas, {
+    // Visible preview pane (Source/Live keep following CodeMirror instead).
+    getPreviewEl: () => document.querySelector('.editor-area .EasyMDEContainer .editor-preview-side')
+      || document.querySelector('.editor-preview-side'),
+    isPreviewActive: () => layoutMode === 'preview',
+  });
 }
 
 function setupMinimap() {
@@ -1914,6 +1919,11 @@ function applyLayoutMode(mode) {
     forceLayout();
     requestAnimationFrame(forceLayout);
   });
+  // The minimap follows CodeMirror in Source/Live but the visible preview pane
+  // in Preview (hidden editor reads 0) — re-bind on every mode switch.
+  if (minimapHandle) {
+    try { minimapHandle.refresh(); } catch (_) {}
+  }
 }
 
 function setupLayoutToggle() {
