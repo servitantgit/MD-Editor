@@ -55,10 +55,12 @@ test('in Preview mode viewport follows the preview pane scroll, not CodeMirror',
   const { createMinimap } = await import('../js/minimap.js');
   const cm = makeCm();
   const canvas = dom.window.document.getElementById('map');
+  const wrap = canvas.parentElement;
   const pv = dom.window.document.getElementById('pv');
   // jsdom has no layout: stub the scroller metrics the map reads.
   Object.defineProperty(pv, 'scrollHeight', { value: 2000, configurable: true });
   Object.defineProperty(pv, 'clientHeight', { value: 500, configurable: true });
+  Object.defineProperty(wrap, 'clientHeight', { value: 200, configurable: true });
   pv.scrollTop = 1500; // bottom
 
   const ctx = stubContext(canvas);
@@ -69,12 +71,19 @@ test('in Preview mode viewport follows the preview pane scroll, not CodeMirror',
   rafQueue.forEach((fn) => fn());
 
   const calls = ctx.__calls || [];
-  const fills = calls.filter((c) => c.m === 'fillRect');
-  // bg fill + viewport fill + cursor fill
-  assert.ok(fills.length >= 3, `expected a viewport rect, got ${JSON.stringify(fills)}`);
-  const vp = fills[1];
+  // paint order: full-width bg, then per-line bars (x > 0), then full-width
+  // viewport + cursor. Never assume fills[1] is the viewport — line bars land first.
+  const fullWidth = calls.filter((c) => c.m === 'fillRect' && c.x === 0);
+  assert.ok(
+    fullWidth.length >= 3,
+    `expected bg + viewport + cursor full-width fills, got ${JSON.stringify(fullWidth)}`
+  );
+  const vp = fullWidth[1];
   // Fully scrolled to the bottom: viewport rect must sit at the bottom of the map.
-  assert.ok(vp.y + vp.h >= canvas.height - 1, `viewport should be at bottom, got y=${vp.y} h=${vp.h} canvasH=${canvas.height}`);
+  assert.ok(
+    vp.y + vp.h >= canvas.height - 1,
+    `viewport should be at bottom, got y=${vp.y} h=${vp.h} canvasH=${canvas.height}`
+  );
 });
 
 test('in Preview mode a click scrolls the preview pane', async () => {
@@ -85,6 +94,7 @@ test('in Preview mode a click scrolls the preview pane', async () => {
   const pv = dom.window.document.getElementById('pv');
   Object.defineProperty(pv, 'scrollHeight', { value: 2000, configurable: true });
   Object.defineProperty(pv, 'clientHeight', { value: 500, configurable: true });
+  Object.defineProperty(canvas.parentElement, 'clientHeight', { value: 200, configurable: true });
   pv.scrollTop = 0;
 
   stubContext(canvas);
