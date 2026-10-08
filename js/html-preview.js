@@ -14,11 +14,16 @@ import { dirnameOf, resolveRelativePath, isExternalOrAnchor } from './paths.js';
  */
 export async function buildHtmlSrcdoc(html, currentPath, resolver) {
   const raw = String(html || '');
-  if (typeof DOMParser === 'undefined') return raw;
+  // Prefer the global constructor; in unit tests jsdom exposes it on window only.
+  const Parser = (typeof DOMParser !== 'undefined' && DOMParser)
+    || (typeof globalThis !== 'undefined' && globalThis.DOMParser)
+    || (typeof window !== 'undefined' && window.DOMParser)
+    || null;
+  if (!Parser) return raw;
 
   let doc;
   try {
-    doc = new DOMParser().parseFromString(raw, 'text/html');
+    doc = new Parser().parseFromString(raw, 'text/html');
   } catch (_) {
     return raw;
   }

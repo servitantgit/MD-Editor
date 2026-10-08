@@ -45,6 +45,8 @@ function installEnvironment(dom, { text = () => '' } = {}) {
   globalThis.requestAnimationFrame = (fn) => { fn(); return 0; };
   globalThis.document = dom.window.document;
   globalThis.window = dom.window;
+  // html-preview.js needs DOMParser to inject the height/link bridge into srcdoc
+  globalThis.DOMParser = dom.window.DOMParser;
   return { easyMDE, codemirror, inputField };
 }
 
