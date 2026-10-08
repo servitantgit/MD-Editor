@@ -479,10 +479,12 @@ test('height handshake: md-editor-frame-height sizes the HTML iframe (single pan
   // scrollbar, like markdown — no inner frame scrollbar).
   const frameWin = frame.contentWindow;
   assert.ok(frameWin, 'iframe must have a contentWindow');
-  const postHeight = (height) => {
+  // Optional second arg = MessageEvent.source. Defaults to this frame's window.
+  // A foreign/null source must be ignored by onParentMessage (contentWindow match).
+  const postHeight = (height, source = frameWin) => {
     dom.window.dispatchEvent(new dom.window.MessageEvent('message', {
       data: { type: 'md-editor-frame-height', height },
-      source: frameWin,
+      source,
     }));
   };
 
@@ -498,12 +500,17 @@ test('height handshake: md-editor-frame-height sizes the HTML iframe (single pan
   postHeight(0);
   postHeight('x');
   postHeight(-5);
-  postHeight(1e12);
+  postHeight(1e12); // above the 1e6 hard cap in onParentMessage
   assert.equal(frame.style.getPropertyValue('height'), '2400px',
     'invalid heights must not resize the frame');
-  postHeight(9999, null); // not from this frame's window
+  // Explicit foreign source — previously postHeight ignored the 2nd arg, so
+  // this still arrived as source:frameWin and legitimately set 9999px.
+  postHeight(9999, null);
   assert.equal(frame.style.getPropertyValue('height'), '2400px',
     'messages from other sources must be ignored');
+  postHeight(8888, {}); // object that is not this frame's contentWindow
+  assert.equal(frame.style.getPropertyValue('height'), '2400px',
+    'messages from non-matching sources must be ignored');
 
   handle.destroy();
 });
