@@ -19,10 +19,12 @@ Short manual pass after UI/editor changes. Automated coverage: `npm test` + `pyt
 - [ ] **Live** — source + preview side by side, preview has content
 - [ ] **Preview** — preview full width (source hidden), not empty
 - [ ] Switching layouts does not lose text or caret
+- [ ] Flip **Live ↔ Preview several times quickly**: preview stays filled every time (no alternating empty pane) and the `.html` iframe does NOT flash/reload 2-3× (content unchanged → zero reloads)
 
 ## File types
 - [ ] Open `.md` — markdown toolbar, Live/Preview render headings/lists
 - [ ] Open `.html` — Live shows iframe; relative images/CSS resolve when possible
+- [ ] `.html` in **Preview** layout: iframe content present (CodeMirror hidden there — the old jump/render paths silently targeted it)
 - [ ] Click relative `<a href="other.md">` inside **HTML** Live preview opens that file
 - [ ] Click relative link in **markdown** preview opens that file
 - [ ] Open `.js` / `.css` — source mode + code preview; md-only toolbar actions disabled
@@ -40,7 +42,10 @@ Short manual pass after UI/editor changes. Automated coverage: `npm test` + `pyt
 
 ## Find / Map / Outline
 - [ ] Find / Replace (Ctrl+F / Ctrl+H)
-- [ ] Wrap, Fold headings, Outline (jump to heading)
+- [ ] Wrap, Fold headings
+- [ ] Outline: click jumps in **Source AND Live AND Preview** — in Preview the preview pane itself must scroll (CodeMirror is hidden there)
+- [ ] Outline: jump to a heading inside a folded section unfolds it first
+- [ ] Outline refreshes while typing; active heading (above the cursor) highlighted; `#` lines inside ``` fences are NOT listed, `C#` keeps its `#`
 - [ ] **Map** minimap: full document scale, click/drag scrolls, persists preference
 
 ## Images & PDF

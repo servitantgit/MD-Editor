@@ -682,6 +682,79 @@ exception is the restore at page load, which discards paths that no longer exist
 refreshing a clean cached tab when the file changed on GitHub meanwhile (a stale sha
 surfaces as the usual 409 flow on the next commit).
 
+## HTML Live/Preview — two panes, one funnel, null protocol, no srcdoc churn
+
+Added after three stacked bugs (empty pane → alternating "renders / doesn't
+render" → 2-3× flicker on every Live/Preview switch). Read this before touching
+`previewRender`, `renderActivePreview` or `fillPreviewPane` in `js/editor.js` /
+`js/app.js`.
+
+**There are TWO preview nodes per container**: `.editor-preview-side` (the
+visible Live/Preview pane) and `.editor-preview` (EasyMDE's full-preview pane,
+still in the DOM). `renderActivePreview()` loops over BOTH in one tick. A
+global `previewRenderToken` therefore made the SECOND pane's call cancel the
+FIRST pane's deferred fill — which pane "wins" depended on call order
+(EasyMDE's `update` vs our render), so the visible pane alternated between
+filled and empty on Live/Preview switches. **State is per-pane now**:
+`htmlPaneStates` WeakMap (`{token, chain, renderedText}`) inside
+`renderHtmlPreview()` — the single funnel for all HTML rendering. `fillPreviewPane`
+(app.js) must DELEGATE to `editorHandle.renderHtmlPreview()`, never build its
+own iframe; panes are independent and must never block each other.
+
+**`previewRender` returns `null` for HTML, never `''`.** EasyMDE has three
+write sites (`sideBySideRenderingFunction`, `togglePreview`, the `value()`
+setter), all guarded by `!= null` / `!== null` — `''` PASSES those guards and
+wipes the pane. Our own callers mirror the same rule (`renderActivePreview`
+and `fillPreviewPane` skip `null` too). The async fill owns the pane for the
+whole HTML branch; nobody may `innerHTML = ''` it.
+
+**Assigning `iframe.srcdoc` is a FULL iframe navigation — a visible flash.**
+One Live/Preview click triggers a render up to THREE times (our `forceLayout`
+runs on double-rAF + EasyMDE re-renders on CodeMirror `update` from
+`cm.refresh()`), and each render used to assign srcdoc twice (raw, then
+resolved) → up to 6 reloads per click (measured by the test: "iframe reloaded
+6x"). Two guards, both required:
+
+- `state.renderedText === plainText` → **early return**, untouched srcdoc.
+  A layout switch does not change the text, so it must reload nothing.
+- compare before assigning (`iframe.srcdoc !== raw` / `!== srcdoc`) — even an
+  identical value reloads the frame.
+
+`renderedText` is stamped only AFTER the resolved srcdoc lands and only when
+the per-pane token is still current — a superseded pass must not claim the
+pane. Markdown/code panes must keep using plain `innerHTML` (no reload = no
+flicker) — routing them through the iframe path would reintroduce flashing.
+
+Covered by `test/editor.test.js`: "HTML preview fills BOTH panes on every
+render pass (no alternating starve)" and "Live/Preview switching with
+unchanged text NEVER reloads the HTML iframe (flicker)" — both verified RED
+without the fixes (starved first pane; `6 !== 0` reloads). The e2e HTML check
+(`HTML Live preview renders page content`) only proves content exists once; it
+cannot see alternation or flicker (timing), so the unit tests are the guard.
+
+## Outline (heading map) — jump to the VISIBLE scroller
+
+`js/doc-outline.js` is a pure parser (unit-tested in `test/doc-outline.test.js`):
+ATX headings with up to 3 leading spaces, skips fenced ``` / ~~~ blocks and
+indented code, does NOT strip the `#` of `C#`, skips bare `#`. Do not
+re-derive it inline in `app.js` — the original inlined regex listed `#`
+comments inside code blocks and mangled `C#`.
+
+**A jump must scroll whichever pane is actually visible.** In Preview layout
+CodeMirror is `display:none`, so `setCursor` / `scrollIntoView` / `focus()`
+all silently do nothing on screen (that was the original "click highlights but
+nothing happens" bug). `jumpToOutlineHeading()` in `app.js` scrolls CodeMirror
+AND the `.editor-preview-side` pane (Nth rendered heading by outline index,
+fractional `scrollTop` as fallback), unfolds a folded section first via
+`editorHandle.unfoldAtLine(line)` (otherwise the cursor lands inside hidden
+collapsed text), and skips `cm.focus()` while `layoutMode === 'preview'`.
+
+The panel refreshes via a debounced `scheduleOutlineRefresh()` hooked to the
+editor's `onChange` (the old `document keydown` listener was dead code —
+removed) and highlights the nearest heading above the cursor via
+`cursorActivity` (`markActiveOutlineItem` / `.outline-item.active`). Keep both
+when reworking the panel.
+
 ## General rule before considering a task done
 
 Here CI broke twice in a row right after merge (first `npm ci`, then a
@@ -691,7 +764,10 @@ insignificant relative to the main task. Before push:
 1. `npm ci && npm test` — from scratch, without leftovers of the old `node_modules`.
 2. If `index.html` / `js/app.js` / anything in login was changed — run
    `e2e_smoke_test.py` locally (`node serve.mjs &` then
-   `python3 e2e_smoke_test.py`), not just relying on CI.
+   `python3 e2e_smoke_test.py`), not just relying on CI. On Windows, redirecting
+   its output to a file (`python e2e_smoke_test.py > out.txt`) dies with
+   `UnicodeEncodeError: 'charmap' codec can't encode '✓'` — the cp1250 console
+   cannot hold the checkmarks. Set `$env:PYTHONIOENCODING='utf-8'` first.
 3. If the deploy infrastructure was changed — first check which Cloudflare product
    actually serves the live domain, and only then write code for it.
 4. Remember what the local checks *cannot* see: `e2e_smoke_test.py` mocks
@@ -708,3 +784,12 @@ insignificant relative to the main task. Before push:
    `position: fixed; left: -99999px` back on `#pdf-export-container`, drop the
    `clampImagesToPage()` call, set `IDLE_MS` to 0, remove the silent 409 retry).
    The 409 scenario once only printed a ✓ without asserting anything.
+   `git stash push -- <files>` is the quickest way to get the "before" state for
+   a red run (remember to `git stash pop`; an interrupted git can leave
+   `.git/index.lock` behind — delete it before retrying).
+7. When INSERTING a new test into an existing `test/*.test.js`, make sure the
+   previous test's closing `});` really precedes it. An insert slipped one line
+   too early nests the new test inside the previous test's callback — both then
+   report as failed (the parent fails with its child), which reads like a second,
+   unrelated regression. After editing test files, eyeball the `test(...)` /
+   `});` pairing or run the file alone: `node --test test/<file>.test.js`.
