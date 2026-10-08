@@ -216,3 +216,111 @@ test('showDoc() swaps the document, refreshes layout, and re-renders the Preview
   handle.destroy();
 });
 
+test('HTML preview fills BOTH panes on every render pass (no alternating starve)', async () => {
+  const dom = new JSDOM('<!doctype html><body></body>');
+  const { easyMDE, codemirror } = installEnvironment(dom);
+
+  // Real EasyMDE layout: .CodeMirror wrapper + TWO preview nodes under
+  // .EasyMDEContainer — .editor-preview-side (Live/Preview visible pane) and
+  // .editor-preview (full-preview pane). renderActivePreview loops over BOTH
+  // in one tick; a global render token used to let only the LAST pane win and
+  // starve the first one — the "renders once, then not, then renders again"
+  // cycle on Live/Preview switches.
+  const container = dom.window.document.createElement('div');
+  container.className = 'EasyMDEContainer';
+  const cmWrap = dom.window.document.createElement('div');
+  cmWrap.className = 'CodeMirror';
+  const sidePane = dom.window.document.createElement('div');
+  sidePane.className = 'editor-preview-side';
+  const fullPane = dom.window.document.createElement('div');
+  fullPane.className = 'editor-preview';
+  container.appendChild(cmWrap);
+  container.appendChild(sidePane);
+  container.appendChild(fullPane);
+  dom.window.document.body.appendChild(container);
+  codemirror.getWrapperElement = () => cmWrap;
+
+  const htmlDoc = '<h1>Hello HTML</h1><p>HTML_PAGE_OK</p>';
+  easyMDE.isSideBySideActive = () => true;
+  easyMDE.isPreviewActive = () => false;
+  easyMDE.value = () => htmlDoc;
+  // renderActivePreview calls easyMDE.options.previewRender — capture the real
+  // options object createEditor passes to `new EasyMDE(...)` (the fake
+  // constructor ignores it by default) and replay it onto the fake.
+  easyMDE.options = {};
+  let capturedPreviewRender = null;
+  const origEasyMDE = globalThis.EasyMDE;
+  globalThis.EasyMDE = function (opts) {
+    capturedPreviewRender = opts && opts.previewRender;
+    return origEasyMDE();
+  };
+
+  const { createEditor } = await import('../js/editor.js');
+  const handle = createEditor(dom.window.document.createElement('textarea'), {
+    marked: {},
+    imageResolver: { resolve: async () => '' },
+    getCurrentPath: () => 'Notes/page.html',
+    onImageUploadRequest: () => {},
+    onImagePaste: () => {},
+  });
+  // Point the fake at the real previewRender built inside createEditor.
+  easyMDE.options.previewRender = capturedPreviewRender;
+  globalThis.EasyMDE = origEasyMDE;
+  assert.equal(typeof easyMDE.options.previewRender, 'function', 'harness must capture the real previewRender');
+
+  const settle = async () => {
+    // previewRender defers the iframe to the next tick; buildHtmlSrcdoc's
+    // .then lands a tick or two later.
+    await new Promise((r) => setTimeout(r, 0));
+    await new Promise((r) => setTimeout(r, 0));
+    await new Promise((r) => setTimeout(r, 20));
+  };
+  const srcdocOf = (pane) => {
+    const f = pane.querySelector('iframe.html-preview-frame');
+    return f ? (f.srcdoc || '') : null;
+  };
+
+  // One production render pass: EasyMDE calls previewRender for EVERY pane in
+  // the same tick (renderActivePreview / sideBySideRenderingFunction), then
+  // (for HTML) our async funnel fills the iframes.
+  const renderPass = async () => {
+    handle.renderActivePreview();
+    await settle();
+  };
+
+  // Pass 1: both panes start empty and must BOTH end up holding the page.
+  await renderPass();
+  assert.ok((srcdocOf(sidePane) || '').includes('HTML_PAGE_OK'),
+    'visible side pane is empty after the first render (token starve)');
+  assert.ok((srcdocOf(fullPane) || '').includes('HTML_PAGE_OK'),
+    'full preview pane is empty after the first render');
+
+  // Pass 2: the alternating bug showed on the SECOND switch — re-render must
+  // keep both panes alive, not leave one behind.
+  await renderPass();
+  assert.ok((srcdocOf(sidePane) || '').includes('HTML_PAGE_OK'),
+    'side pane went empty on the second render pass (the alternating bug)');
+  assert.ok((srcdocOf(fullPane) || '').includes('HTML_PAGE_OK'),
+    'full pane went empty on the second render pass');
+
+  // Hammer: five rapid passes, as when flipping Live/Preview quickly.
+  for (let i = 0; i < 5; i++) await renderPass();
+  assert.ok((srcdocOf(sidePane) || '').includes('HTML_PAGE_OK'),
+    'side pane lost content after rapid Live/Preview flips');
+  assert.ok((srcdocOf(fullPane) || '').includes('HTML_PAGE_OK'),
+    'full pane lost content after rapid Live/Preview flips');
+
+  // EasyMDE's own single-pane update path (sideBySideRenderingFunction) does
+  // preview.innerHTML = return directly — for HTML the return must be null so
+  // the wipe is SKIPPED. Simulate the exact EasyMDE line:
+  //   var newValue = previewRender(...); if (newValue != null) preview.innerHTML = newValue;
+  const ret = easyMDE.options.previewRender(htmlDoc, sidePane);
+  if (ret != null) sidePane.innerHTML = ret; // EasyMDE's own write, verbatim
+  await settle();
+  assert.ok((srcdocOf(sidePane) || '').includes('HTML_PAGE_OK'),
+    'EasyMDE-style write must not wipe the HTML pane (previewRender must return null for HTML)');
+
+  handle.destroy();
+});
+
+

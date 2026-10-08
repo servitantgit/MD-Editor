@@ -17,6 +17,14 @@ import { buildHtmlSrcdoc } from './html-preview.js';
  */
 export function createEditor(textareaEl, deps) {
   let previewRenderToken = 0;
+  // Per-PANE HTML preview state. EasyMDE's container always holds TWO preview
+  // nodes (.editor-preview-side and .editor-preview), and renderActivePreview
+  // loops over both: a GLOBAL token would make the second pane's call starve
+  // the first one's deferred fill ("renders, then doesn't, then renders" —
+  // the alternating bug on Live/Preview switches). Each pane gets its own
+  // latest-wins token + serial fill chain; panes never block each other.
+  // Keyed by element → collected with the pane itself (no cleanup needed).
+  const htmlPaneStates = new WeakMap();
   let inlineImageGeneration = 0;
   let inlineImageMarks = [];
   let inlineImageTimer = null;
@@ -61,34 +69,27 @@ export function createEditor(textareaEl, deps) {
       const kind = kindFromPath(path || '');
 
       // HTML: sandboxed iframe (filled after EasyMDE writes our return value).
-      // The iframe is created ASYNC (next tick) while the sync return ('') is
-      // applied by the caller immediately — so every caller must skip the
-      // `innerHTML = ''` wipe for this branch (see renderActivePreview) and
-      // every creator must reuse an existing iframe instead of wiping the pane
-      // (fillPreviewPane in app.js does the same thing in parallel).
+      // Single funnel renderHtmlPreview (below): all parallel triggers queue
+      // instead of racing, and the async fill re-attaches the iframe if a
+      // stale caller wiped the pane in between. Return null — NOT '' — so
+      // EasyMDE's own `if (newValue != null) preview.innerHTML = newValue`
+      // and value()'s `!== null` write both skip the pane for this branch.
       if (kind.preview === 'html') {
+        // Capture the pane now: toggleSideBySide replaces the preview element
+        // on mode switches, and a stale setTimeout closure must not render
+        // into the detached node.
+        const paneNow = previewEl;
+        const textNow = plainText;
+        // NO global token guard here: renderActivePreview calls this for EVERY
+        // pane in the same tick, and the global token would always cancel all
+        // but the last pane (the alternating bug). Staleness is handled per
+        // pane inside renderHtmlPreview (latest-wins); timeouts run FIFO, so
+        // for one pane the newest text lands last.
         setTimeout(() => {
-          if (myToken !== previewRenderToken || !previewEl || !previewEl.isConnected) return;
-          let iframe = previewEl.querySelector('iframe.html-preview-frame');
-          if (!iframe) {
-            previewEl.innerHTML = '';
-            iframe = document.createElement('iframe');
-            iframe.className = 'html-preview-frame';
-            iframe.setAttribute('sandbox', 'allow-scripts allow-forms allow-modals');
-            iframe.setAttribute('title', 'HTML preview');
-            previewEl.appendChild(iframe);
-          }
-          iframe.srcdoc = plainText || '<!-- empty -->';
-          // Resolve relative assets after EasyMDE writes our empty return
-          const path = deps.getCurrentPath ? deps.getCurrentPath() : null;
-          buildHtmlSrcdoc(plainText || '', path, deps.imageResolver)
-            .then((srcdoc) => {
-              if (myToken !== previewRenderToken || !iframe.isConnected) return;
-              iframe.srcdoc = srcdoc;
-            })
-            .catch((e) => { console.error('HTML preview resolve failed:', e); /* keep raw srcdoc */ });
+          if (!paneNow || !paneNow.isConnected) return;
+          renderHtmlPreview(paneNow, textNow);
         }, 0);
-        return '';
+        return null;
       }
 
       // Code / plain text: highlighted read-only view
@@ -182,7 +183,56 @@ export function createEditor(textareaEl, deps) {
     if (myToken === previewRenderToken) wirePreviewLinks(previewEl);
   }
 
-  /** Click relative .md/.html links in the preview pane to open that file. */
+  /**
+   * The single funnel for HTML side-by-side rendering. previewRender AND
+   * fillPreviewPane both delegate here, so parallel triggers (EasyMDE 'update'
+   * + our forceLayout on layout switches) queue instead of racing: every pass
+   * reuses the live iframe and refreshes its srcdoc, none wipes the pane.
+   * Returns a promise resolving to the srcdoc (or null when superseded).
+   */
+  function renderHtmlPreview(previewEl, plainText, { syncSrcdoc = true } = {}) {
+    if (!previewEl) return Promise.resolve(null);
+    let state = htmlPaneStates.get(previewEl);
+    if (!state) {
+      state = { token: 0, chain: Promise.resolve() };
+      htmlPaneStates.set(previewEl, state);
+    }
+    const myToken = ++state.token; // per-pane, not global: panes are independent
+    const run = (async () => {
+      if (!previewEl || !previewEl.isConnected) return null;
+      let iframe = previewEl.querySelector('iframe.html-preview-frame');
+      if (!iframe || !iframe.isConnected) {
+        previewEl.innerHTML = '';
+        iframe = document.createElement('iframe');
+        iframe.className = 'html-preview-frame';
+        iframe.setAttribute('sandbox', 'allow-scripts allow-forms allow-modals');
+        iframe.setAttribute('title', 'HTML preview');
+        previewEl.appendChild(iframe);
+      }
+      if (syncSrcdoc) iframe.srcdoc = plainText || '<!-- empty -->';
+      const path = deps.getCurrentPath ? deps.getCurrentPath() : null;
+      let srcdoc;
+      try {
+        srcdoc = await buildHtmlSrcdoc(plainText || '', path, deps.imageResolver);
+      } catch (e) {
+        console.error('HTML preview resolve failed:', e);
+        return myToken === state.token ? (iframe.srcdoc || null) : null;
+      }
+      // A newer pass for THIS pane queued meanwhile — it owns the pane now.
+      if (myToken !== state.token) return null;
+      if (!iframe.isConnected || !previewEl.isConnected) return null;
+      // The pane may have been wiped by a stale caller in between (EasyMDE's
+      // own `preview.innerHTML = newValue`); re-attach instead of dropping.
+      if (iframe.parentElement !== previewEl) previewEl.appendChild(iframe);
+      iframe.srcdoc = srcdoc;
+      return srcdoc;
+    })();
+    // Chain after the previous pass FOR THIS PANE so fills of one pane never
+    // interleave; other panes run in parallel. A rejection must not poison
+    // the chain for the next pass.
+    state.chain = state.chain.then(() => run, () => run);
+    return run;
+  }
   function wirePreviewLinks(previewEl) {
     if (!previewEl || previewEl.dataset.linkNav === '1') return;
     previewEl.dataset.linkNav = '1';
@@ -503,11 +553,9 @@ export function createEditor(textareaEl, deps) {
     const isHtmlPreview = kindFromPath(deps.getCurrentPath ? deps.getCurrentPath() : '' || '').preview === 'html';
     for (const preview of list) {
       const html = easyMDE.options.previewRender(plain, preview);
-      // HTML branch fills the pane ASYNC (iframe on next tick) and returns ''
-      // as a placeholder — a sync innerHTML wipe here would erase the iframe
-      // that fillPreviewPane/previewRender just created. Skip it; the async
-      // step owns the pane for HTML.
-      if (html === '' && isHtmlPreview) {
+      // HTML returns null (async funnel renderHtmlPreview owns the pane) —
+      // skip every sync wipe here unconditionally: null is the protocol.
+      if (html === null || (html === '' && isHtmlPreview)) {
         preview.scrollTop = 0;
         continue;
       }
@@ -779,6 +827,7 @@ export function createEditor(textareaEl, deps) {
     getDoc,
     showDoc,
     renderActivePreview,
+    renderHtmlPreview,
     setLanguage,
     setToolbarForKind,
     findInFile,

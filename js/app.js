@@ -1609,26 +1609,31 @@ function fillPreviewPane(node, plain, kind) {
   if (!node) return;
   const preview = kind && kind.preview ? kind.preview : 'markdown';
   if (preview === 'html') {
-    // Same rule as previewRender in editor.js: never wipe a live iframe —
-    // the pane may already hold one from the parallel previewRender path
-    // (both run on layout switches). Reuse it, only create when absent.
-    let iframe = node.querySelector('iframe.html-preview-frame');
-    if (!iframe) {
-      node.innerHTML = '';
-      iframe = document.createElement('iframe');
-      iframe.className = 'html-preview-frame';
-      iframe.setAttribute('sandbox', 'allow-scripts allow-forms allow-modals');
-      iframe.setAttribute('title', 'HTML preview');
-      node.appendChild(iframe);
+    // Single funnel: delegate to the editor's serial HTML renderer instead of
+    // building a second iframe here. Parallel triggers (EasyMDE 'update' +
+    // forceLayout) queue there; none wipes the pane, so no through-one blanks.
+    if (editorHandle && typeof editorHandle.renderHtmlPreview === 'function') {
+      editorHandle.renderHtmlPreview(node, plain);
+    } else {
+      // Fallback for tests / early init before the editor handle exists.
+      let iframe = node.querySelector('iframe.html-preview-frame');
+      if (!iframe) {
+        node.innerHTML = '';
+        iframe = document.createElement('iframe');
+        iframe.className = 'html-preview-frame';
+        iframe.setAttribute('sandbox', 'allow-scripts allow-forms allow-modals');
+        iframe.setAttribute('title', 'HTML preview');
+        node.appendChild(iframe);
+      }
+      iframe.srcdoc = plain || '<!-- empty -->';
+      const path = state.currentPath;
+      const resolver = imageResolver;
+      buildHtmlSrcdoc(plain || '', path, resolver)
+        .then((srcdoc) => {
+          if (iframe.isConnected) iframe.srcdoc = srcdoc;
+        })
+        .catch((e) => { console.error('HTML preview resolve failed:', e); });
     }
-    iframe.srcdoc = plain || '<!-- empty -->';
-    const path = state.currentPath;
-    const resolver = imageResolver;
-    buildHtmlSrcdoc(plain || '', path, resolver)
-      .then((srcdoc) => {
-        if (iframe.isConnected) iframe.srcdoc = srcdoc;
-      })
-      .catch((e) => { console.error('HTML preview resolve failed:', e); });
     return;
   }
   if (preview === 'code') {
@@ -1645,8 +1650,12 @@ function fillPreviewPane(node, plain, kind) {
     return;
   }
   // markdown (default)
+  // NOTE: previewRender returns null for HTML (async funnel owns the pane),
+  // EasyMDE itself skips `innerHTML` on null — we must do the same here, or
+  // our own wipe reintroduces the through-one blank from the other direction.
   if (editorHandle && editorHandle.easyMDE && editorHandle.easyMDE.options.previewRender) {
     const html = editorHandle.easyMDE.options.previewRender(plain, node);
+    if (html === null) return;
     if (html != null) node.innerHTML = html;
   }
 }
