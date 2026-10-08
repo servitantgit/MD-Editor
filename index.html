@@ -2,7 +2,14 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#161b22" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="MD Editor" />
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png" />
+  <link rel="apple-touch-icon" href="icon-192.png" />
   <title>MD Editor — GitHub workspace</title>
 
   <!-- EasyMDE (CodeMirror-based editor) -->
@@ -321,7 +328,7 @@
         <button class="secondary desktop-tool" id="btn-fold" title="Fold / unfold markdown headings">Fold</button>
         <button class="secondary desktop-tool" id="btn-outline" title="Document outline (headings)">Outline</button>
         <button class="secondary desktop-tool" id="btn-minimap" title="Document minimap">Map</button>
-        <button id="btn-save" disabled title="Save: push only this file to GitHub now (single-file). Idle autosave does the same after ~10s.">
+        <button id="btn-save" disabled title="Save now (desktop). On phone: autosave runs on idle; status dot shows sync state.">
           <i class="fa-solid fa-floppy-disk" aria-hidden="true"></i><span class="btn-lbl"> Save</span>
         </button>
         <!-- Autosave status, owned by js/autosave.js. Kept separate from

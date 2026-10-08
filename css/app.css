@@ -2274,3 +2274,109 @@ body.md-layout-source .editor-preview-active-side {
     font-size: 12px !important;
   }
 }
+
+
+/* ===== Mobile read + status + safe areas (items 1 & 3) ===== */
+@supports (padding: env(safe-area-inset-top)) {
+  @media (max-width: 768px), ((orientation: landscape) and (max-height: 560px)) {
+    header#app-header {
+      padding-top: max(8px, env(safe-area-inset-top));
+      padding-left: max(10px, env(safe-area-inset-left));
+      padding-right: max(10px, env(safe-area-inset-right));
+    }
+  }
+}
+
+@media (max-width: 768px), ((orientation: landscape) and (max-height: 560px)) {
+  /* 3: Save button → status dot. Force-save still available when Aa is open. */
+  #btn-save {
+    display: none !important;
+  }
+  body.mobile-fmt-open #btn-save {
+    display: inline-flex !important;
+  }
+  #autosave-status {
+    display: inline-block;
+    width: 12px;
+    height: 12px;
+    min-width: 12px;
+    border-radius: 50%;
+    padding: 0 !important;
+    margin: 0 4px;
+    overflow: hidden;
+    color: transparent !important;
+    font-size: 0 !important;
+    line-height: 0 !important;
+    border: 2px solid #30363d;
+    background: #30363d;
+    flex-shrink: 0;
+    vertical-align: middle;
+  }
+  #autosave-status.unsaved {
+    background: #d29922;
+    border-color: #d29922;
+  }
+  #autosave-status.drafted {
+    background: #8b949e;
+    border-color: #8b949e;
+  }
+  #autosave-status.saving {
+    background: #58a6ff;
+    border-color: #58a6ff;
+    animation: sync-pulse 1s ease-in-out infinite;
+  }
+  #autosave-status.ok {
+    background: #3fb950;
+    border-color: #3fb950;
+  }
+  #autosave-status.err {
+    background: #f85149;
+    border-color: #f85149;
+  }
+  @keyframes sync-pulse {
+    50% { opacity: 0.45; }
+  }
+
+  /* 1: Preview = full-bleed reading surface */
+  body.md-layout-preview #app-header {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 25;
+    background: linear-gradient(to bottom, rgba(15, 17, 21, 0.92), rgba(15, 17, 21, 0));
+    border-bottom: none;
+    pointer-events: none;
+  }
+  body.md-layout-preview #app-header > * {
+    pointer-events: auto;
+  }
+  body.md-layout-preview #app-header h1,
+  body.md-layout-preview #btn-logout,
+  body.md-layout-preview .editor-toolbar,
+  body.md-layout-preview .tab-bar,
+  body.md-layout-preview .EasyMDEContainer .editor-statusbar {
+    display: none !important;
+  }
+  body.md-layout-preview .editor-area,
+  body.md-layout-preview #editor-container,
+  body.md-layout-preview .EasyMDEContainer {
+    min-height: 0 !important;
+  }
+  body.md-layout-preview .editor-preview-side,
+  body.md-layout-preview .editor-preview {
+    padding: 48px 16px 24px !important;
+    -webkit-overflow-scrolling: touch;
+  }
+  /* Subtle hint that the surface is tappable to edit */
+  body.md-layout-preview .editor-area::after {
+    content: none;
+  }
+}
+
+@media (orientation: landscape) and (max-height: 560px) {
+  body.md-layout-preview .editor-preview-side,
+  body.md-layout-preview .editor-preview {
+    padding: 36px 20px 12px !important;
+  }
+}

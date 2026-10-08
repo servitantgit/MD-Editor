@@ -1963,6 +1963,32 @@ function setMobileSidebarOpen(open) {
     els.btnMobileFiles.setAttribute('aria-expanded', open ? 'true' : 'false');
   }
 }
+
+/** Read mode: tap the preview canvas (not a link) → jump to Source to edit. */
+function setupMobilePreviewTap() {
+  if (document.documentElement.dataset.mobilePreviewTap) return;
+  document.documentElement.dataset.mobilePreviewTap = '1';
+  document.addEventListener('click', (e) => {
+    try {
+      if (!isMobileShell()) return;
+      if (layoutMode !== 'preview') return;
+      // Keep real navigation / controls working.
+      if (e.target.closest('a, button, input, textarea, select, label, .sidebar, header, .editor-toolbar, #find-bar, #draft-banner')) return;
+      const pane = e.target.closest('.editor-preview-side, .editor-preview, .editor-preview-active-side');
+      if (!pane) return;
+      e.preventDefault();
+      applyLayoutMode('source');
+      requestAnimationFrame(() => {
+        try {
+          if (editorHandle && editorHandle.easyMDE) {
+            editorHandle.easyMDE.codemirror.focus();
+          }
+        } catch (_) {}
+      });
+    } catch (_) { /* ignore */ }
+  }, true);
+}
+
 function setupMobileShell() {
   if (els.btnMobileFiles) {
     els.btnMobileFiles.addEventListener('click', () => {
@@ -2024,6 +2050,18 @@ function setupMobileShell() {
     window.visualViewport.addEventListener('resize', syncViewport);
   }
   syncViewport();
+  setupMobilePreviewTap();
+  if (els.autosaveStatus && !els.autosaveStatus.dataset.forceSaveBound) {
+    els.autosaveStatus.dataset.forceSaveBound = '1';
+    els.autosaveStatus.title = 'Sync status — tap to save now';
+    els.autosaveStatus.style.cursor = 'pointer';
+    els.autosaveStatus.addEventListener('click', () => {
+      try {
+        if (autosave && typeof autosave.saveNow === 'function') autosave.saveNow();
+        else if (els.btnSave && !els.btnSave.disabled) els.btnSave.click();
+      } catch (_) {}
+    });
+  }
 }
 
 function setupDocOutline() {
