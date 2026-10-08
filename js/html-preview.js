@@ -75,6 +75,15 @@ export async function buildHtmlSrcdoc(html, currentPath, resolver) {
     doc.head.insertBefore(meta, doc.head.firstChild);
   }
 
+  // The bridge must run when the frame is parsed. A document without a <body>
+  // (e.g. a freshly built, empty srcdoc — plain === '') has no place for the
+  // script, so give it a body first. Without this, the frame posts nothing
+  // and the preview pane keeps the old frame height (an extra scrollbar).
+  if (!doc.body) {
+    const body = doc.createElement('body');
+    doc.documentElement.appendChild(body);
+  }
+
   // Bridge: clicks on data-md-path links ask the parent to open that path,
   // and the frame reports its own document height — the parent cannot measure
   // it (sandbox without allow-same-origin = opaque origin), yet the preview
@@ -97,8 +106,12 @@ export async function buildHtmlSrcdoc(html, currentPath, resolver) {
     'window.addEventListener("load",__mdPostHeight);',
     '__mdPostHeight();',
   ].join('');
-  if (doc.body) doc.body.appendChild(bridge);
-  else doc.documentElement.appendChild(bridge);
+
+  // Attach the bridge where the frame will actually parse it: right after the
+  // <head> if present, otherwise into the <body> (created above if missing).
+  const head = doc.querySelector('head');
+  if (head) head.appendChild(bridge);
+  else doc.body.appendChild(bridge);
 
   return '<!DOCTYPE html>\n' + doc.documentElement.outerHTML;
 }
