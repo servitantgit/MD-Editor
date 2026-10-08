@@ -260,25 +260,27 @@
 
   <!-- ===== MAIN APP ===== -->
   <header class="hidden" id="app-header">
+    <button type="button" class="secondary mobile-only" id="btn-mobile-files" title="Files &amp; search" aria-label="Open file list">☰</button>
     <h1>MD Editor</h1>
     <span id="repo-label" style="color:var(--muted);font-size:13px"></span>
-    <span class="branch-pill" id="branch-pill" title="Current branch"><i class="fa-solid fa-code-branch"></i> <span id="branch-label">main</span></span>
-    <a class="repo-link" href="https://github.com/servitantgit/MD-Editor" target="_blank" rel="noopener noreferrer" title="MD Editor on GitHub — source, issues, releases">
+    <span class="branch-pill desktop-only" id="branch-pill" title="Current branch"><i class="fa-solid fa-code-branch"></i> <span id="branch-label">main</span></span>
+    <a class="repo-link desktop-only" href="https://github.com/servitantgit/MD-Editor" target="_blank" rel="noopener noreferrer" title="MD Editor on GitHub — source, issues, releases">
       <i class="fa-brands fa-github"></i>
     </a>
     <div class="layout-toggle" id="layout-toggle" title="Editor layout">
-      <button class="secondary layout-btn active" data-mode="source" title="Source only">Source</button>
-      <button class="secondary layout-btn" data-mode="split" title="Hybrid live: source + preview">Live</button>
-      <button class="secondary layout-btn" data-mode="preview" title="Preview only">Preview</button>
+      <button class="secondary layout-btn active" data-mode="source" title="Source only — edit">Source</button>
+      <button class="secondary layout-btn desktop-only" data-mode="split" title="Hybrid live: source + preview">Live</button>
+      <button class="secondary layout-btn" data-mode="preview" title="Preview only — read">Preview</button>
     </div>
-    <button class="secondary" id="btn-history" title="History: recent commits (drawer from the right). Click again to close.">History</button>
-    <button id="btn-commit" title="Commit: package all local changes into one Git commit (drawer). Click again to close." disabled>Commit <span id="commit-badge" class="changes-badge hidden">0</span></button>
-    <button class="secondary" id="btn-refresh" title="Refresh tree">↻</button>
-    <button class="secondary" id="btn-logout">Sign out</button>
+    <button class="secondary desktop-only" id="btn-history" title="History: recent commits (drawer from the right). Click again to close.">History</button>
+    <button class="desktop-only" id="btn-commit" title="Commit: package all local changes into one Git commit (drawer). Click again to close." disabled>Commit <span id="commit-badge" class="changes-badge hidden">0</span></button>
+    <button class="secondary desktop-only" id="btn-refresh" title="Refresh tree">↻</button>
+    <button class="secondary" id="btn-logout" title="Sign out">Sign out</button>
   </header>
 
   <div class="main hidden" id="app-main">
-    <div class="sidebar">
+    <div id="sidebar-backdrop" class="sidebar-backdrop hidden" aria-hidden="true"></div>
+    <div class="sidebar" id="app-sidebar">
       <div class="sidebar-header">
         <div class="sidebar-path-block" title="Target folder for New file / New folder">
           <span class="sidebar-path-label">Files</span>

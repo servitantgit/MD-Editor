@@ -109,6 +109,9 @@ const els = {
   draftReload: document.getElementById('draft-reload'),
   draftOverwrite: document.getElementById('draft-overwrite'),
 
+  btnMobileFiles: document.getElementById('btn-mobile-files'),
+  sidebarBackdrop: document.getElementById('sidebar-backdrop'),
+  appSidebar: document.getElementById('app-sidebar'),
   editorContainer: document.getElementById('editor-container'),
   editorTextarea: document.getElementById('editor'),
   dropOverlay: document.getElementById('editor-dropzone-overlay'),
@@ -604,6 +607,7 @@ function showApp(owner, repo) {
   setupLayoutToggle();
   setupFindBar();
   setupDocOutline();
+  setupMobileShell();
   setupMinimap();
   if (els.minimapWrap && !els.minimapWrap.classList.contains('hidden')) {
     ensureMinimap();
@@ -1040,6 +1044,7 @@ async function openFile(path, { reload = false } = {}) {
     editorHandle.easyMDE.codemirror.focus();
     // Tabs restore / second click must still surface a pending local draft
     void resurfaceDraftBanner(path);
+    if (isMobileShell()) setMobileSidebarOpen(false);
     return;
   }
 
@@ -1102,6 +1107,7 @@ async function openFile(path, { reload = false } = {}) {
     hideDraftBanner();
     setAutosaveStatus(null);
     state.currentPath = path;
+    if (isMobileShell()) setMobileSidebarOpen(false);
     state.currentSha = sha;
     ensureAutosave();
     try { await draftStoreReady; } catch (_) { /* degraded store */ }
@@ -1931,6 +1937,41 @@ function setupMinimap() {
     } else {
       destroyMinimap();
       if (editorHandle) editorHandle.refreshLayout();
+    }
+  });
+}
+
+
+/** Phone shell: files drawer + close after open. Desktop unchanged. */
+function isMobileShell() {
+  try {
+    return window.matchMedia && window.matchMedia('(max-width: 768px)').matches;
+  } catch (_) {
+    return false;
+  }
+}
+function setMobileSidebarOpen(open) {
+  document.body.classList.toggle('mobile-sidebar-open', !!open);
+  if (els.sidebarBackdrop) {
+    els.sidebarBackdrop.classList.toggle('hidden', !open);
+    els.sidebarBackdrop.setAttribute('aria-hidden', open ? 'false' : 'true');
+  }
+  if (els.btnMobileFiles) {
+    els.btnMobileFiles.setAttribute('aria-expanded', open ? 'true' : 'false');
+  }
+}
+function setupMobileShell() {
+  if (!els.btnMobileFiles) return;
+  els.btnMobileFiles.addEventListener('click', () => {
+    setMobileSidebarOpen(!document.body.classList.contains('mobile-sidebar-open'));
+  });
+  if (els.sidebarBackdrop) {
+    els.sidebarBackdrop.addEventListener('click', () => setMobileSidebarOpen(false));
+  }
+  // Escape closes the drawer
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && document.body.classList.contains('mobile-sidebar-open')) {
+      setMobileSidebarOpen(false);
     }
   });
 }

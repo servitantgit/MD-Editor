@@ -1962,3 +1962,151 @@ body.md-layout-source .editor-preview-active-side {
   border-color: #58a6ff;
   color: #58a6ff;
 }
+
+
+/* ===== Mobile shell: read + quick edit (≤768px) =====
+   Desktop keeps full chrome. Phone: files drawer, Source/Preview, Save. */
+.mobile-only { display: none !important; }
+
+@media (max-width: 768px) {
+  .mobile-only { display: inline-flex !important; }
+  .desktop-only { display: none !important; }
+
+  header#app-header {
+    padding: 8px 10px;
+    gap: 8px;
+    flex-wrap: nowrap;
+  }
+  header#app-header h1 {
+    font-size: 14px;
+    margin-right: 0;
+    flex: 0 1 auto;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 28vw;
+  }
+  #repo-label {
+    display: none !important;
+  }
+  #btn-mobile-files {
+    flex-shrink: 0;
+    min-width: 40px;
+    min-height: 40px;
+    padding: 8px 10px;
+    font-size: 18px;
+    line-height: 1;
+  }
+  .layout-toggle {
+    margin-left: auto;
+    flex-shrink: 0;
+  }
+  .layout-toggle .layout-btn {
+    min-height: 36px;
+    padding: 6px 10px;
+  }
+  #btn-logout {
+    min-height: 36px;
+    padding: 6px 8px;
+    font-size: 12px;
+  }
+
+  /* Files as overlay drawer */
+  .main {
+    position: relative;
+  }
+  .sidebar-backdrop {
+    display: none;
+    position: absolute;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.55);
+    z-index: 40;
+  }
+  .sidebar-backdrop:not(.hidden) {
+    display: block;
+  }
+  .sidebar {
+    position: absolute;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    width: min(88vw, 320px);
+    z-index: 50;
+    transform: translateX(-105%);
+    transition: transform 0.2s ease;
+    box-shadow: none;
+    border-right: 1px solid var(--border);
+  }
+  body.mobile-sidebar-open .sidebar {
+    transform: translateX(0);
+    box-shadow: 8px 0 24px rgba(0, 0, 0, 0.45);
+  }
+
+  /* Editor fills the width */
+  .content {
+    width: 100%;
+    min-width: 0;
+  }
+
+  /* Live on phone ≈ Source (full width edit) */
+  .editor-area.mode-split .EasyMDEContainer.sided--no-fullscreen .editor-preview-side {
+    display: none !important;
+  }
+  .editor-area.mode-split .EasyMDEContainer.sided--no-fullscreen .CodeMirror,
+  .editor-area.mode-split .EasyMDEContainer.sided--no-fullscreen .CodeMirror-sided {
+    width: 100% !important;
+    max-width: 100% !important;
+    border-right: none !important;
+  }
+
+  /* Hide desktop-power tools on the file toolbar */
+  #btn-fold,
+  #btn-outline,
+  #btn-minimap,
+  #btn-export-pdf,
+  #lang-badge {
+    display: none !important;
+  }
+  #minimap-wrap,
+  #doc-outline {
+    display: none !important;
+  }
+
+  /* Easier touch on primary actions */
+  #btn-save,
+  #btn-delete {
+    min-height: 40px;
+    padding: 8px 14px;
+  }
+  .editor-toolbar {
+    gap: 6px;
+    padding: 8px 10px;
+  }
+  .current-file {
+    font-size: 12px;
+    max-width: 40vw;
+  }
+
+  /* Tabs scroll horizontally */
+  .tab-bar {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* EasyMDE toolbar: allow wrap, slightly larger hit area */
+  .editor-toolbar + .CodeMirror,
+  .EasyMDEContainer .editor-toolbar {
+    flex-wrap: wrap;
+  }
+  .EasyMDEContainer .editor-toolbar button {
+    min-width: 36px;
+    min-height: 36px;
+  }
+
+  /* Drawers full-width if ever opened from leftover state */
+  .history-panel,
+  .commit-panel {
+    width: 100% !important;
+    max-width: 100% !important;
+  }
+}
