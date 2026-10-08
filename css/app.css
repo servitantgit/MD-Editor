@@ -2059,11 +2059,8 @@ body.md-layout-source .editor-preview-active-side {
     border-right: none !important;
   }
 
-  /* Hide desktop-power tools on the file toolbar */
-  #btn-fold,
-  #btn-outline,
-  #btn-minimap,
-  #btn-export-pdf,
+  /* Desktop-only tools on the file toolbar */
+  .desktop-tool,
   #lang-badge {
     display: none !important;
   }
@@ -2072,19 +2069,47 @@ body.md-layout-source .editor-preview-active-side {
     display: none !important;
   }
 
-  /* Easier touch on primary actions */
+  /* Icon-only Save / Delete */
+  .editor-toolbar .btn-lbl {
+    display: none;
+  }
   #btn-save,
   #btn-delete {
-    min-height: 40px;
-    padding: 8px 14px;
+    min-width: 42px;
+    min-height: 42px;
+    padding: 8px 10px;
+    font-size: 16px;
   }
+  #btn-save i,
+  #btn-delete i {
+    margin: 0;
+  }
+  #btn-mobile-fmt {
+    min-width: 42px;
+    min-height: 42px;
+    padding: 8px 10px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+  }
+  body.mobile-fmt-open #btn-mobile-fmt {
+    background: #21262d;
+    border-color: #58a6ff;
+    color: #58a6ff;
+  }
+
   .editor-toolbar {
     gap: 6px;
     padding: 8px 10px;
   }
   .current-file {
     font-size: 12px;
-    max-width: 40vw;
+    max-width: 36vw;
+  }
+  #autosave-status {
+    font-size: 11px;
+    max-width: 28vw;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   /* Tabs scroll horizontally */
@@ -2093,14 +2118,24 @@ body.md-layout-source .editor-preview-active-side {
     -webkit-overflow-scrolling: touch;
   }
 
-  /* EasyMDE toolbar: allow wrap, slightly larger hit area */
-  .editor-toolbar + .CodeMirror,
-  .EasyMDEContainer .editor-toolbar {
-    flex-wrap: wrap;
+  /* EasyMDE formatting bar: collapsed until Aa is toggled */
+  body:not(.mobile-fmt-open) .EasyMDEContainer > .editor-toolbar {
+    display: none !important;
   }
-  .EasyMDEContainer .editor-toolbar button {
-    min-width: 36px;
-    min-height: 36px;
+  body.mobile-fmt-open .EasyMDEContainer > .editor-toolbar {
+    display: flex !important;
+    flex-wrap: wrap;
+    max-height: 40vh;
+    overflow-y: auto;
+  }
+  body.mobile-fmt-open .EasyMDEContainer .editor-toolbar button {
+    min-width: 40px;
+    min-height: 40px;
+  }
+  /* Optional tools appear together with the format bar */
+  body.mobile-fmt-open .desktop-tool#btn-find,
+  body.mobile-fmt-open .desktop-tool#btn-wrap {
+    display: inline-flex !important;
   }
 
   /* Drawers full-width if ever opened from leftover state */

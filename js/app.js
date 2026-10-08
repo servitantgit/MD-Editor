@@ -110,6 +110,7 @@ const els = {
   draftOverwrite: document.getElementById('draft-overwrite'),
 
   btnMobileFiles: document.getElementById('btn-mobile-files'),
+  btnMobileFmt: document.getElementById('btn-mobile-fmt'),
   sidebarBackdrop: document.getElementById('sidebar-backdrop'),
   appSidebar: document.getElementById('app-sidebar'),
   editorContainer: document.getElementById('editor-container'),
@@ -1961,17 +1962,34 @@ function setMobileSidebarOpen(open) {
   }
 }
 function setupMobileShell() {
-  if (!els.btnMobileFiles) return;
-  els.btnMobileFiles.addEventListener('click', () => {
-    setMobileSidebarOpen(!document.body.classList.contains('mobile-sidebar-open'));
-  });
+  if (els.btnMobileFiles) {
+    els.btnMobileFiles.addEventListener('click', () => {
+      setMobileSidebarOpen(!document.body.classList.contains('mobile-sidebar-open'));
+    });
+  }
   if (els.sidebarBackdrop) {
     els.sidebarBackdrop.addEventListener('click', () => setMobileSidebarOpen(false));
   }
-  // Escape closes the drawer
+  if (els.btnMobileFmt) {
+    els.btnMobileFmt.addEventListener('click', () => {
+      const open = !document.body.classList.contains('mobile-fmt-open');
+      document.body.classList.toggle('mobile-fmt-open', open);
+      els.btnMobileFmt.setAttribute('aria-expanded', open ? 'true' : 'false');
+      els.btnMobileFmt.title = open ? 'Hide formatting tools' : 'Show formatting tools';
+    });
+  }
+  // Escape closes the files drawer (and the fmt strip if open)
   document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && document.body.classList.contains('mobile-sidebar-open')) {
+    if (e.key !== 'Escape') return;
+    if (document.body.classList.contains('mobile-sidebar-open')) {
       setMobileSidebarOpen(false);
+    }
+    if (document.body.classList.contains('mobile-fmt-open')) {
+      document.body.classList.remove('mobile-fmt-open');
+      if (els.btnMobileFmt) {
+        els.btnMobileFmt.setAttribute('aria-expanded', 'false');
+        els.btnMobileFmt.title = 'Show formatting tools';
+      }
     }
   });
 }

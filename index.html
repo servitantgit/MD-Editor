@@ -315,19 +315,24 @@
       <div class="editor-toolbar">
         <span class="current-file" id="current-file">No file selected</span>
         <span class="lang-badge" id="lang-badge" title="Language (from file extension)">—</span>
-        <button class="secondary" id="btn-find" title="Find / Replace in file (Ctrl+F)">Find</button>
-        <button class="secondary" id="btn-wrap" title="Toggle word wrap">Wrap</button>
-        <button class="secondary" id="btn-fold" title="Fold / unfold markdown headings">Fold</button>
-        <button class="secondary" id="btn-outline" title="Document outline (headings)">Outline</button>
-        <button class="secondary" id="btn-minimap" title="Document minimap">Map</button>
-        <button id="btn-save" disabled title="Save: push only this file to GitHub now (single-file). Idle autosave does the same after ~10s.">Save</button>
+        <button type="button" class="secondary mobile-only" id="btn-mobile-fmt" title="Show formatting tools" aria-expanded="false" aria-controls="easymde-toolbar">Aa</button>
+        <button class="secondary desktop-tool" id="btn-find" title="Find / Replace in file (Ctrl+F)">Find</button>
+        <button class="secondary desktop-tool" id="btn-wrap" title="Toggle word wrap">Wrap</button>
+        <button class="secondary desktop-tool" id="btn-fold" title="Fold / unfold markdown headings">Fold</button>
+        <button class="secondary desktop-tool" id="btn-outline" title="Document outline (headings)">Outline</button>
+        <button class="secondary desktop-tool" id="btn-minimap" title="Document minimap">Map</button>
+        <button id="btn-save" disabled title="Save: push only this file to GitHub now (single-file). Idle autosave does the same after ~10s.">
+          <i class="fa-solid fa-floppy-disk" aria-hidden="true"></i><span class="btn-lbl"> Save</span>
+        </button>
         <!-- Autosave status, owned by js/autosave.js. Kept separate from
              #save-status on purpose: that one auto-clears after 4s for every
              other operation (moves, deletes, folder ops), while these states
              describe the live condition of the open file and must not flicker. -->
         <span id="autosave-status" class="autosave-status"></span>
-        <button class="secondary" id="btn-export-pdf" disabled title="Export the active page to PDF">📄 PDF</button>
-        <button class="secondary danger" id="btn-delete" disabled title="Delete the active file from the repository">🗑 Delete</button>
+        <button class="secondary desktop-tool" id="btn-export-pdf" disabled title="Export the active page to PDF">📄 PDF</button>
+        <button class="secondary danger" id="btn-delete" disabled title="Delete the active file from the repository">
+          <i class="fa-solid fa-trash" aria-hidden="true"></i><span class="btn-lbl"> Delete</span>
+        </button>
         <span id="save-status" class="status"></span>
       </div>
       <!-- Draft recovery / remote-changed banner. One element, two questions:
