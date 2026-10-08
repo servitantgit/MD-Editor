@@ -26,6 +26,7 @@ import { bindCommitPanel, bindHistoryPanel } from './commit-ui.js';
 import { unifiedDiff, renderDiffLines } from './diff-util.js';
 import { kindFromPath, isHtmlPath, isMarkdownPath, isEditableTextPath } from './file-kind.js';
 import { parseHeadingOutline } from './doc-outline.js';
+import { createBacklinkIndex } from './backlinks.js';
 import { buildHtmlSrcdoc } from './html-preview.js';
 import { createMinimap } from './minimap.js';
 
@@ -94,6 +95,8 @@ const els = {
   btnFold: document.getElementById('btn-fold'),
   btnOutline: document.getElementById('btn-outline'),
   docOutline: document.getElementById('doc-outline'),
+  btnBacklinks: document.getElementById('btn-backlinks'),
+  backlinksPanel: document.getElementById('backlinks-panel'),
   btnMinimap: document.getElementById('btn-minimap'),
   minimapWrap: document.getElementById('minimap-wrap'),
   minimapCanvas: document.getElementById('minimap'),
@@ -134,6 +137,9 @@ let imageResolver = null;
 let fileTree = null;
 let editorHandle = null;
 let searchSync = null;
+/** @type {ReturnType<typeof createBacklinkIndex>} */
+let backlinkIndex = createBacklinkIndex();
+let backlinksRefreshTimer = 0;
 let searchUI = null;
 let draftStore = null;
 let autosave = null;
@@ -575,6 +581,7 @@ function showApp(owner, repo) {
       // Outline is a cheap parse but an expensive DOM rebuild — debounce it,
       // and only when the panel is actually open.
       scheduleOutlineRefresh();
+      scheduleBacklinksRefresh();
       // Working-tree badges are best-effort and must never interrupt draft writes
       try {
         if (state.currentPath && workingTree) {
@@ -608,6 +615,7 @@ function showApp(owner, repo) {
   setupLayoutToggle();
   setupFindBar();
   setupDocOutline();
+  setupBacklinks();
   setupMobileShell();
   setupMinimap();
   if (els.minimapWrap && !els.minimapWrap.classList.contains('hidden')) {
@@ -714,6 +722,7 @@ function setupSearch(owner, repo) {
     onDegrade: () => setSearchStatus(null, true),
   });
 
+  backlinkIndex = createBacklinkIndex();
   searchSync = new SearchSync({
     client: state.client,
     store,
@@ -729,6 +738,21 @@ function setupSearch(owner, repo) {
       setSearchStatus(null, !persistent);
       // The index may have just gained the file the results are showing.
       if (searchUI && searchUI.isActive()) searchUI.renderResults(els.searchInput.value);
+      try {
+        if (searchSync && searchSync.index) {
+          searchSync.index.bodyCache.forEach((path, body) => backlinkIndex.setFile(path, body));
+        }
+      } catch (_) {}
+      renderBacklinksPanel();
+    },
+    onFileIndexed: (path, body) => {
+      try { backlinkIndex.setFile(path, body); } catch (_) {}
+    },
+    onFileRemoved: (path) => {
+      try {
+        if (path == null) backlinkIndex.clear();
+        else backlinkIndex.removeFile(path);
+      } catch (_) {}
     },
   });
 
@@ -1868,9 +1892,11 @@ function syncActiveOutlineItem() {
 
 /** Debounced outline rebuild for typing (keystroke-cheap, render-expensive). */
 function scheduleOutlineRefresh() {
-  if (!els.docOutline || els.docOutline.classList.contains('hidden')) return;
-  clearTimeout(outlineRefreshTimer);
-  outlineRefreshTimer = setTimeout(() => { renderDocOutline(); }, 400);
+  if (els.docOutline && !els.docOutline.classList.contains('hidden')) {
+    clearTimeout(outlineRefreshTimer);
+    outlineRefreshTimer = setTimeout(() => { renderDocOutline(); }, 400);
+  }
+  scheduleBacklinksRefresh();
 }
 
 function renderDocOutline() {
@@ -2062,6 +2088,114 @@ function setupMobileShell() {
       } catch (_) {}
     });
   }
+}
+
+
+function scheduleBacklinksRefresh() {
+  clearTimeout(backlinksRefreshTimer);
+  backlinksRefreshTimer = setTimeout(() => {
+    try {
+      if (state.currentPath && editorHandle) {
+        const text = editorHandle.easyMDE ? editorHandle.easyMDE.value() : '';
+        backlinkIndex.setFile(state.currentPath, text);
+      }
+    } catch (_) {}
+    renderBacklinksPanel();
+  }, 500);
+}
+
+function renderBacklinksPanel() {
+  if (!els.backlinksPanel || els.backlinksPanel.classList.contains('hidden')) return;
+  const path = state.currentPath;
+  els.backlinksPanel.innerHTML = '';
+  const head = document.createElement('div');
+  head.className = 'backlinks-heading';
+  if (!path) {
+    head.textContent = 'Backlinks';
+    els.backlinksPanel.appendChild(head);
+    const empty = document.createElement('div');
+    empty.className = 'backlinks-empty';
+    empty.textContent = 'Open a note to see what links here.';
+    els.backlinksPanel.appendChild(empty);
+    return;
+  }
+  const sources = backlinkIndex.getBacklinks(path);
+  head.textContent = sources.length ? `Backlinks (${sources.length})` : 'Backlinks';
+  els.backlinksPanel.appendChild(head);
+  if (!sources.length) {
+    const empty = document.createElement('div');
+    empty.className = 'backlinks-empty';
+    empty.textContent = 'No other notes link here yet.';
+    els.backlinksPanel.appendChild(empty);
+    return;
+  }
+  for (const src of sources) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'backlink-item';
+    const base = src.split('/').pop() || src;
+    btn.innerHTML = '';
+    const title = document.createElement('span');
+    title.textContent = base.replace(/\.md$/i, '');
+    btn.appendChild(title);
+    if (src.includes('/')) {
+      const sub = document.createElement('span');
+      sub.className = 'bl-path';
+      sub.textContent = src;
+      btn.appendChild(sub);
+    }
+    btn.title = src;
+    btn.addEventListener('click', () => openFile(src));
+    els.backlinksPanel.appendChild(btn);
+  }
+}
+
+
+async function ensureBacklinksPopulated() {
+  if (!backlinkIndex || backlinkIndex.size > 0) return;
+  if (!searchSync || !searchSync.index) return;
+  // Prefer bodies already in the search LRU.
+  try {
+    searchSync.index.bodyCache.forEach((path, body) => {
+      backlinkIndex.setFile(path, body);
+    });
+  } catch (_) {}
+  if (backlinkIndex.size > 0) {
+    renderBacklinksPanel();
+    return;
+  }
+  // Cold start after hydrate: fetch note bodies once to seed reverse links.
+  const paths = Object.keys(searchSync.manifest || {}).filter((p) => /\.(md|markdown|mdown)$/i.test(p));
+  const cap = Math.min(paths.length, 400);
+  for (let i = 0; i < cap; i++) {
+    const path = paths[i];
+    try {
+      const body = await searchSync.fetchBody(path);
+      if (body != null) backlinkIndex.setFile(path, body);
+    } catch (_) {}
+  }
+  renderBacklinksPanel();
+}
+
+function setupBacklinks() {
+  if (!els.btnBacklinks || els.btnBacklinks.dataset.bound) return;
+  els.btnBacklinks.dataset.bound = '1';
+  const pref = localStorage.getItem('md_backlinks');
+  if (pref === '1' && els.backlinksPanel) {
+    els.backlinksPanel.classList.remove('hidden');
+    els.btnBacklinks.classList.add('active-panel');
+  }
+  els.btnBacklinks.addEventListener('click', () => {
+    if (!els.backlinksPanel) return;
+    const open = els.backlinksPanel.classList.toggle('hidden') === false;
+    els.btnBacklinks.classList.toggle('active-panel', open);
+    localStorage.setItem('md_backlinks', open ? '1' : '0');
+    if (open) {
+      void ensureBacklinksPopulated().then(() => renderBacklinksPanel());
+      renderBacklinksPanel();
+    }
+    if (editorHandle) editorHandle.refreshLayout();
+  });
 }
 
 function setupDocOutline() {

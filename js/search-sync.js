@@ -29,7 +29,7 @@ export class SearchSync {
    * @param {(done: number, total: number) => void} [deps.onProgress]
    * @param {(info: {indexed: number, total: number, persistent: boolean}) => void} [deps.onDone]
    */
-  constructor({ client, store, owner, repo, branch, MiniSearchCtor, onProgress, onDone }) {
+  constructor({ client, store, owner, repo, branch, MiniSearchCtor, onProgress, onDone, onFileIndexed, onFileRemoved }) {
     this.client = client;
     this.store = store;
     this.key = recordKey(owner, repo, branch);
@@ -37,6 +37,8 @@ export class SearchSync {
     this.MiniSearchCtor = MiniSearchCtor;
     this.onProgress = onProgress || (() => {});
     this.onDone = onDone || (() => {});
+    this.onFileIndexed = onFileIndexed || (() => {});
+    this.onFileRemoved = onFileRemoved || (() => {});
     this.index = null;
     this.manifest = {};
     this.lastSyncedAt = 0;
@@ -87,6 +89,7 @@ export class SearchSync {
     if (force) {
       this.index.clear();
       this.manifest = {};
+      try { this.onFileRemoved(null); } catch (_) {} // signal full rebuild start
     }
 
     const files = tree.filter((f) => isSearchablePath(f.path));
@@ -94,8 +97,14 @@ export class SearchSync {
 
     // Removed and changed paths must leave the index BEFORE their new versions
     // go in, otherwise the old version can survive alongside the new one.
-    for (const path of removed) this.index.removeDocument(path);
-    for (const path of changed) this.index.removeDocument(path);
+    for (const path of removed) {
+      this.index.removeDocument(path);
+      try { this.onFileRemoved(path); } catch (_) {}
+    }
+    for (const path of changed) {
+      this.index.removeDocument(path);
+      try { this.onFileRemoved(path); } catch (_) {}
+    }
 
     const manifest = {};
     files.forEach((f) => { manifest[f.path] = f.sha; });
@@ -129,7 +138,9 @@ export class SearchSync {
         // b64ToUtf8 THROWS on content that is not valid UTF-8. That throw is the
         // signal to skip the file — a binary blob with a .md extension must not
         // be indexed as a string of U+FFFD replacement characters.
-        this.index.add(path, b64ToUtf8(b64));
+        const body = b64ToUtf8(b64);
+        this.index.add(path, body);
+        try { this.onFileIndexed(path, body); } catch (_) {}
         done++;
       } catch (_) {
         // A skipped file stays absent from the index, but it is still listed in

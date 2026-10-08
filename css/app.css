@@ -1943,6 +1943,65 @@ body.md-layout-source .editor-preview-active-side {
   color: #58a6ff;
 }
 
+/* ===== Backlinks (who links here) ===== */
+.backlinks-panel {
+  width: 220px;
+  flex-shrink: 0;
+  overflow-y: auto;
+  border-left: 1px solid var(--border);
+  background: var(--panel);
+  padding: 8px 0;
+  font-size: 12px;
+}
+.backlinks-panel.hidden { display: none; }
+.backlinks-heading {
+  padding: 4px 12px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+.backlinks-empty {
+  padding: 12px;
+  color: var(--muted);
+  text-align: center;
+  line-height: 1.4;
+}
+.backlink-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  padding: 6px 12px;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.backlink-item:hover { background: #21262d; color: #58a6ff; }
+.backlink-item .bl-path {
+  display: block;
+  font-size: 10px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+#btn-backlinks.active-panel {
+  background: #1f6feb33;
+  border-color: #58a6ff;
+  color: #58a6ff;
+}
+@media (max-width: 768px), ((orientation: landscape) and (max-height: 560px)) {
+  #btn-backlinks,
+  #backlinks-panel {
+    display: none !important;
+  }
+}
+
+
 
 /* ===== Document minimap ===== */
 .minimap-wrap {

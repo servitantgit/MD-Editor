@@ -327,6 +327,7 @@
         <button class="secondary desktop-tool" id="btn-wrap" title="Toggle word wrap">Wrap</button>
         <button class="secondary desktop-tool" id="btn-fold" title="Fold / unfold markdown headings">Fold</button>
         <button class="secondary desktop-tool" id="btn-outline" title="Document outline (headings)">Outline</button>
+        <button class="secondary desktop-tool" id="btn-backlinks" title="Backlinks: notes that link here">Backlinks</button>
         <button class="secondary desktop-tool" id="btn-minimap" title="Document minimap">Map</button>
         <button id="btn-save" disabled title="Save now (desktop). On phone: autosave runs on idle; status dot shows sync state.">
           <i class="fa-solid fa-floppy-disk" aria-hidden="true"></i><span class="btn-lbl"> Save</span>
@@ -368,6 +369,7 @@
           <textarea id="editor"></textarea>
           <div id="editor-dropzone-overlay" class="hidden">Drop to add an image to the file</div>
         </div>
+        <div id="backlinks-panel" class="backlinks-panel hidden" aria-label="Backlinks"></div>
         <div id="minimap-wrap" class="minimap-wrap hidden" title="Click or drag to scroll">
           <canvas id="minimap" aria-label="Document minimap"></canvas>
         </div>

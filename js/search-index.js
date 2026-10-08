@@ -167,6 +167,7 @@ export function createBodyCache(limit = BODY_CACHE_LIMIT) {
     get size() { return map.size; },
     delete: (path) => map.delete(path),
     clear: () => map.clear(),
+    forEach(fn) { map.forEach((body, path) => fn(path, body)); },
   };
 }
 
