@@ -34,97 +34,229 @@
        source. The Owner/Repository inputs and #btn-login ids are a contract with
        js/app.js (els.*) and e2e_smoke_test.py — don't rename them. -->
   <div id="login-screen">
-    <div class="login-box">
-      <div class="login-brand">
+
+    <!-- Top bar -->
+    <nav class="landing-nav">
+      <div class="landing-nav-brand">
         <i class="fa-brands fa-markdown"></i>
-        <h2>MD Editor</h2>
-        <span class="login-badge">for GitHub</span>
+        <span>MD Editor</span>
+      </div>
+      <div class="landing-nav-links">
+        <a href="#features">Features</a>
+        <a href="#why">Why</a>
+        <a href="#faq">FAQ</a>
+        <a href="https://github.com/servitantgit" target="_blank" rel="noopener" title="Author profile on GitHub">
+          <i class="fa-brands fa-github"></i> GitHub
+        </a>
+      </div>
+    </nav>
+
+    <!-- Hero -->
+    <section class="hero">
+      <div class="hero-copy">
+        <div class="hero-eyebrow">
+          <span class="hero-dot"></span> Open source · MIT · Zero install
+        </div>
+        <h1 class="hero-title">
+          Edit any GitHub repo<br />
+          <span class="hero-accent">in your browser.</span>
+        </h1>
+        <p class="hero-sub login-tagline">
+          Markdown-first workspace for <strong>any GitHub repo</strong> — live preview,
+          multi-tab editing, autosave and full-text search. No local clone,
+          no build step, no tokens to paste.
+        </p>
+
+        <div class="hero-cta">
+          <button type="button" id="btn-login" class="cta-primary">
+            <i class="fa-brands fa-github"></i>
+            Sign in with GitHub
+          </button>
+          <button type="button" class="cta-secondary" id="btn-toggle-advanced" aria-expanded="false" aria-controls="advanced-form">
+            Open specific repo →
+          </button>
+        </div>
+
+        <div class="hero-trust">
+          <span><i class="fa-solid fa-lock"></i> OAuth · 2FA on GitHub's side</span>
+          <span><i class="fa-solid fa-shield-halved"></i> Token in sessionStorage only</span>
+          <span><i class="fa-solid fa-house"></i> Your data stays in your repo</span>
+        </div>
+
+        <!-- Pre-login repo selection (hidden by default).
+             Owner + Repository are REQUIRED by app.js — Sign in reads them
+             before redirecting to /auth/login. -->
+        <div class="advanced-form hidden" id="advanced-form">
+          <label for="input-owner">Owner (username or organization)</label>
+          <input id="input-owner" placeholder="username" autocomplete="username" />
+          <label for="input-repo">Repository</label>
+          <input id="input-repo" placeholder="my-private-repo" autocomplete="off" />
+          <p class="advanced-hint">
+            Required — the repository to open right after signing in.
+          </p>
+        </div>
+
+        <div id="login-status" class="status"></div>
       </div>
 
-      <p class="login-tagline">
-        Browser workspace for <strong>any GitHub repo</strong> — Markdown-first, also
-        HTML and code. Public or private. No local clone, no build step, no Personal
-        Access Token to create.
-      </p>
+      <div class="hero-visual">
+        <!-- Optional screenshot: drop a 1600x1000 dark-theme PNG at
+             screenshots/hero.png — otherwise a placeholder box shows. -->
+        <div class="hero-shot">
+          <div class="hero-shot-chrome">
+            <span class="dot dot-r"></span>
+            <span class="dot dot-y"></span>
+            <span class="dot dot-g"></span>
+            <span class="hero-shot-url">md-edit.pages.dev</span>
+          </div>
+          <img src="./screenshots/hero.png" alt="MD Editor interface"
+               onerror="this.parentElement.classList.add('no-shot')" />
+          <div class="hero-shot-placeholder">
+            <i class="fa-regular fa-image"></i>
+            <span>Drop <code>screenshots/hero.png</code> here</span>
+          </div>
+        </div>
+      </div>
+    </section>
 
-      <ul class="login-features">
-        <li>
-          <i class="fa-solid fa-right-to-bracket"></i>
-          <span><b>GitHub OAuth login</b> — one click, no manual tokens; 2FA stays on GitHub's side</span>
-        </li>
-        <li>
-          <i class="fa-solid fa-layer-group"></i>
-          <span><b>Source / Live / Preview</b> — side-by-side live preview or full-width read view, remembered between reloads</span>
-        </li>
-        <li>
-          <i class="fa-solid fa-file-code"></i>
-          <span><b>Markdown, HTML &amp; code</b> — edit notes and text files; language badge, find/replace, outline, minimap</span>
-        </li>
-        <li>
-          <i class="fa-solid fa-folder-tree"></i>
-          <span><b>Full file &amp; folder CRUD</b> — create, rename, move, delete, with automatic link rewriting on move</span>
-        </li>
-        <li>
-          <i class="fa-solid fa-window-restore"></i>
-          <span><b>Multi-tab editing</b> — each tab keeps text, undo, cursor and scroll; Preview follows the active tab</span>
-        </li>
-        <li>
-          <i class="fa-solid fa-floppy-disk"></i>
-          <span><b>Autosave + local drafts</b> — IndexedDB drafts, idle push to GitHub, conflict recovery, survives reload</span>
-        </li>
-        <li>
-          <i class="fa-solid fa-magnifying-glass"></i>
-          <span><b>Full-text search</b> — Markdown and other text files, indexed in the browser</span>
-        </li>
-        <li>
-          <i class="fa-solid fa-code-commit"></i>
-          <span><b>Commit / History</b> — multi-file commits, dirty badges, per-file diffs and restore</span>
-        </li>
-        <li>
-          <i class="fa-regular fa-images"></i>
-          <span><b>Images &amp; internal links</b> — API-resolved previews (private repos too); open relative links from preview</span>
-        </li>
-        <li>
-          <i class="fa-solid fa-file-pdf"></i>
-          <span><b>PDF export</b> — Markdown or HTML page to PDF in one click</span>
-        </li>
-        <li>
-          <i class="fa-solid fa-code"></i>
-          <span><b>Nothing to install</b> — plain HTML/JS on Cloudflare Pages, works in the browser</span>
-        </li>
-      </ul>
+    <!-- Features -->
+    <section class="features" id="features">
+      <h2 class="section-title">Everything you need, nothing you don't</h2>
+      <div class="features-grid">
+        <div class="feature-group">
+          <div class="feature-group-h">
+            <i class="fa-solid fa-pen-to-square"></i>
+            <h3>Edit</h3>
+          </div>
+          <ul class="login-features">
+            <li><b>Source / Live / Preview</b> — side-by-side or full width</li>
+            <li><b>Markdown, HTML &amp; code</b> — badge, outline, minimap</li>
+            <li><b>Multi-tab editing</b> — undo, cursor &amp; scroll per tab</li>
+            <li><b>Find / replace</b> — in-file search with regex</li>
+            <li><b>PDF export</b> — any page in one click</li>
+          </ul>
+        </div>
+        <div class="feature-group">
+          <div class="feature-group-h">
+            <i class="fa-solid fa-floppy-disk"></i>
+            <h3>Save safely</h3>
+          </div>
+          <ul class="login-features">
+            <li><b>GitHub OAuth</b> — no manual tokens, 2FA on GitHub</li>
+            <li><b>Autosave + drafts</b> — IndexedDB, survives reload</li>
+            <li><b>409 conflict recovery</b> — never silently overwrite</li>
+            <li><b>Multi-file commits</b> — stage changes, one commit</li>
+            <li><b>History &amp; diffs</b> — per-file, with restore</li>
+          </ul>
+        </div>
+        <div class="feature-group">
+          <div class="feature-group-h">
+            <i class="fa-solid fa-folder-tree"></i>
+            <h3>Organize</h3>
+          </div>
+          <ul class="login-features">
+            <li><b>File &amp; folder CRUD</b> — create, rename, move, delete</li>
+            <li><b>Auto link rewriting</b> — moves don't break refs</li>
+            <li><b>Drag &amp; drop</b> — files, folders, images</li>
+            <li><b>Full-text search</b> — the whole repo, in browser</li>
+            <li><b>Private repos</b> — same OAuth, same perms</li>
+          </ul>
+        </div>
+      </div>
+    </section>
 
-      <div class="login-chips">
-        <span>No local clone</span>
-        <span>No build step</span>
-        <span>No manual tokens</span>
-        <span>Private repos</span>
+    <!-- Why not X -->
+    <section class="why" id="why">
+      <h2 class="section-title">Why not something else?</h2>
+      <div class="why-grid">
+        <div class="why-card">
+          <h4>Why not <b>github.dev</b>?</h4>
+          <p>Code-first. No markdown live preview, no PDF export,
+            no drafts, no link rewriting on move.</p>
+        </div>
+        <div class="why-card">
+          <h4>Why not <b>Obsidian</b>?</h4>
+          <p>Desktop app with manual Git sync. Zero-install here,
+            runs on any device with a browser.</p>
+        </div>
+        <div class="why-card">
+          <h4>Why not <b>StackEdit</b>?</h4>
+          <p>No multi-file commits, no conflict recovery,
+            no file tree ops, no link rewriting.</p>
+        </div>
+        <div class="why-card">
+          <h4>Why not <b>OneNote / Notion</b>?</h4>
+          <p>Proprietary format, lock-in, no git history. Here docs
+            are plain <code>.md</code> files — forever yours.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- FAQ -->
+    <section class="faq" id="faq">
+      <h2 class="section-title">Questions</h2>
+      <details class="faq-item">
+        <summary>Is my code safe?</summary>
+        <p>Server never stores your token. Token lives only in this
+          tab's <code>sessionStorage</code>, destroyed on close.</p>
+      </details>
+      <details class="faq-item">
+        <summary>Does it work with private repositories?</summary>
+        <p>Yes. Same OAuth grants access to any repo you permit.
+          Previews work on private repos too.</p>
+      </details>
+      <details class="faq-item">
+        <summary>What if I lose connection?</summary>
+        <p>Edits land in IndexedDB within 400&nbsp;ms. Reconnect and
+          pick keep-or-discard — nothing merges automatically.</p>
+      </details>
+      <details class="faq-item">
+        <summary>Can I self-host it?</summary>
+        <p>Yes — Cloudflare Pages free tier. Callback is Pages
+          Functions. See <code>README-CLOUDFLARE.md</code>.</p>
+      </details>
+      <details class="faq-item">
+        <summary>What about my OneNote / Obsidian collection?</summary>
+        <p>Export to markdown, push to a GitHub repo, open it here —
+          plain files with full git history.</p>
+      </details>
+    </section>
+
+    <!-- Footer: exactly ONE repo link (e2e: count == 1) -->
+    <footer class="landing-footer">
+      <div class="footer-row">
+        <a class="login-link" href="https://github.com/servitantgit/MD-Editor" target="_blank" rel="noopener noreferrer" title="Source code, issues and releases on GitHub">
+          <i class="fa-brands fa-github"></i> Source &amp; issues: <b>servitantgit/MD-Editor</b>
+        </a>
+        <span class="footer-sep">·</span>
         <span>MIT License</span>
+        <span class="footer-sep">·</span>
+        <span>Built with ES modules, no bundler</span>
+        <span class="footer-sep">·</span>
+        <span class="login-meta">by servitantgit</span>
       </div>
-
-      <label>Owner (username or organization)</label>
-      <input id="input-owner" placeholder="username" />
-      <label>Repository</label>
-      <input id="input-repo" placeholder="my-private-repo" />
-      <button id="btn-login"><i class="fa-brands fa-github"></i> Sign in with GitHub</button>
-      <div id="login-status" class="status" style="margin-top:12px"></div>
-
       <p class="login-note">
         The access token is issued by GitHub and kept only in this browser tab
         (sessionStorage) — our server sees nothing except the one-time
         code-for-token exchange.
       </p>
+    </footer>
 
-      <div class="login-footer">
-        <a class="login-link" href="https://github.com/servitantgit/MD-Editor" target="_blank" rel="noopener noreferrer" title="Source code, issues and releases on GitHub">
-          <i class="fa-brands fa-github"></i> Source &amp; issues: <b>servitantgit/MD-Editor</b>
-        </a>
-        <span class="login-meta">
-          by <a class="login-link" href="https://github.com/servitantgit" target="_blank" rel="noopener noreferrer" title="Author profile on GitHub">servitantgit</a>
-        </span>
-      </div>
-    </div>
   </div>
+
+  <!-- Landing toggle: zero deps, works even if app.js fails to load. -->
+  <script>
+    (function () {
+      var btn = document.getElementById('btn-toggle-advanced');
+      var form = document.getElementById('advanced-form');
+      if (!btn || !form) return;
+      btn.addEventListener('click', function () {
+        var hidden = form.classList.toggle('hidden');
+        btn.setAttribute('aria-expanded', hidden ? 'false' : 'true');
+        btn.textContent = hidden ? 'Open specific repo →' : 'Hide repo selector ↑';
+      });
+    })();
+  </script>
 
   <!-- ===== MAIN APP ===== -->
   <header class="hidden" id="app-header">
