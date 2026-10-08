@@ -1,3 +1,4 @@
+<img width="1920" height="1080" alt="hero" src="https://github.com/user-attachments/assets/b44b2918-2c13-496e-9310-34ad7f1128bc" />
 # GitHub MD Editor
 
 [![Tests](../../actions/workflows/test.yml/badge.svg)](../../actions/workflows/test.yml)
@@ -22,13 +23,15 @@ drawers, find/replace, outline, minimap, and PDF export.
 
 ## Screenshots
 
+
 <p align="center">
-  <img width="1919" height="1012" alt="Screenshot_1" src="https://github.com/user-attachments/assets/c55044e0-c2bb-45d8-96de-b42ca02e274b" /><br>
+  <img width="1920" height="1200" alt="landpage" src="https://github.com/user-attachments/assets/5b3a581e-19f3-4ced-819f-deb50cf9f243" /><br>
   <sub><b>Sign in with GitHub</b> — OAuth login, no manual token to create or paste.</sub>
 </p>
 
+
 <p align="center">
-  <img src="https://github.com/user-attachments/assets/f4949051-31fd-4fca-acf3-c976a22b9685" alt="GitHub MD Editor — main editing view" width="900"><br>
+  <img width="1920" height="1080" alt="hero" src="https://github.com/user-attachments/assets/a8ac5554-3455-4bec-9b34-a1d71fe0bffd" /><br>
   <sub>File tree, tabs, live preview and toolbar side by side while editing a note.</sub>
 </p>
 
