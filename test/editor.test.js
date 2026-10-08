@@ -323,4 +323,92 @@ test('HTML preview fills BOTH panes on every render pass (no alternating starve)
   handle.destroy();
 });
 
+test('Live/Preview switching with unchanged text NEVER reloads the HTML iframe (flicker)', async () => {
+  const dom = new JSDOM('<!doctype html><body></body>');
+  const { easyMDE, codemirror } = installEnvironment(dom);
+
+  const container = dom.window.document.createElement('div');
+  container.className = 'EasyMDEContainer';
+  const cmWrap = dom.window.document.createElement('div');
+  cmWrap.className = 'CodeMirror';
+  const sidePane = dom.window.document.createElement('div');
+  sidePane.className = 'editor-preview-side';
+  const fullPane = dom.window.document.createElement('div');
+  fullPane.className = 'editor-preview';
+  container.appendChild(cmWrap);
+  container.appendChild(sidePane);
+  container.appendChild(fullPane);
+  dom.window.document.body.appendChild(container);
+  codemirror.getWrapperElement = () => cmWrap;
+
+  let htmlDoc = '<h1>Hello HTML</h1><p>HTML_PAGE_OK</p>';
+  easyMDE.isSideBySideActive = () => true;
+  easyMDE.isPreviewActive = () => false;
+  easyMDE.value = () => htmlDoc;
+  easyMDE.options = {};
+  let capturedPreviewRender = null;
+  const origEasyMDE = globalThis.EasyMDE;
+  globalThis.EasyMDE = function (opts) {
+    capturedPreviewRender = opts && opts.previewRender;
+    return origEasyMDE();
+  };
+
+  const { createEditor } = await import('../js/editor.js');
+  const handle = createEditor(dom.window.document.createElement('textarea'), {
+    marked: {},
+    imageResolver: { resolve: async () => '' },
+    getCurrentPath: () => 'Notes/page.html',
+    onImageUploadRequest: () => {},
+    onImagePaste: () => {},
+  });
+  easyMDE.options.previewRender = capturedPreviewRender;
+  globalThis.EasyMDE = origEasyMDE;
+
+  const settle = async () => {
+    await new Promise((r) => setTimeout(r, 0));
+    await new Promise((r) => setTimeout(r, 0));
+    await new Promise((r) => setTimeout(r, 20));
+  };
+  const renderPass = async () => { handle.renderActivePreview(); await settle(); };
+  const srcdocOf = (pane) => {
+    const f = pane.querySelector('iframe.html-preview-frame');
+    return f ? (f.srcdoc || '') : null;
+  };
+
+  // First render fills the pane (this one may reload — the pane was empty).
+  await renderPass();
+  const first = srcdocOf(sidePane);
+  assert.ok((first || '').includes('HTML_PAGE_OK'), 'precondition: first render must fill the side pane');
+
+  // Count every srcdoc assignment on the LIVE iframe. Each assignment is a
+  // full iframe navigation → a visible flash in the preview.
+  let sets = 0;
+  const frame = sidePane.querySelector('iframe.html-preview-frame');
+  const proto = Object.getOwnPropertyDescriptor(dom.window.HTMLIFrameElement.prototype, 'srcdoc');
+  assert.ok(proto && typeof proto.set === 'function', 'jsdom must expose srcdoc accessor');
+  Object.defineProperty(frame, 'srcdoc', {
+    configurable: true,
+    get() { return proto.get.call(this); },
+    set(v) { sets++; proto.set.call(this, v); },
+  });
+
+  // Simulate Live/Preview toggles: renderActivePreview fires (EasyMDE update,
+  // forceLayout nudge) several times per click — text is UNCHANGED, so the
+  // iframe must not be touched at all. Production flashes 2-3 times here.
+  for (let i = 0; i < 3; i++) await renderPass();
+  assert.equal(sets, 0,
+    `iframe reloaded ${sets}x on Live/Preview toggles with unchanged text — that's the visible flicker`);
+  assert.ok((srcdocOf(sidePane) || '').includes('HTML_PAGE_OK'),
+    'content must survive the toggles');
+
+  // Real content change must still reach the iframe.
+  htmlDoc = '<h1>Changed</h1><p>SECOND_VERSION</p>';
+  await renderPass();
+  assert.ok(sets >= 1, 'an edited document must reload the iframe');
+  assert.ok((srcdocOf(sidePane) || '').includes('SECOND_VERSION'),
+    'edited content must be shown after the reload');
+
+  handle.destroy();
+});
+
 

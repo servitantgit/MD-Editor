@@ -208,8 +208,17 @@ export function createEditor(textareaEl, deps) {
         iframe.setAttribute('sandbox', 'allow-scripts allow-forms allow-modals');
         iframe.setAttribute('title', 'HTML preview');
         previewEl.appendChild(iframe);
+      } else if (state.renderedText === plainText && iframe.parentElement === previewEl) {
+        // FLICKER GUARD: assigning srcdoc is a full iframe navigation — a
+        // visible flash. A Live/Preview switch re-runs render (forceLayout ×2
+        // + EasyMDE 'update') with UNCHANGED text; touching the srcdoc there
+        // reloads the page 2-3 times for nothing. Nothing changed → done.
+        // (The set token still supersedes older in-flight passes correctly.)
+        return iframe.srcdoc || null;
       }
-      if (syncSrcdoc) iframe.srcdoc = plainText || '<!-- empty -->';
+      const raw = plainText || '<!-- empty -->';
+      // Compare before assigning: even an identical value reloads the frame.
+      if (syncSrcdoc && iframe.srcdoc !== raw) iframe.srcdoc = raw;
       const path = deps.getCurrentPath ? deps.getCurrentPath() : null;
       let srcdoc;
       try {
@@ -224,7 +233,8 @@ export function createEditor(textareaEl, deps) {
       // The pane may have been wiped by a stale caller in between (EasyMDE's
       // own `preview.innerHTML = newValue`); re-attach instead of dropping.
       if (iframe.parentElement !== previewEl) previewEl.appendChild(iframe);
-      iframe.srcdoc = srcdoc;
+      if (iframe.srcdoc !== srcdoc) iframe.srcdoc = srcdoc;
+      state.renderedText = plainText; // this text is on screen now (flip-guard)
       return srcdoc;
     })();
     // Chain after the previous pass FOR THIS PANE so fills of one pane never
