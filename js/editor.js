@@ -60,17 +60,25 @@ export function createEditor(textareaEl, deps) {
       const path = deps.getCurrentPath ? deps.getCurrentPath() : null;
       const kind = kindFromPath(path || '');
 
-      // HTML: sandboxed iframe (filled after EasyMDE writes our return value)
+      // HTML: sandboxed iframe (filled after EasyMDE writes our return value).
+      // The iframe is created ASYNC (next tick) while the sync return ('') is
+      // applied by the caller immediately — so every caller must skip the
+      // `innerHTML = ''` wipe for this branch (see renderActivePreview) and
+      // every creator must reuse an existing iframe instead of wiping the pane
+      // (fillPreviewPane in app.js does the same thing in parallel).
       if (kind.preview === 'html') {
         setTimeout(() => {
-          if (myToken !== previewRenderToken || !previewEl) return;
-          const iframe = document.createElement('iframe');
-          iframe.className = 'html-preview-frame';
-          iframe.setAttribute('sandbox', 'allow-scripts allow-forms allow-modals');
-          iframe.setAttribute('title', 'HTML preview');
+          if (myToken !== previewRenderToken || !previewEl || !previewEl.isConnected) return;
+          let iframe = previewEl.querySelector('iframe.html-preview-frame');
+          if (!iframe) {
+            previewEl.innerHTML = '';
+            iframe = document.createElement('iframe');
+            iframe.className = 'html-preview-frame';
+            iframe.setAttribute('sandbox', 'allow-scripts allow-forms allow-modals');
+            iframe.setAttribute('title', 'HTML preview');
+            previewEl.appendChild(iframe);
+          }
           iframe.srcdoc = plainText || '<!-- empty -->';
-          previewEl.innerHTML = '';
-          previewEl.appendChild(iframe);
           // Resolve relative assets after EasyMDE writes our empty return
           const path = deps.getCurrentPath ? deps.getCurrentPath() : null;
           buildHtmlSrcdoc(plainText || '', path, deps.imageResolver)
@@ -78,7 +86,7 @@ export function createEditor(textareaEl, deps) {
               if (myToken !== previewRenderToken || !iframe.isConnected) return;
               iframe.srcdoc = srcdoc;
             })
-            .catch(() => { /* keep raw srcdoc */ });
+            .catch((e) => { console.error('HTML preview resolve failed:', e); /* keep raw srcdoc */ });
         }, 0);
         return '';
       }
@@ -492,8 +500,17 @@ export function createEditor(textareaEl, deps) {
     if (!list.length) return;
 
     const plain = easyMDE.value();
+    const isHtmlPreview = kindFromPath(deps.getCurrentPath ? deps.getCurrentPath() : '' || '').preview === 'html';
     for (const preview of list) {
       const html = easyMDE.options.previewRender(plain, preview);
+      // HTML branch fills the pane ASYNC (iframe on next tick) and returns ''
+      // as a placeholder — a sync innerHTML wipe here would erase the iframe
+      // that fillPreviewPane/previewRender just created. Skip it; the async
+      // step owns the pane for HTML.
+      if (html === '' && isHtmlPreview) {
+        preview.scrollTop = 0;
+        continue;
+      }
       if (html !== null && html !== undefined) preview.innerHTML = html;
       preview.scrollTop = 0;
     }

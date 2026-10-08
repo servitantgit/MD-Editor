@@ -1609,20 +1609,26 @@ function fillPreviewPane(node, plain, kind) {
   if (!node) return;
   const preview = kind && kind.preview ? kind.preview : 'markdown';
   if (preview === 'html') {
-    const iframe = document.createElement('iframe');
-    iframe.className = 'html-preview-frame';
-    iframe.setAttribute('sandbox', 'allow-scripts allow-forms allow-modals');
-    iframe.setAttribute('title', 'HTML preview');
+    // Same rule as previewRender in editor.js: never wipe a live iframe —
+    // the pane may already hold one from the parallel previewRender path
+    // (both run on layout switches). Reuse it, only create when absent.
+    let iframe = node.querySelector('iframe.html-preview-frame');
+    if (!iframe) {
+      node.innerHTML = '';
+      iframe = document.createElement('iframe');
+      iframe.className = 'html-preview-frame';
+      iframe.setAttribute('sandbox', 'allow-scripts allow-forms allow-modals');
+      iframe.setAttribute('title', 'HTML preview');
+      node.appendChild(iframe);
+    }
     iframe.srcdoc = plain || '<!-- empty -->';
-    node.innerHTML = '';
-    node.appendChild(iframe);
     const path = state.currentPath;
     const resolver = imageResolver;
     buildHtmlSrcdoc(plain || '', path, resolver)
       .then((srcdoc) => {
         if (iframe.isConnected) iframe.srcdoc = srcdoc;
       })
-      .catch(() => {});
+      .catch((e) => { console.error('HTML preview resolve failed:', e); });
     return;
   }
   if (preview === 'code') {
