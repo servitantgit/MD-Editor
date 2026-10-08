@@ -1919,6 +1919,7 @@ body.md-layout-source .editor-preview-active-side {
   text-overflow: ellipsis;
 }
 .outline-item:hover { background: #21262d; color: #58a6ff; }
+.outline-item.active { background: #1f6feb33; color: #58a6ff; }
 .outline-item.level-1 { font-weight: 600; padding-left: 10px; }
 .outline-item.level-2 { padding-left: 18px; }
 .outline-item.level-3 { padding-left: 26px; color: var(--muted); }

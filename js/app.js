@@ -25,6 +25,7 @@ import { WorkingTree } from './working-tree.js';
 import { bindCommitPanel, bindHistoryPanel } from './commit-ui.js';
 import { unifiedDiff, renderDiffLines } from './diff-util.js';
 import { kindFromPath, isHtmlPath, isMarkdownPath, isEditableTextPath } from './file-kind.js';
+import { parseHeadingOutline } from './doc-outline.js';
 import { buildHtmlSrcdoc } from './html-preview.js';
 import { createMinimap } from './minimap.js';
 
@@ -567,6 +568,9 @@ function showApp(owner, repo) {
       if (suppressEditorChange) return;
       // Autosave FIRST — draft recovery depends on every keystroke reaching IndexedDB
       ensureAutosave().onChange(text);
+      // Outline is a cheap parse but an expensive DOM rebuild — debounce it,
+      // and only when the panel is actually open.
+      scheduleOutlineRefresh();
       // Working-tree badges are best-effort and must never interrupt draft writes
       try {
         if (state.currentPath && workingTree) {
@@ -1752,15 +1756,94 @@ function setupFindBar() {
 
 
 
-function parseHeadingOutline(text) {
-  const lines = String(text || '').split('\n');
-  const items = [];
-  for (let i = 0; i < lines.length; i++) {
-    const m = /^(#{1,6})\s+(.+?)\s*$/.exec(lines[i]);
-    if (!m) continue;
-    items.push({ line: i, level: m[1].length, text: m[2].replace(/#+\s*$/, '').trim() });
+let outlineRefreshTimer = 0;
+let outlineCursorBound = false;
+
+function getPreviewScroller() {
+  const root = document.querySelector('.editor-area .EasyMDEContainer')
+    || document.querySelector('.EasyMDEContainer');
+  if (!root) return null;
+  const pane = root.querySelector('.editor-preview-side, .editor-preview-active-side, .editor-preview-active, .editor-preview');
+  return (pane && pane.isConnected) ? pane : null;
+}
+
+/** Jump to a heading: scroll the CodeMirror pane AND the preview pane (when visible). */
+function jumpToOutlineHeading(line) {
+  if (!editorHandle) return;
+  const cm = editorHandle.easyMDE.codemirror;
+  // A folded section (Fold button) hides its lines inside a collapsed mark:
+  // clearOnEnter only unfolds when the CURSOR enters, and the cursor is still
+  // on the old line — so unfold explicitly, or setCursor lands in hidden text.
+  try {
+    if (editorHandle.unfoldAtLine) editorHandle.unfoldAtLine(line);
+    else if (typeof cm.foldCode === 'function') cm.foldCode({ line, ch: 0 }, { rangeFinder: null });
+  } catch (_) { /* fold addon may be absent */ }
+  try { cm.setCursor({ line, ch: 0 }); } catch (_) { /* ignore */ }
+  // Source/Live: CodeMirror is the visible scroller.
+  try { cm.scrollIntoView({ line, ch: 0 }, 80); } catch (_) { /* ignore */ }
+  // Live/Preview: .editor-preview-side is scrollable too — move the Nth
+  // rendered heading into view. Index lookup (not text matching) survives
+  // duplicate titles; the fractional fallback covers async render races.
+  try {
+    const pane = getPreviewScroller();
+    if (pane && pane.clientHeight > 0 && pane.scrollHeight > pane.clientHeight + 4) {
+      const heads = pane.querySelectorAll('h1, h2, h3, h4, h5, h6');
+      const lineCount = Math.max(1, cm.lineCount());
+      const idx = outlineHeadingIndex(line);
+      if (idx >= 0 && heads && heads[idx] && typeof heads[idx].scrollIntoView === 'function') {
+        heads[idx].scrollIntoView({ block: 'start' });
+      } else {
+        const frac = Math.min(1, Math.max(0, line / lineCount));
+        pane.scrollTop = frac * Math.max(0, pane.scrollHeight - pane.clientHeight);
+      }
+    }
+  } catch (_) { /* preview may be absent/hidden */ }
+  // Preview hides CodeMirror (display:none) — focusing it steals nothing and
+  // scrolls nothing; only focus when the editor is actually visible.
+  try {
+    const hidden = layoutMode === 'preview';
+    if (!hidden) cm.focus();
+  } catch (_) { /* ignore */ }
+  markActiveOutlineItem(line);
+}
+
+/** Order index of the outline item covering `line` (for preview heading lookup). */
+function outlineHeadingIndex(line) {
+  if (!els.docOutline) return -1;
+  const btns = els.docOutline.querySelectorAll('.outline-item[data-line]');
+  for (let i = 0; i < btns.length; i++) {
+    if (Number(btns[i].dataset.line) === line) return i;
   }
-  return items;
+  return -1;
+}
+
+function markActiveOutlineItem(line) {
+  if (!els.docOutline) return;
+  const btns = els.docOutline.querySelectorAll('.outline-item');
+  btns.forEach((b) => b.classList.toggle('active', Number(b.dataset.line) === line));
+}
+
+/** Highlight the outline item closest above the cursor (scroll-spy). */
+function syncActiveOutlineItem() {
+  if (!els.docOutline || !editorHandle) return;
+  if (els.docOutline.classList.contains('hidden')) return;
+  const btns = els.docOutline.querySelectorAll('.outline-item[data-line]');
+  if (!btns.length) return;
+  let cur = 0;
+  try { cur = editorHandle.easyMDE.codemirror.getCursor().line; } catch (_) { /* ignore */ }
+  let best = btns[0];
+  for (const b of btns) {
+    if (Number(b.dataset.line) <= cur) best = b;
+    else break;
+  }
+  btns.forEach((b) => b.classList.toggle('active', b === best));
+}
+
+/** Debounced outline rebuild for typing (keystroke-cheap, render-expensive). */
+function scheduleOutlineRefresh() {
+  if (!els.docOutline || els.docOutline.classList.contains('hidden')) return;
+  clearTimeout(outlineRefreshTimer);
+  outlineRefreshTimer = setTimeout(() => { renderDocOutline(); }, 400);
 }
 
 function renderDocOutline() {
@@ -1778,14 +1861,11 @@ function renderDocOutline() {
     btn.className = 'outline-item level-' + it.level;
     btn.textContent = it.text;
     btn.title = 'Line ' + (it.line + 1);
-    btn.addEventListener('click', () => {
-      const cm = editorHandle.easyMDE.codemirror;
-      cm.setCursor({ line: it.line, ch: 0 });
-      cm.scrollIntoView({ line: it.line, ch: 0 }, 80);
-      cm.focus();
-    });
+    btn.dataset.line = String(it.line);
+    btn.addEventListener('click', () => jumpToOutlineHeading(it.line));
     els.docOutline.appendChild(btn);
   }
+  syncActiveOutlineItem();
 }
 
 
@@ -1846,13 +1926,14 @@ function setupDocOutline() {
     els.btnOutline.classList.toggle('active-panel', open);
     if (open) renderDocOutline();
   });
-  // Refresh outline when typing (debounced via existing change is heavy — only when open)
-  document.addEventListener('keydown', (e) => {
-    if (!els.docOutline || els.docOutline.classList.contains('hidden')) return;
-    if (e.key === 'Escape' && els.docOutline && !els.docOutline.classList.contains('hidden')) {
-      // don't steal Esc from find bar
-    }
-  });
+  // Scroll-spy: highlight the heading above the cursor. Bound once — the
+  // CodeMirror instance is stable for the session (tabs swap Docs, not editors).
+  if (!outlineCursorBound && editorHandle) {
+    outlineCursorBound = true;
+    try {
+      editorHandle.easyMDE.codemirror.on('cursorActivity', () => syncActiveOutlineItem());
+    } catch (_) { /* ignore */ }
+  }
 }
 
 

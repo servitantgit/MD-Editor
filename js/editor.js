@@ -730,6 +730,30 @@ export function createEditor(textareaEl, deps) {
     return headingsFolded;
   }
 
+  /**
+   * Clear the collapsed mark hiding `line` (if any), so a programmatic jump
+   * from the outline lands on visible text instead of inside a fold.
+   * Returns true when something was unfolded.
+   */
+  function unfoldAtLine(line) {
+    let unfolded = false;
+    headingFoldMarks = headingFoldMarks.filter((m) => {
+      let dead = false;
+      try {
+        const r = m.find();
+        if (!r) dead = true;
+        else if (line >= r.from.line && line <= r.to.line) {
+          m.clear();
+          unfolded = true;
+          dead = true;
+        }
+      } catch (_) { dead = true; }
+      return !dead;
+    });
+    if (unfolded && headingFoldMarks.length === 0) headingsFolded = false;
+    return unfolded;
+  }
+
   return {
     easyMDE,
     refreshLayout,
@@ -746,6 +770,7 @@ export function createEditor(textareaEl, deps) {
     clearFind,
     toggleLineWrapping,
     toggleHeadingFolds,
+    unfoldAtLine,
     destroy,
   };
 }
