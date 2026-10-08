@@ -247,6 +247,14 @@ export function createMinimap(cm, canvasEl, opts = {}) {
   cm.on('change', schedulePaintDebounced);
   cm.on('cursorActivity', schedulePaintDebounced);
 
+  // The HTML height handshake grows the iframe WITHOUT any scroll event, which
+  // changes the pane's scrollHeight and therefore the viewport rectangle —
+  // repaint when a frame reports its new height.
+  function onFrameHeightMessage(e) {
+    if (e && e.data && e.data.type === 'md-editor-frame-height') schedulePaint();
+  }
+  window.addEventListener('message', onFrameHeightMessage);
+
   if (ro && canvasEl.parentElement) ro.observe(canvasEl.parentElement);
   bindPreview();
 
@@ -269,6 +277,7 @@ export function createMinimap(cm, canvasEl, opts = {}) {
       try { cm.off('viewportChange', schedulePaint); } catch (_) {}
       try { cm.off('change', schedulePaintDebounced); } catch (_) {}
       try { cm.off('cursorActivity', schedulePaintDebounced); } catch (_) {}
+      try { window.removeEventListener('message', onFrameHeightMessage); } catch (_) {}
       if (boundPreview) {
         try { boundPreview.removeEventListener('scroll', schedulePaint); } catch (_) {}
         try { if (ro) ro.unobserve(boundPreview); } catch (_) {}

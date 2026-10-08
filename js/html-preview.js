@@ -75,7 +75,11 @@ export async function buildHtmlSrcdoc(html, currentPath, resolver) {
     doc.head.insertBefore(meta, doc.head.firstChild);
   }
 
-  // Bridge: clicks on data-md-path links ask the parent to open that path
+  // Bridge: clicks on data-md-path links ask the parent to open that path,
+  // and the frame reports its own document height — the parent cannot measure
+  // it (sandbox without allow-same-origin = opaque origin), yet the preview
+  // pane must know how tall to grow the iframe so THE PANE scrolls the whole
+  // document (one scrollbar, like markdown) instead of an inner frame scrollbar.
   const bridge = doc.createElement('script');
   bridge.textContent = [
     'document.addEventListener("click",function(e){',
@@ -84,6 +88,14 @@ export async function buildHtmlSrcdoc(html, currentPath, resolver) {
     '  e.preventDefault();',
     '  try{parent.postMessage({type:"md-editor-open",path:a.getAttribute("data-md-path")},"*");}catch(_){}',
     '},true);',
+    'function __mdPostHeight(){try{',
+    '  var d=document.documentElement,b=document.body;',
+    '  var h=Math.max(d?d.scrollHeight:0,b?b.scrollHeight:0);',
+    '  if(h>0)parent.postMessage({type:"md-editor-frame-height",height:h},"*");',
+    '}catch(_){}}',
+    'try{if(window.ResizeObserver){new ResizeObserver(__mdPostHeight).observe(document.documentElement);}}catch(_){}',
+    'window.addEventListener("load",__mdPostHeight);',
+    '__mdPostHeight();',
   ].join('');
   if (doc.body) doc.body.appendChild(bridge);
   else doc.documentElement.appendChild(bridge);

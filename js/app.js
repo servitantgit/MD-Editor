@@ -1626,6 +1626,9 @@ function fillPreviewPane(node, plain, kind) {
         node.appendChild(iframe);
       }
       iframe.srcdoc = plain || '<!-- empty -->';
+      // This pane had no editor handle yet — drop any stale handshake height
+      // from an earlier document; the frame grows to its content on its own.
+      iframe.style.removeProperty('height');
       const path = state.currentPath;
       const resolver = imageResolver;
       buildHtmlSrcdoc(plain || '', path, resolver)

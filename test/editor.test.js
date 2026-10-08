@@ -411,4 +411,88 @@ test('Live/Preview switching with unchanged text NEVER reloads the HTML iframe (
   handle.destroy();
 });
 
+test('height handshake: md-editor-frame-height sizes the HTML iframe (single pane scrollbar)', async () => {
+  const dom = new JSDOM('<!doctype html><body></body>');
+  const { easyMDE, codemirror } = installEnvironment(dom);
+
+  const container = dom.window.document.createElement('div');
+  container.className = 'EasyMDEContainer';
+  const cmWrap = dom.window.document.createElement('div');
+  cmWrap.className = 'CodeMirror';
+  const sidePane = dom.window.document.createElement('div');
+  sidePane.className = 'editor-preview-side';
+  const fullPane = dom.window.document.createElement('div');
+  fullPane.className = 'editor-preview';
+  container.appendChild(cmWrap);
+  container.appendChild(sidePane);
+  container.appendChild(fullPane);
+  dom.window.document.body.appendChild(container);
+  codemirror.getWrapperElement = () => cmWrap;
+
+  const htmlDoc = '<h1>Hello HTML</h1><p>HTML_PAGE_OK</p>';
+  easyMDE.isSideBySideActive = () => true;
+  easyMDE.isPreviewActive = () => false;
+  easyMDE.value = () => htmlDoc;
+  easyMDE.options = {};
+  let capturedPreviewRender = null;
+  const origEasyMDE = globalThis.EasyMDE;
+  globalThis.EasyMDE = function (opts) {
+    capturedPreviewRender = opts && opts.previewRender;
+    return origEasyMDE();
+  };
+
+  const { createEditor } = await import('../js/editor.js');
+  const handle = createEditor(dom.window.document.createElement('textarea'), {
+    marked: {},
+    imageResolver: { resolve: async () => '' },
+    getCurrentPath: () => 'Notes/page.html',
+    onImageUploadRequest: () => {},
+    onImagePaste: () => {},
+  });
+  easyMDE.options.previewRender = capturedPreviewRender;
+  globalThis.EasyMDE = origEasyMDE;
+
+  const settle = async () => {
+    await new Promise((r) => setTimeout(r, 0));
+    await new Promise((r) => setTimeout(r, 0));
+    await new Promise((r) => setTimeout(r, 20));
+  };
+
+  handle.renderActivePreview();
+  await settle();
+  const frame = sidePane.querySelector('iframe.html-preview-frame');
+  assert.ok(frame, 'iframe must be created in the side pane');
+  const srcdoc = frame.srcdoc || '';
+  assert.ok(srcdoc.includes('md-editor-frame-height'),
+    'srcdoc bridge must report the document height — a sandboxed frame (opaque origin) cannot be measured from the parent');
+
+  const postHeight = (height, source) => {
+    dom.window.dispatchEvent(new dom.window.MessageEvent('message', {
+      data: { type: 'md-editor-frame-height', height },
+      source: source === undefined ? frame.contentWindow : source,
+    }));
+  };
+
+  // The frame grows to its document; the PANE then scrolls it — one scrollbar
+  // (like markdown), and the minimap's preview-pane tracking works unchanged.
+  postHeight(2400);
+  assert.equal(frame.style.getPropertyValue('height'), '2400px',
+    'frame-height message must size the iframe so the pane scrolls the whole document');
+  assert.equal(frame.style.getPropertyPriority('height'), 'important',
+    'inline height must be !important — app.css sets height:100%!important and would win the cascade otherwise');
+
+  // Garbage / foreign posts must not resize our frame.
+  postHeight(0);
+  postHeight('x');
+  postHeight(-5);
+  postHeight(1e12);
+  assert.equal(frame.style.getPropertyValue('height'), '2400px',
+    'invalid heights must not resize the frame');
+  postHeight(9999, null); // not from this frame's window
+  assert.equal(frame.style.getPropertyValue('height'), '2400px',
+    'messages from other sources must be ignored');
+
+  handle.destroy();
+});
+
 

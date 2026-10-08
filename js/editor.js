@@ -218,7 +218,12 @@ export function createEditor(textareaEl, deps) {
       }
       const raw = plainText || '<!-- empty -->';
       // Compare before assigning: even an identical value reloads the frame.
-      if (syncSrcdoc && iframe.srcdoc !== raw) iframe.srcdoc = raw;
+      // Drop the stale handshake height first — the OLD document's height
+      // must not outlive its reload (a shorter page would keep the tall frame).
+      if (syncSrcdoc && iframe.srcdoc !== raw) {
+        iframe.style.removeProperty('height');
+        iframe.srcdoc = raw;
+      }
       const path = deps.getCurrentPath ? deps.getCurrentPath() : null;
       let srcdoc;
       try {
@@ -233,7 +238,10 @@ export function createEditor(textareaEl, deps) {
       // The pane may have been wiped by a stale caller in between (EasyMDE's
       // own `preview.innerHTML = newValue`); re-attach instead of dropping.
       if (iframe.parentElement !== previewEl) previewEl.appendChild(iframe);
-      if (iframe.srcdoc !== srcdoc) iframe.srcdoc = srcdoc;
+      if (iframe.srcdoc !== srcdoc) {
+        iframe.style.removeProperty('height'); // stale px from the old doc
+        iframe.srcdoc = srcdoc;
+      }
       state.renderedText = plainText; // this text is on screen now (flip-guard)
       return srcdoc;
     })();
@@ -315,9 +323,31 @@ export function createEditor(textareaEl, deps) {
 
   function onParentMessage(ev) {
     const data = ev && ev.data;
-    if (!data || data.type !== 'md-editor-open' || !data.path) return;
-    if (typeof deps.onOpenInternalLink === 'function') {
-      deps.onOpenInternalLink(String(data.path));
+    if (!data) return;
+    if (data.type === 'md-editor-open') {
+      if (!data.path) return;
+      if (typeof deps.onOpenInternalLink === 'function') {
+        deps.onOpenInternalLink(String(data.path));
+      }
+      return;
+    }
+    if (data.type !== 'md-editor-frame-height') return;
+    // Height handshake: the sandboxed frame (opaque origin) reports its own
+    // document height; we grow the iframe so the preview PANE scrolls the
+    // whole document — one scrollbar (like markdown) and the minimap's
+    // preview-pane tracking gets real scroll metrics to work with.
+    const h = Math.round(Number(data.height));
+    if (!isFinite(h) || h < 1 || h > 1e6) return;
+    // Match by window: several panes hold frames, and a foreign page must
+    // never be able to resize ours.
+    const frames = document.querySelectorAll('iframe.html-preview-frame');
+    for (const f of frames) {
+      if (f.contentWindow && ev.source && f.contentWindow === ev.source) {
+        // !important on purpose: app.css sets height:100%!important as the
+        // pre-handshake fallback and would win the cascade otherwise.
+        f.style.setProperty('height', h + 'px', 'important');
+        break;
+      }
     }
   }
   window.addEventListener('message', onParentMessage);

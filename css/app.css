@@ -1846,7 +1846,11 @@ body.md-layout-preview .editor-preview.editor-preview-active {
 body.md-layout-preview .html-preview-frame {
   width: 100% !important;
   height: 100% !important;
-  min-height: 100vh !important;
+  /* NOT 100vh: the pane is shorter than the viewport, so a 100vh frame always
+     overflowed it and showed an EXTRA scrollbar next to the frame's own.
+     The height handshake (md-editor-frame-height) sets the real px inline;
+     until it arrives the frame just fits the pane. */
+  min-height: 0 !important;
 }
 
 /* Live fullscreen: keep 50/50 if EasyMDE sizes them */
