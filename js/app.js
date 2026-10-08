@@ -1992,6 +1992,36 @@ function setupMobileShell() {
       }
     }
   });
+
+  // After rotate, 100vh / CodeMirror metrics are often stale → no vertical scroll.
+  let viewportTimer = null;
+  const syncViewport = () => {
+    clearTimeout(viewportTimer);
+    viewportTimer = setTimeout(() => {
+      const h = (window.visualViewport && window.visualViewport.height) || window.innerHeight;
+      if (h > 0) {
+        document.documentElement.style.setProperty('--app-height', h + 'px');
+        document.body.style.height = h + 'px';
+        document.body.style.maxHeight = h + 'px';
+      }
+      try {
+        if (editorHandle && typeof editorHandle.refreshLayout === 'function') {
+          editorHandle.refreshLayout();
+        }
+      } catch (_) { /* editor not ready */ }
+      try {
+        if (minimapHandle && typeof minimapHandle.refresh === 'function') {
+          minimapHandle.refresh();
+        }
+      } catch (_) { /* no minimap */ }
+    }, 120);
+  };
+  window.addEventListener('orientationchange', syncViewport);
+  window.addEventListener('resize', syncViewport);
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener('resize', syncViewport);
+  }
+  syncViewport();
 }
 
 function setupDocOutline() {
