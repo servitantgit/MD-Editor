@@ -463,13 +463,24 @@ test('height handshake: md-editor-frame-height sizes the HTML iframe (single pan
   const frame = sidePane.querySelector('iframe.html-preview-frame');
   assert.ok(frame, 'iframe must be created in the side pane');
   const srcdoc = frame.srcdoc || '';
+  // The parent cannot measure an opaque-origin sandboxed frame, so the frame
+  // reports its own document height — the bridge below is what schedules the
+  // postMessage that the parent listener (onParentMessage) reacts to.
   assert.ok(srcdoc.includes('md-editor-frame-height'),
     'srcdoc bridge must report the document height — a sandboxed frame (opaque origin) cannot be measured from the parent');
+  assert.ok(srcdoc.includes('__mdPostHeight'),
+    'bridge script must POST the document height (load + ResizeObserver + immediate)');
 
-  const postHeight = (height, source) => {
+  // Emulate what a real browser does with srcdoc: the frame posts its height
+  // from its own window, the parent handler matches it by contentWindow and
+  // grows the iframe so the preview PANE scrolls the whole document (one
+  // scrollbar, like markdown — no inner frame scrollbar).
+  const frameWin = frame.contentWindow;
+  assert.ok(frameWin, 'iframe must have a contentWindow');
+  const postHeight = (height) => {
     dom.window.dispatchEvent(new dom.window.MessageEvent('message', {
       data: { type: 'md-editor-frame-height', height },
-      source: source === undefined ? frame.contentWindow : source,
+      source: frameWin,
     }));
   };
 
