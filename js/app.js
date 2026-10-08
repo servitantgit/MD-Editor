@@ -187,46 +187,66 @@ let tabsRestored = false;
 init();
 
 async function init() {
+  // Wire chrome controls BEFORE any showApp/OAuth work. If a later step throws
+  // (search, backlinks, tree), the user must still be able to sign in again.
+  if (els.btnLogin) els.btnLogin.onclick = onLoginClick;
+  if (els.btnLogout) {
+    els.btnLogout.onclick = () => {
+      // Defence in depth: logout reloads the page, which tears down every timer
+      // anyway, but an autosave aimed at the old token should not outlive it.
+      if (autosave) autosave.destroy();
+      sessionStorage.clear();
+      location.reload();
+    };
+  }
+  if (els.btnRefresh) els.btnRefresh.onclick = () => loadTree();
+  // Wrap in arrows: assigning the handler directly would hand it the click
+  // event as `folderPath`, creating "[object PointerEvent]/name.md".
+  if (els.btnNewFile) {
+    els.btnNewFile.onclick = () => {
+      closeAddMenu();
+      onCreateNewFile();
+    };
+  }
+  if (els.btnNewFolder) {
+    els.btnNewFolder.onclick = () => {
+      closeAddMenu();
+      onCreateNewFolder();
+    };
+  }
+  try { setupAddMenu(); } catch (e) { console.warn('setupAddMenu', e); }
+  if (els.btnSave) els.btnSave.onclick = onSaveFile;
+  if (els.btnExportPdf) els.btnExportPdf.onclick = onExportPdf;
+  if (els.btnDelete) els.btnDelete.onclick = onDeleteFile;
+
   // Must be awaited, and must be allowed to end init() on its own: finishLogin()
   // calls showApp() itself. Reading the session while the token check is still
   // in flight would build the app TWICE when an OAuth callback lands on a tab
   // that still holds a session — two editors, two ResizeObservers, two paste
   // handlers, with the first one nobody can reach to tear down.
-  if (await consumeOAuthRedirect()) return;
+  try {
+    if (await consumeOAuthRedirect()) return;
+  } catch (e) {
+    console.error('OAuth callback failed', e);
+    setLoginStatus('Login failed: ' + (e && e.message ? e.message : e), true);
+  }
 
   const saved = readSession();
   if (saved) {
-    state.client = new GitHubClient(saved);
-    state.branch = saved.branch;
-    showApp(saved.owner, saved.repo);
-    loadTree();
+    try {
+      state.client = new GitHubClient(saved);
+      state.branch = saved.branch;
+      showApp(saved.owner, saved.repo);
+      loadTree();
+    } catch (e) {
+      console.error('Session restore failed', e);
+      sessionStorage.removeItem('gh_token');
+      setLoginStatus('Could not restore session: ' + (e && e.message ? e.message : e) + '. Sign in again.', true);
+      restorePendingLoginFields();
+    }
   } else {
     restorePendingLoginFields();
   }
-
-  els.btnLogin.onclick = onLoginClick;
-  els.btnLogout.onclick = () => {
-    // Defence in depth: logout reloads the page, which tears down every timer
-    // anyway, but an autosave aimed at the old token should not outlive it.
-    if (autosave) autosave.destroy();
-    sessionStorage.clear();
-    location.reload();
-  };
-  els.btnRefresh.onclick = () => loadTree();
-  // Wrap in arrows: assigning the handler directly would hand it the click
-  // event as `folderPath`, creating "[object PointerEvent]/name.md".
-  els.btnNewFile.onclick = () => {
-    closeAddMenu();
-    onCreateNewFile();
-  };
-  els.btnNewFolder.onclick = () => {
-    closeAddMenu();
-    onCreateNewFolder();
-  };
-  setupAddMenu();
-  els.btnSave.onclick = onSaveFile;
-  els.btnExportPdf.onclick = onExportPdf;
-  els.btnDelete.onclick = onDeleteFile;
 
   // Switching tabs is the natural checkpoint Google Docs uses too: commit a
   // dirty draft immediately instead of making the user wait out the 10s window.
@@ -611,13 +631,13 @@ function showApp(owner, repo) {
   renderTabs();
 
   // Hybrid layout + Commit / History panels (idempotent re-bind each showApp)
-  applyLayoutMode(layoutMode);
-  setupLayoutToggle();
-  setupFindBar();
-  setupDocOutline();
-  setupBacklinks();
-  setupMobileShell();
-  setupMinimap();
+  try { applyLayoutMode(layoutMode); } catch (e) { console.warn(e); }
+  try { setupLayoutToggle(); } catch (e) { console.warn(e); }
+  try { setupFindBar(); } catch (e) { console.warn(e); }
+  try { setupDocOutline(); } catch (e) { console.warn(e); }
+  try { setupBacklinks(); } catch (e) { console.warn(e); }
+  try { setupMobileShell(); } catch (e) { console.warn(e); }
+  try { setupMinimap(); } catch (e) { console.warn(e); }
   if (els.minimapWrap && !els.minimapWrap.classList.contains('hidden')) {
     ensureMinimap();
   }
@@ -739,11 +759,14 @@ function setupSearch(owner, repo) {
       // The index may have just gained the file the results are showing.
       if (searchUI && searchUI.isActive()) searchUI.renderResults(els.searchInput.value);
       try {
-        if (searchSync && searchSync.index) {
-          searchSync.index.bodyCache.forEach((path, body) => backlinkIndex.setFile(path, body));
+        const cache = searchSync && searchSync.index && searchSync.index.bodyCache;
+        if (cache && typeof cache.forEach === 'function') {
+          cache.forEach((path, body) => {
+            try { backlinkIndex.setFile(path, body); } catch (__) {}
+          });
         }
       } catch (_) {}
-      renderBacklinksPanel();
+      try { renderBacklinksPanel(); } catch (_) {}
     },
     onFileIndexed: (path, body) => {
       try { backlinkIndex.setFile(path, body); } catch (_) {}
@@ -2156,9 +2179,12 @@ async function ensureBacklinksPopulated() {
   if (!searchSync || !searchSync.index) return;
   // Prefer bodies already in the search LRU.
   try {
-    searchSync.index.bodyCache.forEach((path, body) => {
-      backlinkIndex.setFile(path, body);
-    });
+    const cache = searchSync.index.bodyCache;
+    if (cache && typeof cache.forEach === 'function') {
+      cache.forEach((path, body) => {
+        try { backlinkIndex.setFile(path, body); } catch (__) {}
+      });
+    }
   } catch (_) {}
   if (backlinkIndex.size > 0) {
     renderBacklinksPanel();
