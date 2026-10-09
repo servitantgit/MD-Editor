@@ -950,6 +950,7 @@ function showApp(owner, repo) {
   try { applyLayoutMode(layoutMode); } catch (e) { console.warn(e); }
   try { setupLayoutToggle(); } catch (e) { console.warn(e); }
   try { setupFindBar(); } catch (e) { console.warn(e); }
+  try { setupMoreFileMenu(); } catch (e) { console.warn(e); }
   try { setupDocOutline(); } catch (e) { console.warn(e); }
   try { setupBacklinks(); } catch (e) { console.warn(e); }
   try { setupMobileShell(); } catch (e) { console.warn(e); }
@@ -2044,10 +2045,16 @@ function setupMoreFileMenu() {
     els.btnMoreFile.setAttribute('aria-expanded', 'false');
   };
   els.btnMoreFile.addEventListener('click', (e) => {
+    e.preventDefault();
     e.stopPropagation();
     if (!els.moreFileMenu) return;
-    const open = els.moreFileMenu.classList.toggle('hidden') === false;
-    els.btnMoreFile.setAttribute('aria-expanded', open ? 'true' : 'false');
+    const willOpen = els.moreFileMenu.classList.contains('hidden');
+    if (willOpen) {
+      els.moreFileMenu.classList.remove('hidden');
+      els.btnMoreFile.setAttribute('aria-expanded', 'true');
+    } else {
+      close();
+    }
   });
   document.addEventListener('click', (e) => {
     if (!els.moreFileMenu || els.moreFileMenu.classList.contains('hidden')) return;
@@ -2057,6 +2064,12 @@ function setupMoreFileMenu() {
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') close();
   });
+  // Close after choosing an action
+  if (els.moreFileMenu) {
+    els.moreFileMenu.addEventListener('click', (e) => {
+      if (e.target.closest('button')) close();
+    });
+  }
 }
 
 function setupFindBar() {

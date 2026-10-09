@@ -310,7 +310,8 @@
       <div id="tab-bar" class="tab-bar hidden" role="tablist" aria-label="Open files"></div>
       <div class="editor-toolbar">
         <div class="tb-group tb-meta">
-          <span class="current-file" id="current-file">No file selected</span>
+          <!-- Filename lives in the tab strip; keep #current-file for JS, hide visually -->
+          <span class="current-file sr-only" id="current-file" aria-live="polite">No file selected</span>
           <span class="lang-badge" id="lang-badge" title="Language (from file extension)">—</span>
           <button type="button" class="secondary mobile-only" id="btn-mobile-fmt" title="Show formatting tools" aria-expanded="false" aria-controls="easymde-toolbar">Aa</button>
         </div>
