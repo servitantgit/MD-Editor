@@ -179,9 +179,10 @@ let syncing = false;
 //   doc        the tab's own CodeMirror document, so undo history, cursor and
 //              scroll position survive switching away and back
 //   sha        the last blob sha we know GitHub has for this file
-//   unsaved    we left the tab with something GitHub did not have yet. Such a tab
-//              is reloaded from GitHub on return (the draft banner then offers the
-//              local text) instead of trusting a cached document
+//   unsaved    we left the tab with something GitHub does not have yet (hybrid
+//              model: local draft / working tree). The cached CodeMirror doc is
+//              still trusted on return — do NOT refetch, or the in-memory edits
+//              and undo history are wiped. Draft banner is for cold reload only.
 //   stale      the file was renamed/moved or its links were rewritten, so the cached
 //              document no longer matches GitHub
 //   commitSeen a commit for this path landed since we started leaving it
@@ -1427,7 +1428,9 @@ async function openFile(path, { reload = false } = {}) {
   }
 
   const cached = tabDocs.get(path);
-  const useCache = !reload && !!cached && !!cached.doc && !cached.stale && !cached.unsaved;
+  // Unsaved tabs MUST use the cached doc (hybrid autosave). Refetching would
+  // replace in-memory edits with the remote blob and look like data loss.
+  const useCache = !reload && !!cached && !!cached.doc && !cached.stale;
 
   els.btnSave.disabled = true;
   els.btnExportPdf.disabled = true;
@@ -1481,11 +1484,17 @@ async function openFile(path, { reload = false } = {}) {
     const opened = await ensureAutosave().onOpen(path, remoteText, sha);
     if (seq !== openSeq) return; // another open won the race
 
+    // Returning to a dirty cached tab: onOpen treated the in-memory text as
+    // "remote" and left state CLEAN. Re-arm dirty so Save / Commit still work.
+    if (useCache && cached && cached.unsaved && autosave && !opened.hasDraft) {
+      autosave.onChange(remoteText);
+    }
+
     let doc;
     if (useCache) {
       doc = cached.doc;
       cached.sha = sha;
-      cached.unsaved = false;
+      // Keep cached.unsaved — hybrid model leaves dirty tabs dirty until Save/Commit.
       cached.commitSeen = false;
     } else {
       doc = editorHandle.createDoc(opened.text);

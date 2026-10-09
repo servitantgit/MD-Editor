@@ -10,6 +10,7 @@ Prefer automated coverage in `test/*.test.js` and `e2e_smoke_test.py` when pract
 - [ ] **Save** pushes the current file once; status `✓ Saved to GitHub`.
 - [ ] Editing several files fills the **Commit** badge; Commit panel lists them; Commit/Push writes them and clears badges.
 - [ ] Switching tabs or hiding the browser tab does **not** auto-push (draft stays local).
+- [ ] Switching **back** to a dirty tab restores the same text, cursor and undo (no silent refetch).
 - [ ] Closing a dirty tab does **not** force a GitHub commit; neighbour tab activates; draft recoverable if needed.
 - [ ] Single 409 on Save is retried silently; two 409s show Reload / Overwrite.
 - [ ] `beforeunload` never starts a network write (only the browser prompt when dirty).
