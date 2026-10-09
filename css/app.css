@@ -2774,3 +2774,7 @@ body.md-layout-source .editor-preview-active-side {
 .tb-group.tb-meta {
   max-width: none;
 }
+
+.tb-group.tb-export {
+  /* sits between panels and file actions — borders from .tb-group */
+}
