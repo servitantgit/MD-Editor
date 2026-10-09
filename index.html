@@ -326,6 +326,7 @@
           <button class="secondary" id="btn-minimap" title="Document minimap">Map</button>
         </div>
         <div class="tb-group tb-file" role="group" aria-label="File actions">
+          <button class="secondary desktop-tool" id="btn-export-pdf" disabled title="Export the active page to PDF">PDF</button>
           <button id="btn-save" class="tb-save" disabled title="Save now (desktop). On phone: autosave runs on idle; status dot shows sync state.">
             <i class="fa-solid fa-floppy-disk" aria-hidden="true"></i><span class="btn-lbl"> Save</span>
           </button>
@@ -334,12 +335,6 @@
                other operation (moves, deletes, folder ops), while these states
                describe the live condition of the open file and must not flicker. -->
           <span id="autosave-status" class="autosave-status"></span>
-          <div class="tb-more-wrap desktop-tool">
-            <button type="button" class="secondary" id="btn-more-file" title="More file actions" aria-expanded="false" aria-controls="more-file-menu">⋯</button>
-            <div id="more-file-menu" class="tb-more-menu hidden" role="menu">
-              <button type="button" class="secondary" id="btn-export-pdf" role="menuitem" disabled title="Export the active page to PDF">📄 Export PDF</button>
-            </div>
-          </div>
           <button class="secondary danger tb-delete" id="btn-delete" disabled title="Delete the active file from the repository">
             <i class="fa-solid fa-trash" aria-hidden="true"></i><span class="btn-lbl"> Delete</span>
           </button>
