@@ -349,10 +349,7 @@ with sync_playwright() as p:
     )
     print("✓ Save skips an untouched file; informational statuses still clear themselves")
 
-    # --- 8. Two-tier autosave. Typing must NOT commit; the 10s idle window
-    # must. (The 5-minute maximum is deliberately NOT tested here — real time
-    # 5 minutes in CI flakes constantly, and test/autosave.test.js covers it
-    # with a fake clock.)
+    # --- 8. Hybrid autosave: local draft on idle; GitHub only on Save/Commit.
     def writes_with(marker):
         return [w for w in CONTENT_WRITES if marker in w["text"]]
 
@@ -365,29 +362,21 @@ with sync_playwright() as p:
     assert not CONTENT_WRITES, f"nothing at all should have been committed yet: {CONTENT_WRITES}"
     page.wait_for_function(
         "document.getElementById('autosave-status').textContent.includes('Unsaved')"
-        " || document.getElementById('autosave-status').textContent.includes('Draft saved')",
+        " || document.getElementById('autosave-status').textContent.includes('Local only')",
         timeout=3000,
     )
     print("✓ typing shows the unsaved label and commits nothing")
 
-    # Now let the editor go idle: 10s after the last keystroke it must commit,
-    # exactly once, and with the same message a manual save would use.
-    # Poll for the first commit instead of sleeping a fixed time, then keep watching:
-    # "exactly once" means no duplicate follows the first one a moment later.
-    deadline = time.time() + 20
-    while time.time() < deadline and not writes_with("AUTOSAVE_IDLE_MARKER"):
-        page.wait_for_timeout(200)
-    page.wait_for_timeout(3000)
+    # 10s idle must NOT push — only local draft status.
+    page.wait_for_timeout(12000)
     idle_writes = writes_with("AUTOSAVE_IDLE_MARKER")
-    assert len(idle_writes) == 1, \
-        f"expected exactly one idle commit, got {len(idle_writes)}: {CONTENT_WRITES}"
-    assert idle_writes[0]["message"] == "Update Notes/Test note.md", \
-        f"autosave commit message changed: {idle_writes[0]['message']!r}"
+    assert len(idle_writes) == 0, \
+        f"idle must not auto-commit, got {len(idle_writes)}: {CONTENT_WRITES}"
     page.wait_for_function(
-        "document.getElementById('autosave-status').textContent.includes('Saved to GitHub')",
+        "document.getElementById('autosave-status').textContent.includes('Local only')",
         timeout=5000,
     )
-    print("✓ 10s idle commits once, with the same message format as a manual save")
+    print("✓ 10s idle stays local only (no GitHub put)")
 
     # --- 9. Save is an escape hatch, not the only way to save: clicking it must
     # commit immediately, long before the idle window would have fired.
@@ -632,7 +621,7 @@ with sync_playwright() as p:
     assert toolbar_delete[0]["sha"], f"toolbar DELETE carries no sha: {toolbar_delete[0]}"
     print("✓ toolbar delete: cancel sends nothing, accept sends one DELETE with a sha")
 
-    # --- D. Continuous typing: no commit during typing, one commit after 10s idle ---
+    # --- D. Continuous typing: no commit during typing, still none after 10s idle ---
     # Re-open the test note (mock tree still has it)
     page.click(".file-item:not(.folder)")
     page.wait_for_function("document.getElementById('btn-save').disabled === false", timeout=5000)
@@ -645,11 +634,11 @@ with sync_playwright() as p:
     # Should be ~28 chars * 100ms = 2.8s total, well under 10s idle
     page.wait_for_timeout(3000)
     assert not CONTENT_WRITES, f"typing committed during active typing: {CONTENT_WRITES}"
-    # Now wait 10s idle
+    # Now wait 10s idle — hybrid model must still not push
     page.wait_for_timeout(11000)
     idle_writes = [w for w in CONTENT_WRITES if w["method"] == "PUT"]
-    assert len(idle_writes) == 1, f"expected exactly one idle commit, got {len(idle_writes)}: {CONTENT_WRITES}"
-    print(f"✓ continuous typing commits nothing; 10s idle commits once")
+    assert len(idle_writes) == 0, f"idle must not auto-commit, got {len(idle_writes)}: {CONTENT_WRITES}"
+    print(f"✓ continuous typing commits nothing; 10s idle stays local")
 
     # --- E. Draft survives reload ---
     # Type text, don't wait for commit, reload page, open file → banner appears
@@ -910,17 +899,19 @@ with sync_playwright() as p:
     wait_until(lambda: page.locator("#tab-bar .tab.dirty").count() == 0, what="the dot to clear after Save")
     print("✓ the unsaved dot follows the active file and clears on save")
 
-    # G4. Closing a dirty tab loses nothing: it is committed, and the neighbour takes over.
+    # G4. Closing a dirty tab: draft stays local (no auto-push); neighbour takes over.
     CONTENT_WRITES.clear()
     page.click(".CodeMirror")  # the Save click left the focus on the button
     page.keyboard.type("G_TAB_B_MORE")
     assert "G_TAB_B_MORE" in editor_text(), "the test did not manage to type into the editor"
     page.click("#tab-bar .tab.active .tab-close")
-    wait_until(lambda: any("G_TAB_B_MORE" in w["text"] for w in CONTENT_WRITES), what="the commit of the closed tab")
     wait_until(lambda: tab_labels() == ["Test note.md"], what="tab B to disappear")
     wait_until(lambda: active_tab() == "Test note.md", what="the neighbour to become active")
+    page.wait_for_timeout(800)
+    assert not any("G_TAB_B_MORE" in w.get("text", "") for w in CONTENT_WRITES), \
+        f"closing a dirty tab must not auto-commit: {CONTENT_WRITES}"
     assert "G_TAB_A_EDIT" in editor_text(), "the neighbour tab does not show its own text"
-    print("✓ closing a dirty tab commits it and hands over to the neighbour")
+    print("✓ closing a dirty tab keeps draft local and hands over to the neighbour")
 
     # G5. Tabs survive a page reload; only the active one is fetched at once.
     open_in_tree("Second note.md")
@@ -984,9 +975,10 @@ with sync_playwright() as p:
     CONTENT_WRITES.clear()
     page.click(".CodeMirror")
     page.keyboard.type("G_LAST_TAB_EDIT")
-    page.click("#tab-bar .tab.active .tab-close")
+    page.click("#btn-save")
     wait_until(lambda: any("G_LAST_TAB_EDIT" in w["text"] for w in CONTENT_WRITES if w["method"] == "PUT"),
-               what="the commit of the last tab as it closed")
+               what="explicit Save before closing the last tab")
+    page.click("#tab-bar .tab.active .tab-close")
     wait_until(lambda: page.locator("#tab-bar.hidden").count() == 1, what="the tab bar to hide")
     assert editor_text() == "", "the editor still shows the closed file"
     assert page.evaluate("document.getElementById('btn-save').disabled") is True

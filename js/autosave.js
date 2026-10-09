@@ -3,9 +3,9 @@
 //
 //   LOCAL  (IndexedDB) — every keystroke, debounced 400ms. Crash recovery.
 //                        Nothing here talks to GitHub.
-//   REMOTE (GitHub)    — one commit per window: when the editor has been idle
-//                        for 10s, or 5min after the file first became dirty,
-//                        or when the user clicks Save. Never on a keystroke.
+//   REMOTE (GitHub)    — only on explicit Save (or multi-file Commit in app.js).
+//                        Idle / max timers do NOT push — they only finish the
+//                        local draft so Commit can accumulate changes.
 //
 // No DOM at all: the UI hands in a status setter and gets back a label to
 // paint. Everything about the two timers is in AGENTS.md — read it before
@@ -27,12 +27,12 @@ export const MAX_MS = 5 * 60 * 1000;
  *   clean      --onChange-->            dirtyLocal   ● Unsaved
  *   dirtyLocal --400ms draft write-->   dirtyIdle    ○ Draft saved locally
  *   dirtyIdle  --onChange-->            dirtyLocal   (idle timer restarts)
- *   dirtyLocal --10s idle elapsed-->    pushing      ⟳ Saving to GitHub…
- *   dirtyLocal --5min max elapsed-->    pushing      (even while still typing)
- *   dirtyLocal --saveNow()/flush/tab--> pushing      (immediate)
+ *   dirtyLocal --10s idle / local draft--> dirtyIdle  ○ Local only (not on GitHub)
+ *   dirtyLocal --saveNow() / Commit----> pushing      ⟳ Saving to GitHub…
+ *   dirtyIdle  --saveNow()-------------> pushing
  *   pushing    --putFile resolves-->    clean        ✓ Saved to GitHub
  *   pushing    --409 twice in a row-->   error        ⚠ reload or overwrite
- *   pushing    --any other error-->     dirtyLocal   ⚠ Save failed, retry later
+ *   pushing    --any other error-->     dirtyLocal   ⚠ Save failed — use Save again
  *   error      --reload-->              clean        (fresh from GitHub)
  *   error      --overwrite-->           pushing      (push with the fresh sha)
  */
@@ -51,7 +51,7 @@ export const STATE = {
  */
 export const STATUS = {
   unsaved: { key: 'unsaved', text: '● Unsaved', variant: 'unsaved', fade: false },
-  drafted: { key: 'drafted', text: '○ Draft saved locally', variant: 'drafted', fade: false },
+  drafted: { key: 'drafted', text: '○ Local only — Save or Commit to push', variant: 'drafted', fade: false },
   saving: { key: 'saving', text: '⟳ Saving to GitHub…', variant: 'saving', fade: false },
   saved: { key: 'saved', text: '✓ Saved to GitHub', variant: 'ok', fade: true },
   error: (reason) => ({ key: 'error', text: `⚠ Save failed: ${reason}`, variant: 'err', fade: false }),
@@ -239,26 +239,36 @@ export class Autosave {
     }, this.debounceMs);
   }
 
-  /** Restarted by every onChange — that is what "idle" means. */
+  /**
+   * Restarted by every onChange. After idle: finish local draft only.
+   * Does NOT push to GitHub (hybrid model: Save / Commit own the remote).
+   */
   _armIdle() {
     this._cancel(this._idleTimer);
     this._idleTimer = this._after(() => {
       this._idleTimer = null;
-      this._push('idle');
+      void this._onIdleLocal();
     }, this.idleMs);
   }
 
-  /**
-   * Armed ONCE, when the file first became dirty, and deliberately NOT reset by
-   * onChange. Resetting it would mean a user who types continuously never gets a
-   * commit at all — which is exactly the failure this timer exists to prevent.
-   */
+  /** Max timer kept for API compat but no longer auto-pushes. */
   _armMax() {
-    if (this._maxTimer !== null) return;
-    this._maxTimer = this._after(() => {
-      this._maxTimer = null;
-      this._push('max');
-    }, this.maxMs);
+    // Intentionally empty: continuous typing no longer forces a GitHub commit.
+    // Remote writes are Save / multi-file Commit only.
+  }
+
+  async _onIdleLocal() {
+    if (this.destroyed || !this.path) return;
+    if (this.state === STATE.PUSHING || this.state === STATE.CLEAN) return;
+    // Ensure draft is on disk; paint "local only" status.
+    this._cancel(this._draftTimer);
+    this._draftTimer = null;
+    await this._writeDraft();
+    if (this.destroyed) return;
+    if (this.state === STATE.DIRTY_LOCAL || this.state === STATE.DIRTY_IDLE) {
+      this.state = STATE.DIRTY_IDLE;
+      this._setStatus(STATUS.drafted);
+    }
   }
 
   /** The LOCAL layer. Nothing here can touch the network. */
@@ -399,14 +409,13 @@ export class Autosave {
       this.onConflict({ path: task.path, text: task.text });
       return;
     }
-    // Any other failure: keep the draft and try again on the next idle window.
+    // Any other failure: keep the draft; user must Save again (no auto-retry push).
     this._backgroundErrors.set(task.path, result.reason);
     if (this.path !== task.path) return;
     this.state = STATE.DIRTY_LOCAL;
     this._setStatus(STATUS.error(result.reason));
     this._armDraftWrite();
     this._armIdle();
-    this._armMax();
   }
 
   /** The Save button: immediate commit, both timers cancelled. They stay
@@ -443,25 +452,32 @@ export class Autosave {
    * must feel instant, and the failure of a background commit is stored per-path
    * so it surfaces on THAT file, never on the one the user just opened.
    */
+  /**
+   * Leaving a file: persist the local draft only (no GitHub push).
+   * Remote is Save on this file or Commit for the whole working tree.
+   */
   async flushCurrentFile() {
     if (this.destroyed || !this.path) return;
     if (!this.hasUnsavedDraft()) {
       this._clearTimers();
       return;
     }
-    let written;
-    const draftWritten = new Promise((resolve) => { written = resolve; });
-    const pending = this._push('flush', { onDraftWritten: written });
-    if (pending && typeof pending.catch === 'function') pending.catch(() => {});
-    await draftWritten;
+    this._cancel(this._draftTimer);
+    this._draftTimer = null;
+    this._cancel(this._idleTimer);
+    this._idleTimer = null;
+    await this._writeDraft();
+    if (this.state === STATE.DIRTY_LOCAL || this.state === STATE.DIRTY_IDLE) {
+      this.state = STATE.DIRTY_IDLE;
+      this._setStatus(STATUS.drafted);
+    }
   }
 
-  /** The user hid the tab: treat it as idle and checkpoint now. Google Docs does
-   *  the same, and unlike beforeunload it is not competing with page teardown. */
+  /** The user hid the tab: local draft checkpoint only (no GitHub push). */
   onVisibilityChange(hidden) {
-    if (this.destroyed || !hidden || !this.path) return;
-    if (!this.hasUnsavedDraft()) return;
-    this._push('hidden');
+    if (!hidden || this.destroyed) return;
+    // Local draft only — do not auto-push when switching browser tabs.
+    this.flushDraftSync();
   }
 
   /** True while there is work that GitHub does not have yet. */

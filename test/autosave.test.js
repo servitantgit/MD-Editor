@@ -129,8 +129,8 @@ test('a keystroke marks the file dirty and arms all three timers', withTimers(as
   assert.equal(client.puts.length, 0, 'the local layer alone must never commit');
 }));
 
-test('the idle timer restarts on every keystroke, the max timer does not', withTimers(async () => {
-  const { autosave, client } = newAutosave();
+test('the idle timer restarts on every keystroke (local only, no GitHub push)', withTimers(async () => {
+  const { autosave, client, statuses } = newAutosave();
   await autosave.onOpen('a.md', 'REMOTE', 'sha-0');
 
   autosave.onChange('v1');
@@ -141,29 +141,31 @@ test('the idle timer restarts on every keystroke, the max timer does not', withT
 
   await advance(1_000); // t = 19s = 10s after the LAST keystroke
   await drain();
-  assert.equal(client.puts.length, 1, '10s after the last keystroke it commits');
-  assert.equal(client.puts[0].text, 'v2', 'the commit carries the latest text');
+  assert.equal(client.puts.length, 0, 'idle never auto-pushes to GitHub');
+  assert.equal(autosave.state, STATE.DIRTY_IDLE);
+  assert.equal(lastStatus(statuses).text, STATUS.drafted.text);
+  assert.equal(autosave.hasUnsavedDraft(), true);
 }));
 
-test('10s idle pushes, and 5 minutes of continuous typing pushes too', withTimers(async () => {
-  const { autosave, client, statuses } = newAutosave();
+test('idle and continuous typing never auto-push; only saveNow does', withTimers(async () => {
+  const { autosave, client } = newAutosave();
   await autosave.onOpen('a.md', 'REMOTE', 'sha-0');
 
-  // Type every 9 seconds for 5 minutes: the idle timer NEVER fires, so only the
-  // max timer can save the user here.
   let i = 0;
   while (i * 9_000 < MAX_MS) {
     autosave.onChange(`keystroke ${i}`);
     await advance(9_000);
     i++;
   }
+  await advance(IDLE_MS + 1_000);
+  await drain();
+  assert.equal(client.puts.length, 0, 'no auto-push on idle or max');
+  assert.equal(autosave.hasUnsavedDraft(), true);
 
-  assert.equal(i, Math.ceil(MAX_MS / 9_000));
-  assert.equal(client.puts.length, 1, 'the 5-minute max timer fires even mid-type');
-  assert.equal(lastStatus(statuses).text, STATUS.saved.text);
+  await autosave.saveNow();
+  await drain();
+  assert.equal(client.puts.length, 1, 'explicit Save writes to GitHub');
   assert.equal(autosave.state, STATE.CLEAN);
-  assert.ok(statusTexts(statuses).includes(STATUS.saving.text), 'the label went through saving');
-  assert.ok(statusTexts(statuses).includes(STATUS.unsaved.text), 'and through unsaved while typing');
 }));
 
 test('a successful commit clears the draft and reports the new sha', withTimers(async () => {
@@ -183,22 +185,23 @@ test('a successful commit clears the draft and reports the new sha', withTimers(
   assert.deepEqual(store.deletes, ['a.md'], 'a committed file keeps no draft');
 }));
 
-test('saveNow cancels both timers and the next keystroke arms fresh ones', withTimers(async () => {
+test('saveNow cancels timers and the next keystroke stays local until Save', withTimers(async () => {
   const { autosave, client } = newAutosave();
   await autosave.onOpen('a.md', 'REMOTE', 'sha-0');
   autosave.onChange('v1');
   await autosave.saveNow();
   await drain();
 
-  // 5 minutes later, nothing else may fire: the cancelled max timer must stay
-  // cancelled, or a single Save would schedule a spurious commit.
   await advance(MAX_MS + IDLE_MS);
-  assert.equal(client.puts.length, 1, 'a cancelled timer must stay cancelled');
+  assert.equal(client.puts.length, 1, 'no spurious commit after Save');
 
   autosave.onChange('v2');
   await advance(IDLE_MS);
   await drain();
-  assert.equal(client.puts.length, 2, 'the next keystroke arms the window again');
+  assert.equal(client.puts.length, 1, 'idle after edit does not push');
+  await autosave.saveNow();
+  await drain();
+  assert.equal(client.puts.length, 2, 'second Save pushes v2');
 }));
 
 test('saveNow on a clean file does not create an empty commit', withTimers(async () => {
@@ -226,21 +229,24 @@ test('typing during a push does not report the file as saved', withTimers(async 
   assert.equal(autosave.hasUnsavedDraft(), true);
 }));
 
-test('keystroke → Unsaved → 10s idle → Saving → Saved, in that order', withTimers(async () => {
+test('keystroke → Unsaved → idle → Local only (no auto GitHub save)', withTimers(async () => {
   const { autosave, client, statuses } = newAutosave();
   await autosave.onOpen('a.md', 'REMOTE', 'sha-0');
 
   autosave.onChange('x');
   assert.deepEqual(statusTexts(statuses), [STATUS.unsaved.text]);
 
-  await advance(IDLE_MS); // 400ms draft + 10s idle
+  await advance(IDLE_MS);
   await drain();
 
-  assert.deepEqual(
-    statusTexts(statuses),
-    [STATUS.unsaved.text, STATUS.drafted.text, STATUS.saving.text, STATUS.saved.text]
-  );
-  assert.equal(client.puts.length, 1, 'exactly one commit for the whole sequence');
+  assert.equal(statusTexts(statuses)[0], STATUS.unsaved.text);
+  assert.equal(lastStatus(statuses).text, STATUS.drafted.text);
+  assert.equal(client.puts.length, 0, 'idle does not commit');
+  assert.equal(autosave.state, STATE.DIRTY_IDLE);
+
+  await autosave.saveNow();
+  await drain();
+  assert.equal(client.puts.length, 1);
   assert.equal(autosave.state, STATE.CLEAN);
 }));
 
@@ -326,35 +332,36 @@ test('reload drops the draft and hands the fresh GitHub text back', withTimers(a
   assert.equal(conflicts.length, 1);
 }));
 
-test('a non-409 failure keeps the draft and retries on the next idle window', withTimers(async () => {
-  const { autosave, store, client, statuses } = newAutosave({ client: newFakeClient({ failWith: 500 }) });
+test('a non-409 failure keeps the draft; user must Save again', withTimers(async () => {
+  const { autosave, client, statuses } = newAutosave({ client: newFakeClient({ failWith: 500 }) });
   await autosave.onOpen('a.md', 'REMOTE', 'sha-0');
-
-  autosave.onChange('KEEPME');
+  autosave.onChange('x');
   await advance(LOCAL_WRITE_DEBOUNCE_MS);
+
   await autosave.saveNow();
   await drain();
-
-  assert.equal(autosave.state, STATE.DIRTY_LOCAL, 'a failed commit leaves the file dirty');
   assert.match(lastStatus(statuses).text, /Save failed/);
-  assert.equal(lastStatus(statuses).fade, false, 'errors are sticky');
-  assert.ok(store.records.get('owner/repo@main:a.md'), 'the local draft survives a failed push');
+  assert.equal(autosave.hasUnsavedDraft(), true, 'the local draft survives a failed push');
+  assert.equal(client.puts.length, 1);
 
-  client.failWith = null; // the network comes back
+  client.failWith = null;
   await advance(IDLE_MS);
   await drain();
-  assert.equal(autosave.state, STATE.CLEAN, 'the next idle window tries again and succeeds');
+  assert.equal(client.puts.length, 1, 'idle does not retry the push');
+
+  await autosave.saveNow();
+  await drain();
+  assert.equal(client.puts.length, 2, 'explicit Save retries');
+  assert.equal(autosave.state, STATE.CLEAN);
 }));
 
-test('flushCurrentFile resolves after the DRAFT is written, not after the push', withTimers(async () => {
+test('flushCurrentFile writes the local draft only (no GitHub push)', withTimers(async () => {
   const { autosave, store, client } = newAutosave();
   await autosave.onOpen('a.md', 'REMOTE', 'sha-0');
   autosave.onChange('MID-EDIT');
   await advance(LOCAL_WRITE_DEBOUNCE_MS);
 
   let pushedDuringFlush = null;
-  // Park the push forever: the point of the test is that the caller gets its
-  // promise back while the network call is still outstanding.
   client.putFile = (...args) => {
     pushedDuringFlush = args;
     return new Promise(() => {});
@@ -364,30 +371,27 @@ test('flushCurrentFile resolves after the DRAFT is written, not after the push',
 
   assert.equal(store.records.get('owner/repo@main:a.md').text, 'MID-EDIT',
     'the draft is already safe when the caller continues');
-  assert.ok(pushedDuringFlush, 'the commit was kicked off...');
-  assert.equal(autosave.state, STATE.PUSHING, '...and is still in flight');
-  assert.deepEqual(store.deletes, [], 'and has not finished, because the caller never waited');
+  assert.equal(pushedDuringFlush, null, 'flush does not start a GitHub put');
+  assert.equal(autosave.state, STATE.DIRTY_IDLE);
+  assert.equal(autosave.hasUnsavedDraft(), true);
 }));
 
-test('a failed background flush is reported on ITS file, not on the new one', withTimers(async () => {
-  const { autosave, client, statuses } = newAutosave({ client: newFakeClient({ failWith: 500 }) });
+test('flushing a dirty file then opening another keeps the first draft local', withTimers(async () => {
+  const { autosave, client, statuses, store } = newAutosave();
   await autosave.onOpen('a.md', 'REMOTE-A', 'sha-a');
   autosave.onChange('WORK-A');
   await advance(LOCAL_WRITE_DEBOUNCE_MS);
 
-  const flush = autosave.flushCurrentFile();
-  // The user opens another file before the push fails — which it will.
-  await autosave.onOpen('b.md', 'REMOTE-B', 'sha-b');
-  await flush;
-  await drain();
+  await autosave.flushCurrentFile();
+  assert.equal(client.puts.length, 0, 'no push on flush');
+  assert.equal(store.records.get('owner/repo@main:a.md').text, 'WORK-A');
 
-  assert.equal(lastStatus(statuses), null, "a.md's failure must not be painted on b.md");
+  await autosave.onOpen('b.md', 'REMOTE-B', 'sha-b');
+  assert.equal(client.puts.length, 0);
   assert.equal(autosave.state, STATE.CLEAN);
 
-  // ...and it is waiting for a.md, not lost.
   const reopened = await autosave.onOpen('a.md', 'REMOTE-A', 'sha-a');
-  assert.match(lastStatus(statuses).text, /Save failed/);
-  assert.equal(reopened.hasDraft, true, 'the draft is still there to save the work');
+  assert.equal(reopened.hasDraft, true, 'the draft is still there');
 }));
 
 test('opening a file with a newer local draft offers it instead of merging', withTimers(async () => {
@@ -471,23 +475,20 @@ test('Discard throws the draft away and leaves the remote text alone', withTimer
   assert.equal(client.puts.length, 0, 'a discarded draft must never be committed behind the user');
 }));
 
-test('hiding the tab commits at once instead of waiting out the idle window', withTimers(async () => {
-  const { autosave, client } = newAutosave();
+test('hiding the tab checkpoints the local draft without pushing', withTimers(async () => {
+  const { autosave, client, store } = newAutosave();
   await autosave.onOpen('a.md', 'REMOTE', 'sha-0');
   autosave.onChange('TAB-SWITCH');
-  await advance(LOCAL_WRITE_DEBOUNCE_MS);
-  assert.equal(client.puts.length, 0);
-
-  autosave.onVisibilityChange(true); // document became hidden
+  // Do not wait for debounce — visibility should force draft write
+  autosave.onVisibilityChange(true);
   await drain();
 
-  assert.equal(client.puts.length, 1, 'a tab switch is a natural checkpoint');
-  assert.equal(client.puts[0].text, 'TAB-SWITCH');
+  assert.equal(client.puts.length, 0, 'tab hide does not push');
+  assert.equal(store.records.get('owner/repo@main:a.md').text, 'TAB-SWITCH');
 
-  // A tab that becomes VISIBLE again must not commit anything.
   autosave.onVisibilityChange(false);
   await advance(IDLE_MS + MAX_MS);
-  assert.equal(client.puts.length, 1);
+  assert.equal(client.puts.length, 0);
 }));
 
 test('destroy() clears both timers and the autosave stops listening', withTimers(async () => {
@@ -535,6 +536,9 @@ test('release() forgets the file, ignores typing, and keeps the instance usable'
   await autosave.onOpen('b.md', 'B-REMOTE', 'sha-b');
   autosave.onChange('b edit');
   await advance(LOCAL_WRITE_DEBOUNCE_MS + IDLE_MS);
+  assert.equal(client.puts.length, 0, 'idle still does not push after reopen');
+  await autosave.saveNow();
+  await drain();
   assert.deepEqual(client.puts.map((p) => [p.path, p.text]), [['b.md', 'b edit']]);
 }));
 
@@ -550,9 +554,13 @@ test('a push already in flight when release() is called still finishes and delet
     return { content: { sha: 'sha-landed' } };
   };
 
-  await autosave.flushCurrentFile(); // draft on disk, commit in flight
+  const pending = autosave.saveNow(); // explicit Save starts the push
+  // Let putFile run until it parks on `finish`
+  for (let i = 0; i < 30 && typeof finish !== 'function'; i++) await Promise.resolve();
+  assert.equal(typeof finish, 'function', 'push must be in flight');
   autosave.release();                // the tab is closed before the commit lands
   finish();
+  await pending;
   await drain();
 
   assert.deepEqual(commits, [{ path: 'a.md', sha: 'sha-landed' }], 'the caller still hears about the new sha');
@@ -571,9 +579,12 @@ test('destroy() abandons an in-flight push without cleaning up (why release() ex
     return { content: { sha: 'sha-landed' } };
   };
 
-  await autosave.flushCurrentFile();
+  const pending = autosave.saveNow();
+  for (let i = 0; i < 30 && typeof finish !== 'function'; i++) await Promise.resolve();
+  assert.equal(typeof finish, 'function', 'push must be in flight');
   autosave.destroy();
   finish();
+  try { await pending; } catch (_) {}
   await drain();
 
   assert.deepEqual(commits, []);
