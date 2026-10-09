@@ -2559,3 +2559,69 @@ body.md-layout-source .editor-preview-active-side {
 #login-trust.hidden {
   display: none;
 }
+
+
+/* ===== In-app repo switcher ===== */
+.repo-switch-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: min(40vw, 280px);
+  padding: 4px 10px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--muted);
+  font-size: 13px;
+  cursor: pointer;
+}
+.repo-switch-btn:hover {
+  border-color: var(--border);
+  background: #21262d;
+  color: var(--text);
+}
+.repo-switch-btn #repo-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.repo-switch-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+.repo-switch-overlay.hidden { display: none; }
+.repo-switch-dialog {
+  width: min(440px, 100%);
+  max-height: min(80vh, 560px);
+  overflow: auto;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 16px;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.45);
+}
+.repo-switch-dialog-h {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.repo-switch-dialog-h h2 {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 600;
+}
+@media (max-width: 768px) {
+  .repo-switch-btn {
+    max-width: 36vw;
+    font-size: 12px;
+    padding: 4px 6px;
+  }
+}

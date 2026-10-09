@@ -253,7 +253,10 @@
   <header class="hidden" id="app-header">
     <button type="button" class="secondary mobile-only" id="btn-mobile-files" title="Files &amp; search" aria-label="Open file list">☰</button>
     <h1>MD Editor</h1>
-    <span id="repo-label" style="color:var(--muted);font-size:13px"></span>
+    <button type="button" id="btn-switch-repo" class="repo-switch-btn" title="Switch repository">
+      <span id="repo-label"></span>
+      <i class="fa-solid fa-caret-down" aria-hidden="true"></i>
+    </button>
     <span class="branch-pill desktop-only" id="branch-pill" title="Current branch"><i class="fa-solid fa-code-branch"></i> <span id="branch-label">main</span></span>
     <a class="repo-link desktop-only" href="https://github.com/servitantgit/MD-Editor" target="_blank" rel="noopener noreferrer" title="MD Editor on GitHub — source, issues, releases">
       <i class="fa-brands fa-github"></i>
@@ -401,6 +404,29 @@
       <div id="history-detail" class="hist-detail">
         <div class="hist-empty">Select a commit</div>
       </div>
+    </div>
+  </div>
+
+  <!-- In-app repository switcher -->
+  <div id="repo-switch-overlay" class="repo-switch-overlay hidden" aria-hidden="true">
+    <div class="repo-switch-dialog" role="dialog" aria-labelledby="repo-switch-title">
+      <div class="repo-switch-dialog-h">
+        <h2 id="repo-switch-title">Switch repository</h2>
+        <button type="button" class="secondary" id="btn-repo-switch-close" title="Close">✕</button>
+      </div>
+      <input type="search" id="repo-switch-search" class="repo-search" placeholder="Filter repositories…" autocomplete="off" />
+      <div id="repo-switch-list" class="repo-list" role="listbox"></div>
+      <details class="repo-manual">
+        <summary>Open by path…</summary>
+        <div class="advanced-form">
+          <label for="switch-input-owner">Owner</label>
+          <input id="switch-input-owner" placeholder="username" autocomplete="username" />
+          <label for="switch-input-repo">Repository</label>
+          <input id="switch-input-repo" placeholder="my-repo" autocomplete="off" />
+          <button type="button" id="btn-switch-open-path" class="cta-primary">Open</button>
+        </div>
+      </details>
+      <p id="repo-switch-status" class="status"></p>
     </div>
   </div>
 

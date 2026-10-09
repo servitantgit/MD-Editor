@@ -47,6 +47,15 @@ const els = {
   appHeader: document.getElementById('app-header'),
   appMain: document.getElementById('app-main'),
   repoLabel: document.getElementById('repo-label'),
+  btnSwitchRepo: document.getElementById('btn-switch-repo'),
+  repoSwitchOverlay: document.getElementById('repo-switch-overlay'),
+  repoSwitchList: document.getElementById('repo-switch-list'),
+  repoSwitchSearch: document.getElementById('repo-switch-search'),
+  btnRepoSwitchClose: document.getElementById('btn-repo-switch-close'),
+  switchInputOwner: document.getElementById('switch-input-owner'),
+  switchInputRepo: document.getElementById('switch-input-repo'),
+  btnSwitchOpenPath: document.getElementById('btn-switch-open-path'),
+  repoSwitchStatus: document.getElementById('repo-switch-status'),
   btnRefresh: document.getElementById('btn-refresh'),
   btnLogout: document.getElementById('btn-logout'),
   branchLabel: document.getElementById('branch-label'),
@@ -197,6 +206,7 @@ async function init() {
   // Wire chrome controls BEFORE any showApp/OAuth work. If a later step throws
   // (search, backlinks, tree), the user must still be able to sign in again.
   if (els.btnLogin) els.btnLogin.onclick = onLoginClick;
+  setupRepoSwitcher();
   if (els.btnLogout) {
     els.btnLogout.onclick = () => {
       // Defence in depth: logout reloads the page, which tears down every timer
@@ -274,6 +284,7 @@ async function init() {
     }
   }
   setupRepoPickerOnce();
+  setupRepoSwitcher();
 
   // Switching tabs is the natural checkpoint Google Docs uses too: commit a
   // dirty draft immediately instead of making the user wait out the 10s window.
@@ -435,6 +446,161 @@ function renderRepoList(filter) {
     });
     els.repoList.appendChild(btn);
   }
+}
+
+
+function setRepoSwitchStatus(msg, isError) {
+  if (!els.repoSwitchStatus) return;
+  els.repoSwitchStatus.textContent = msg || '';
+  els.repoSwitchStatus.className = 'status' + (isError ? ' err' : msg ? ' ok' : '');
+}
+
+function closeRepoSwitcher() {
+  if (!els.repoSwitchOverlay) return;
+  els.repoSwitchOverlay.classList.add('hidden');
+  els.repoSwitchOverlay.setAttribute('aria-hidden', 'true');
+}
+
+function renderSwitchRepoList(filter) {
+  if (!els.repoSwitchList) return;
+  const q = String(filter || '').trim().toLowerCase();
+  const items = !q
+    ? cachedRepos
+    : cachedRepos.filter((r) =>
+        r.full_name.toLowerCase().includes(q)
+        || (r.description && r.description.toLowerCase().includes(q))
+      );
+  els.repoSwitchList.innerHTML = '';
+  if (!items.length) {
+    const empty = document.createElement('div');
+    empty.className = 'repo-list-empty';
+    empty.textContent = q ? 'No match.' : 'No repositories loaded.';
+    els.repoSwitchList.appendChild(empty);
+    return;
+  }
+  const cur = (sessionStorage.getItem('gh_owner') || '') + '/' + (sessionStorage.getItem('gh_repo') || '');
+  for (const r of items.slice(0, 100)) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'repo-list-item';
+    const title = document.createElement('span');
+    title.className = 'repo-full';
+    title.textContent = r.full_name + (r.private ? ' 🔒' : '')
+      + (r.full_name === cur ? ' · current' : '');
+    btn.appendChild(title);
+    if (r.description) {
+      const meta = document.createElement('span');
+      meta.className = 'repo-meta';
+      meta.textContent = r.description;
+      btn.appendChild(meta);
+    }
+    btn.addEventListener('click', () => {
+      void switchRepository(r.owner, r.name);
+    });
+    els.repoSwitchList.appendChild(btn);
+  }
+}
+
+async function openRepoSwitcher() {
+  if (!els.repoSwitchOverlay) return;
+  const token = sessionStorage.getItem('gh_token');
+  if (!token) {
+    setSaveStatus('Not signed in', true);
+    return;
+  }
+  els.repoSwitchOverlay.classList.remove('hidden');
+  els.repoSwitchOverlay.setAttribute('aria-hidden', 'false');
+  setRepoSwitchStatus('Loading repositories…', false);
+  if (els.repoSwitchSearch) els.repoSwitchSearch.value = '';
+  try {
+    const client = new GitHubClient({ token, owner: '', repo: '' });
+    const raw = await client.listUserRepos();
+    cachedRepos = (raw || []).map((r) => ({
+      full_name: r.full_name,
+      name: r.name,
+      owner: r.owner && r.owner.login ? r.owner.login : String(r.full_name || '').split('/')[0],
+      private: !!r.private,
+      description: r.description || '',
+      pushed_at: r.pushed_at || '',
+    }));
+    renderSwitchRepoList('');
+    setRepoSwitchStatus(cachedRepos.length ? '' : 'No repositories found.', !cachedRepos.length);
+    if (els.repoSwitchSearch) els.repoSwitchSearch.focus();
+  } catch (e) {
+    setRepoSwitchStatus('Failed to load: ' + (e && e.message ? e.message : e), true);
+  }
+}
+
+async function switchRepository(owner, repo) {
+  const token = sessionStorage.getItem('gh_token');
+  if (!token) {
+    setRepoSwitchStatus('Session expired — sign in again.', true);
+    return;
+  }
+  if (
+    owner === sessionStorage.getItem('gh_owner')
+    && repo === sessionStorage.getItem('gh_repo')
+  ) {
+    closeRepoSwitcher();
+    return;
+  }
+  // Best-effort: push local dirty work for the current file before tearing down.
+  try {
+    if (autosave && typeof autosave.saveNow === 'function' && autosave.hasUnsavedDraft
+        && autosave.hasUnsavedDraft()) {
+      setRepoSwitchStatus('Saving current file…', false);
+      await autosave.saveNow();
+    }
+  } catch (_) { /* continue switch even if save fails */ }
+
+  setRepoSwitchStatus('Opening ' + owner + '/' + repo + '…', false);
+  try {
+    await finishLogin(token, owner, repo);
+    closeRepoSwitcher();
+  } catch (e) {
+    setRepoSwitchStatus('Could not open: ' + (e && e.message ? e.message : e), true);
+  }
+}
+
+function setupRepoSwitcher() {
+  if (!els.btnSwitchRepo || els.btnSwitchRepo.dataset.bound) return;
+  els.btnSwitchRepo.dataset.bound = '1';
+  els.btnSwitchRepo.addEventListener('click', () => { void openRepoSwitcher(); });
+  if (els.btnRepoSwitchClose) {
+    els.btnRepoSwitchClose.addEventListener('click', closeRepoSwitcher);
+  }
+  if (els.repoSwitchOverlay) {
+    els.repoSwitchOverlay.addEventListener('click', (e) => {
+      if (e.target === els.repoSwitchOverlay) closeRepoSwitcher();
+    });
+  }
+  if (els.repoSwitchSearch) {
+    els.repoSwitchSearch.addEventListener('input', () => {
+      renderSwitchRepoList(els.repoSwitchSearch.value);
+    });
+  }
+  if (els.btnSwitchOpenPath) {
+    els.btnSwitchOpenPath.addEventListener('click', () => {
+      let owner = (els.switchInputOwner && els.switchInputOwner.value || '').trim();
+      let repo = (els.switchInputRepo && els.switchInputRepo.value || '').trim();
+      const parsed = parseGitHubOwnerRepo(owner) || parseGitHubOwnerRepo(repo);
+      if (parsed) {
+        owner = parsed.owner;
+        repo = parsed.repo;
+      }
+      if (!owner || !repo) {
+        setRepoSwitchStatus('Enter owner and repository.', true);
+        return;
+      }
+      void switchRepository(owner, repo);
+    });
+  }
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && els.repoSwitchOverlay
+        && !els.repoSwitchOverlay.classList.contains('hidden')) {
+      closeRepoSwitcher();
+    }
+  });
 }
 
 function setupRepoPickerOnce() {
