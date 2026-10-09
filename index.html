@@ -67,33 +67,37 @@
           no build step, no tokens to paste.
         </p>
 
-        <div class="hero-cta">
+        <div class="hero-cta" id="login-cta">
           <button type="button" id="btn-login" class="cta-primary">
             <i class="fa-brands fa-github"></i>
             Sign in with GitHub
           </button>
-          <button type="button" class="cta-secondary" id="btn-toggle-advanced" aria-expanded="false" aria-controls="advanced-form">
-            Open specific repo →
-          </button>
         </div>
 
-        <div class="hero-trust">
+        <div class="hero-trust" id="login-trust">
           <span><i class="fa-solid fa-lock"></i> OAuth · 2FA on GitHub's side</span>
           <span><i class="fa-solid fa-shield-halved"></i> Token in sessionStorage only</span>
           <span><i class="fa-solid fa-house"></i> Your data stays in your repo</span>
         </div>
 
-        <!-- Pre-login repo selection (hidden by default).
-             Owner + Repository are REQUIRED by app.js — Sign in reads them
-             before redirecting to /auth/login. -->
-        <div class="advanced-form hidden" id="advanced-form">
-          <label for="input-owner">Owner (username or organization)</label>
-          <input id="input-owner" placeholder="username" autocomplete="username" />
-          <label for="input-repo">Repository</label>
-          <input id="input-repo" placeholder="my-private-repo" autocomplete="off" />
-          <p class="advanced-hint">
-            Required — the repository to open right after signing in.
-          </p>
+        <!-- Shown after OAuth: pick a repo from your account (or type owner/repo). -->
+        <div class="repo-picker hidden" id="repo-picker" aria-live="polite">
+          <div class="repo-picker-head">
+            <h2 class="repo-picker-title">Choose a repository</h2>
+            <p class="repo-picker-sub" id="repo-picker-user"></p>
+          </div>
+          <input type="search" id="repo-search" class="repo-search" placeholder="Filter repositories…" autocomplete="off" />
+          <div id="repo-list" class="repo-list" role="listbox" aria-label="Your repositories"></div>
+          <details class="repo-manual">
+            <summary>Open a repo by path…</summary>
+            <div class="advanced-form" id="advanced-form">
+              <label for="input-owner">Owner (username or organization)</label>
+              <input id="input-owner" placeholder="username" autocomplete="username" />
+              <label for="input-repo">Repository</label>
+              <input id="input-repo" placeholder="my-private-repo" autocomplete="off" />
+              <button type="button" id="btn-open-repo" class="cta-primary">Open repository</button>
+            </div>
+          </details>
         </div>
 
         <div id="login-status" class="status"></div>
@@ -244,19 +248,6 @@
 
   </div>
 
-  <!-- Landing toggle: zero deps, works even if app.js fails to load. -->
-  <script>
-    (function () {
-      var btn = document.getElementById('btn-toggle-advanced');
-      var form = document.getElementById('advanced-form');
-      if (!btn || !form) return;
-      btn.addEventListener('click', function () {
-        var hidden = form.classList.toggle('hidden');
-        btn.setAttribute('aria-expanded', hidden ? 'false' : 'true');
-        btn.textContent = hidden ? 'Open specific repo →' : 'Hide repo selector ↑';
-      });
-    })();
-  </script>
 
   <!-- ===== MAIN APP ===== -->
   <header class="hidden" id="app-header">

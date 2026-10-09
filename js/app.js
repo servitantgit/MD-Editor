@@ -36,6 +36,13 @@ const els = {
   inputOwner: document.getElementById('input-owner'),
   inputRepo: document.getElementById('input-repo'),
   btnLogin: document.getElementById('btn-login'),
+  loginCta: document.getElementById('login-cta'),
+  loginTrust: document.getElementById('login-trust'),
+  repoPicker: document.getElementById('repo-picker'),
+  repoPickerUser: document.getElementById('repo-picker-user'),
+  repoList: document.getElementById('repo-list'),
+  repoSearch: document.getElementById('repo-search'),
+  btnOpenRepo: document.getElementById('btn-open-repo'),
 
   appHeader: document.getElementById('app-header'),
   appMain: document.getElementById('app-main'),
@@ -252,12 +259,21 @@ async function init() {
     } catch (e) {
       console.error('Session restore failed', e);
       sessionStorage.removeItem('gh_token');
+      sessionStorage.removeItem('gh_owner');
+      sessionStorage.removeItem('gh_repo');
       setLoginStatus('Could not restore session: ' + (e && e.message ? e.message : e) + '. Sign in again.', true);
       restorePendingLoginFields();
     }
   } else {
-    restorePendingLoginFields();
+    const tokenOnly = sessionStorage.getItem('gh_token');
+    if (tokenOnly) {
+      // OAuth done, repo not chosen yet (reload mid-picker)
+      void showRepoPicker(tokenOnly);
+    } else {
+      restorePendingLoginFields();
+    }
   }
+  setupRepoPickerOnce();
 
   // Switching tabs is the natural checkpoint Google Docs uses too: commit a
   // dirty draft immediately instead of making the user wait out the 10s window.
@@ -285,33 +301,7 @@ function readSession() {
 }
 
 function onLoginClick() {
-  let owner = els.inputOwner.value.trim();
-  let repo = els.inputRepo.value.trim();
-
-  // Guard against pasting the full https://github.com/owner/repo link (e.g. from
-  // the address bar) into either field — split it back into owner + repo, so the
-  // API URL /repos/{owner}/{repo} stays valid.
-  const parsed = parseGitHubOwnerRepo(owner) || parseGitHubOwnerRepo(repo);
-  if (parsed) {
-    owner = parsed.owner;
-    repo = parsed.repo;
-    els.inputOwner.value = owner; // write back so the user sees what will be used
-    els.inputRepo.value = repo;
-  } else if (looksLikeGitHubUrl(owner) || looksLikeGitHubUrl(repo)) {
-    setLoginStatus('That looks like a GitHub link, but no repository in it. Enter just the names: owner and repository.', true);
-    return;
-  }
-
-  if (!owner || !repo) {
-    setLoginStatus('Fill in Owner and Repository', true);
-    return;
-  }
-
-  // owner/repo don't travel through the GitHub OAuth round-trip — we store them
-  // ourselves, in the same tab, and pick them back up after /auth/callback.
-  sessionStorage.setItem('gh_pending_owner', owner);
-  sessionStorage.setItem('gh_pending_repo', repo);
-
+  // Repo is chosen AFTER OAuth — only send the user to GitHub.
   setLoginStatus('Redirecting to GitHub...', false);
   location.href = '/auth/login';
 }
@@ -333,17 +323,21 @@ async function consumeOAuthRedirect() {
   const token = decodeURIComponent(match[1]);
   history.replaceState(null, '', location.pathname + location.search);
 
-  const owner = sessionStorage.getItem('gh_pending_owner');
-  const repo = sessionStorage.getItem('gh_pending_repo');
+  // Optional: pre-filled owner/repo from a previous "manual path" attempt
+  const pendingOwner = sessionStorage.getItem('gh_pending_owner');
+  const pendingRepo = sessionStorage.getItem('gh_pending_repo');
   sessionStorage.removeItem('gh_pending_owner');
   sessionStorage.removeItem('gh_pending_repo');
 
-  if (!owner || !repo) {
-    setLoginStatus('Login session lost (owner/repo). Please try again.', true);
-    return false;
+  sessionStorage.setItem('gh_token', token);
+
+  if (pendingOwner && pendingRepo) {
+    await finishLogin(token, pendingOwner, pendingRepo);
+    return true;
   }
 
-  await finishLogin(token, owner, repo);
+  // Default path: pick a repo from the authenticated account.
+  await showRepoPicker(token);
   return true;
 }
 
@@ -352,6 +346,134 @@ function restorePendingLoginFields() {
   const repo = sessionStorage.getItem('gh_pending_repo');
   if (owner) els.inputOwner.value = owner;
   if (repo) els.inputRepo.value = repo;
+}
+
+
+/** @type {Array<{full_name: string, name: string, owner: string, private: boolean, description: string}>} */
+let cachedRepos = [];
+
+async function showRepoPicker(token) {
+  setLoginStatus('Loading your repositories…', false);
+  if (els.loginCta) els.loginCta.classList.add('hidden');
+  if (els.loginTrust) els.loginTrust.classList.add('hidden');
+  if (els.repoPicker) els.repoPicker.classList.remove('hidden');
+
+  const client = new GitHubClient({ token, owner: '', repo: '' });
+  try {
+    const user = await client.getAuthenticatedUser();
+    if (els.repoPickerUser) {
+      els.repoPickerUser.textContent = 'Signed in as @' + (user.login || 'user')
+        + ' — pick a repository to open.';
+    }
+    const raw = await client.listUserRepos();
+    cachedRepos = (raw || []).map((r) => ({
+      full_name: r.full_name,
+      name: r.name,
+      owner: r.owner && r.owner.login ? r.owner.login : String(r.full_name || '').split('/')[0],
+      private: !!r.private,
+      description: r.description || '',
+      pushed_at: r.pushed_at || '',
+    }));
+    renderRepoList('');
+    setLoginStatus(
+      cachedRepos.length
+        ? 'Select a repository to continue.'
+        : 'No repositories found. Use “Open a repo by path” below, or create one on GitHub.',
+      !cachedRepos.length
+    );
+    if (els.repoSearch) {
+      els.repoSearch.value = '';
+      els.repoSearch.focus();
+    }
+  } catch (e) {
+    setLoginStatus('Could not list repositories: ' + (e && e.message ? e.message : e), true);
+    // Still allow manual owner/repo entry.
+    if (els.repoPicker) els.repoPicker.classList.remove('hidden');
+  }
+  setupRepoPickerOnce();
+}
+
+function renderRepoList(filter) {
+  if (!els.repoList) return;
+  const q = String(filter || '').trim().toLowerCase();
+  const items = !q
+    ? cachedRepos
+    : cachedRepos.filter((r) =>
+        r.full_name.toLowerCase().includes(q)
+        || (r.description && r.description.toLowerCase().includes(q))
+      );
+  els.repoList.innerHTML = '';
+  if (!items.length) {
+    const empty = document.createElement('div');
+    empty.className = 'repo-list-empty';
+    empty.textContent = q ? 'No match for “' + filter + '”.' : 'No repositories to show.';
+    els.repoList.appendChild(empty);
+    return;
+  }
+  for (const r of items.slice(0, 100)) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'repo-list-item';
+    btn.setAttribute('role', 'option');
+    const title = document.createElement('span');
+    title.className = 'repo-full';
+    title.textContent = r.full_name + (r.private ? ' 🔒' : '');
+    btn.appendChild(title);
+    if (r.description) {
+      const meta = document.createElement('span');
+      meta.className = 'repo-meta';
+      meta.textContent = r.description;
+      btn.appendChild(meta);
+    }
+    btn.addEventListener('click', () => {
+      const token = sessionStorage.getItem('gh_token');
+      if (!token) {
+        setLoginStatus('Session lost — sign in again.', true);
+        return;
+      }
+      finishLogin(token, r.owner, r.name);
+    });
+    els.repoList.appendChild(btn);
+  }
+}
+
+function setupRepoPickerOnce() {
+  if (document.documentElement.dataset.repoPickerBound) return;
+  document.documentElement.dataset.repoPickerBound = '1';
+  if (els.repoSearch) {
+    els.repoSearch.addEventListener('input', () => {
+      renderRepoList(els.repoSearch.value);
+    });
+  }
+  if (els.btnOpenRepo) {
+    els.btnOpenRepo.addEventListener('click', onManualOpenRepo);
+  }
+}
+
+function onManualOpenRepo() {
+  let owner = (els.inputOwner && els.inputOwner.value || '').trim();
+  let repo = (els.inputRepo && els.inputRepo.value || '').trim();
+  const parsed = parseGitHubOwnerRepo(owner) || parseGitHubOwnerRepo(repo);
+  if (parsed) {
+    owner = parsed.owner;
+    repo = parsed.repo;
+    if (els.inputOwner) els.inputOwner.value = owner;
+    if (els.inputRepo) els.inputRepo.value = repo;
+  }
+  if (!owner || !repo) {
+    setLoginStatus('Enter both owner and repository name.', true);
+    return;
+  }
+  const token = sessionStorage.getItem('gh_token');
+  if (!token) {
+    // Not signed in yet — stash and start OAuth
+    sessionStorage.setItem('gh_pending_owner', owner);
+    sessionStorage.setItem('gh_pending_repo', repo);
+    setLoginStatus('Redirecting to GitHub...', false);
+    location.href = '/auth/login';
+    return;
+  }
+  finishLogin(token, owner, repo);
 }
 
 async function finishLogin(token, owner, repo) {

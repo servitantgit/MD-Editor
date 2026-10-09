@@ -33,6 +33,31 @@ export class GitHubClient {
     return res;
   }
 
+  /** Authenticated user profile (login, name, …). Works with token-only client. */
+  async getAuthenticatedUser() {
+    const res = await this.request('/user');
+    if (!res.ok) throw await this._error(res, '');
+    return res.json();
+  }
+
+  /**
+   * Repositories the token can access (owned, collab, org). Sorted by recent push.
+   * Paginates up to `maxPages` (default 3 → 300 repos).
+   */
+  async listUserRepos({ per_page = 100, maxPages = 3 } = {}) {
+    const all = [];
+    for (let page = 1; page <= maxPages; page++) {
+      const q = `per_page=${per_page}&page=${page}&sort=updated&affiliation=owner,collaborator,organization_member`;
+      const res = await this.request(`/user/repos?${q}`);
+      if (!res.ok) throw await this._error(res, '');
+      const batch = await res.json();
+      if (!Array.isArray(batch) || !batch.length) break;
+      all.push(...batch);
+      if (batch.length < per_page) break;
+    }
+    return all;
+  }
+
   /** Checks the token/access and returns basic repository info (incl. default_branch). */
   async getRepoInfo() {
     const res = await this.request(`/repos/${this.owner}/${this.repo}`);
