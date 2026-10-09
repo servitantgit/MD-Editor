@@ -8,7 +8,7 @@
 import { markdownToCanonicalHtml } from './markdown-tokens.js';
 import { attachResizeHandles, resolveAllImages } from './image-preview.js';
 import { kindFromPath } from './file-kind.js';
-import { dirnameOf, resolveRelativePath, isExternalOrAnchor, isImagePath } from './paths.js';
+import { dirnameOf, basenameOf, resolveRelativePath, isExternalOrAnchor, isImagePath } from './paths.js';
 import { buildHtmlSrcdoc } from './html-preview.js';
 
 /**
@@ -445,23 +445,53 @@ export function createEditor(textareaEl, deps) {
       const to = typeof cm.posFromIndex === 'function' ? cm.posFromIndex(item.toIndex) : { line: 0, ch: item.toIndex };
       const wrapper = document.createElement('span');
       wrapper.className = 'cm-inline-image';
-      wrapper.title = item.src;
+      wrapper.title = item.alt ? `${item.alt} — ${item.src}` : item.src;
       wrapper.style.display = 'inline-block';
       wrapper.style.verticalAlign = 'middle';
-      wrapper.style.minHeight = '24px';
 
-      const img = document.createElement('img');
-      img.alt = item.alt;
-      img.className = 'cm-inline-image-img';
-      img.style.maxWidth = '100%';
-      img.style.maxHeight = '420px';
-      img.style.height = 'auto';
-      img.style.display = 'block';
+      // Source shows a LINK (file name + where it lives), not the picture: the
+      // image itself is rendered by the Live/Preview panes (markdown-tokens.js),
+      // which this change must not touch.
+      const external = isExternalOrAnchor(item.src);
+      let repoPath = item.src;
+      if (!external) {
+        repoPath = item.src.startsWith('/')
+          ? item.src.slice(1)
+          : resolveRelativePath(dirnameOf(currentPath || ''), item.src);
+      }
+      let nameBase = repoPath;
+      if (external) {
+        try { nameBase = new URL(item.src).pathname || item.src; } catch (_) { /* keep raw src */ }
+      }
+      nameBase = nameBase.split('?')[0].split('#')[0];
+      const filename = basenameOf(nameBase) || nameBase;
 
-      const loading = document.createElement('span');
-      loading.className = 'cm-inline-image-loading';
-      loading.textContent = '⏳';
-      wrapper.append(img, loading);
+      const link = document.createElement('a');
+      link.className = 'cm-inline-image-link';
+      link.href = item.src;
+      link.target = '_blank';
+      link.rel = 'noopener';
+      const nameEl = document.createElement('span');
+      nameEl.className = 'cm-inline-image-filename';
+      nameEl.textContent = filename;
+      link.append(nameEl);
+      if (repoPath !== filename) {
+        const pathEl = document.createElement('span');
+        pathEl.className = 'cm-inline-image-path';
+        pathEl.textContent = repoPath;
+        link.append(pathEl);
+      }
+      wrapper.append(link);
+
+      // data: URLs (what the resolver returns for repo files) are blocked as a
+      // top-frame navigation, so they are swapped for a blob: URL before the
+      // link opens. `resolvedUrl` upgrades the moment resolve() lands.
+      let resolvedUrl = item.src;
+      link.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        openImageLink(resolvedUrl || item.src);
+      });
 
       let mark;
       try {
@@ -481,20 +511,19 @@ export function createEditor(textareaEl, deps) {
         .then((url) => {
           if (generation !== inlineImageGeneration) return;
           try { if (!mark.find()) return; } catch (_) { return; }
-          img.src = url;
-          img.onload = () => {
-            try { loading.remove(); } catch (_) {}
-            // Image height change must not yank the viewport
-            restoreView();
-          };
-          img.onerror = () => {
-            try { if (mark.find()) mark.clear(); } catch (_) {}
-          };
+          // The processed URL makes the link actually open the picture
+          // (a data: URL for repo files, the URL itself when external).
+          if (url) {
+            resolvedUrl = url;
+            link.href = url;
+          }
         })
         .catch((err) => {
           if (generation !== inlineImageGeneration) return;
-          try { if (mark.find()) mark.clear(); } catch (_) {}
-          console.warn('Failed to show inline image:', item.src, err);
+          // The name/path are still the point of the link — keep it visible
+          // and flag that the file itself could not be fetched.
+          try { if (mark.find()) wrapper.classList.add('broken'); } catch (_) {}
+          console.warn('Failed to resolve inline image link:', item.src, err);
         });
     }
 
@@ -885,4 +914,44 @@ function escapeHtml(s) {
   const d = document.createElement('div');
   d.textContent = s;
   return d.innerHTML;
+}
+
+/** data: URL -> Blob, synchronously. Returns null when malformed. */
+function dataUrlToBlob(dataUrl) {
+  const m = /^data:([^;,]+)?(;base64)?,([\s\S]*)$/.exec(dataUrl || '');
+  if (!m) return null;
+  const type = m[1] || 'application/octet-stream';
+  try {
+    if (m[2]) {
+      const bin = atob(m[3]);
+      const bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      return new Blob([bytes], { type });
+    }
+    return new Blob([decodeURIComponent(m[3])], { type });
+  } catch (_) {
+    return null;
+  }
+}
+
+/**
+ * Opens an image URL from a Source-mode file link in a new tab. data: URLs
+ * (what the image resolver returns for repo files) are blocked as a top-frame
+ * navigation, so they go through a short-lived blob: URL instead. Called
+ * synchronously from the click handler, so popup blockers see the gesture.
+ */
+function openImageLink(url) {
+  if (!url) return;
+  try {
+    if (url.startsWith('data:')) {
+      const blob = dataUrlToBlob(url);
+      if (blob && typeof URL.createObjectURL === 'function') {
+        const obj = URL.createObjectURL(blob);
+        window.open(obj, '_blank', 'noopener');
+        setTimeout(() => { try { URL.revokeObjectURL(obj); } catch (_) {} }, 60000);
+        return;
+      }
+    }
+    window.open(url, '_blank', 'noopener');
+  } catch (_) { /* popup blocked — the href still carries the URL */ }
 }

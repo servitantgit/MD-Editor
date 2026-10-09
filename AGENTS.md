@@ -334,7 +334,9 @@ be reachable in practice.
 ## inlineImageMarks: the generation guard is what stops orphaned marks
 
 A stale-mark leak here is easy to *claim* and hard to *believe*, so read
-`renderInlineImages()` before changing it. The invariant is not the generation
+`renderInlineImages()` before changing it. What it draws in Source is a file
+LINK (name + location) — the picture itself belongs to the Live/Preview panes
+(`markdown-tokens.js`). The invariant is not the generation
 guard on its own — it is the combination of three things:
 
 - `markText()` and `inlineImageMarks.push(mark)` (editor.js) run **synchronously**
@@ -360,7 +362,7 @@ Removing both produces the orphan (`resolve#3 … marks=3`). So keep them both �
 they cost nothing and each covers a path the other does not: the pre-creation
 guard avoids building DOM that would be discarded, the post-await guard also
 covers the `catch` branch, and `mark.find() == null` additionally covers a mark
-dropped by `img.onerror`.
+cleared by a rebuild while the await was still in flight.
 
 ## createEditor() owns global resources and now has to be destroyed
 

@@ -1226,10 +1226,11 @@ button.secondary:hover { background: #21262d; }
 }
 
 
-/* ===== Live Preview of images right inside CodeMirror =====
-   The ![alt](path) text stays in the document, but in the editor it is visually
-   replaced by the real picture. EasyMDE/CodeMirror's MarkText keeps the original
-   Markdown, so saving to GitHub doesn't change. */
+/* ===== Source: images shown as file links (name + location) =====
+   The ![alt](path) text stays in the document, but in the editor it is replaced
+   by a link with the file's name and where it lives — the picture itself is
+   rendered in the Live/Preview panes. EasyMDE/CodeMirror's MarkText keeps the
+   original Markdown, so saving to GitHub doesn't change. */
 .cm-inline-image {
   display: inline-block;
   vertical-align: middle;
@@ -1238,18 +1239,44 @@ button.secondary:hover { background: #21262d; }
   border-radius: 4px;
   cursor: default;
 }
-.cm-inline-image-img {
+.cm-inline-image-link {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 1px;
   max-width: 100%;
-  max-height: 420px;
-  width: auto;
-  height: auto;
+  padding: 3px 8px;
+  border: 1px solid var(--border);
   border-radius: 4px;
+  background: #161b22;
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.35;
+  text-decoration: none;
+  cursor: pointer;
 }
-.cm-inline-image-loading {
-  display: inline-block;
-  padding: 2px 6px;
+.cm-inline-image-link:hover {
+  background: #21262d;
+  border-color: #58a6ff;
+}
+.cm-inline-image-filename {
+  font-weight: 600;
+  color: #58a6ff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.cm-inline-image-path {
   color: var(--muted);
-  font-size: 13px;
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.cm-inline-image.broken .cm-inline-image-link {
+  border-color: var(--danger);
+}
+.cm-inline-image.broken .cm-inline-image-path {
+  color: #ff9d94;
 }
 
 /* ===== Branch / layout / commit header controls ===== */

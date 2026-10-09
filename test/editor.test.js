@@ -160,6 +160,55 @@ test('switching files mid-render leaves no orphaned inline-image marks behind', 
   assert.equal(created[2].cleared, false, 'the live run’s mark must survive');
 });
 
+test('Source shows each image as a LINK with filename and location, never as a picture', async () => {
+  const dom = new JSDOM('<!doctype html><body></body>');
+  const DOC = 'intro\n\n![diagram](../img/flow.png)\n\n![logo](https://cdn.example.com/assets/logo.svg)\n';
+  let currentPath = null; // nothing open while createEditor() runs its own first render
+  const { codemirror } = installEnvironment(dom, { text: () => DOC });
+  const widgets = [];
+  codemirror.posFromIndex = (i) => ({ line: 0, ch: i });
+  codemirror.markText = (from, to, opts) => {
+    if (opts && opts.replacedWith) widgets.push(opts.replacedWith);
+    return { clear() {}, find() { return true; } };
+  };
+
+  const { createEditor } = await import('../js/editor.js');
+  const handle = createEditor(dom.window.document.createElement('textarea'), {
+    marked: {},
+    imageResolver: { resolve: async (src) => (src.startsWith('http') ? src : 'data:image/png;base64,QUJD') },
+    getCurrentPath: () => currentPath,
+    onImageUploadRequest: () => {},
+    onImagePaste: () => {},
+  });
+
+  currentPath = 'docs/guide/readme.md';
+  handle.refreshInlineImages();
+  await new Promise((r) => setTimeout(r, 0));
+
+  assert.equal(widgets.length, 2, 'both images must be replaced by widgets');
+  for (const w of widgets) {
+    assert.equal(w.querySelector('img'), null, 'Source must not render a picture');
+  }
+
+  const [internal, external] = widgets;
+  const inLink = internal.querySelector('a.cm-inline-image-link');
+  assert.ok(inLink, 'the repo image must render as a link');
+  assert.equal(inLink.querySelector('.cm-inline-image-filename').textContent, 'flow.png',
+    'the link must show the file name');
+  assert.equal(inLink.querySelector('.cm-inline-image-path').textContent, 'docs/img/flow.png',
+    'the link must show where the file lives (resolved against the open file)');
+  assert.equal(inLink.getAttribute('href'), 'data:image/png;base64,QUJD',
+    'the processed URL must land in the href');
+
+  const exLink = external.querySelector('a.cm-inline-image-link');
+  assert.ok(exLink, 'the external image must render as a link');
+  assert.equal(exLink.querySelector('.cm-inline-image-filename').textContent, 'logo.svg');
+  assert.equal(exLink.querySelector('.cm-inline-image-path').textContent,
+    'https://cdn.example.com/assets/logo.svg');
+
+  handle.destroy();
+});
+
 test('showDoc() swaps the document, refreshes layout, and re-renders the Preview pane when it is showing', async () => {
   const dom = new JSDOM('<!doctype html><body></body>');
   let shown = 'FIRST DOCUMENT';
