@@ -282,8 +282,8 @@ with sync_playwright() as p:
     page.wait_for_selector("#app-main:not(.hidden)", timeout=5000)
     page.wait_for_selector(".file-item", timeout=5000)
 
-    page.click("text=Notes")
-    page.click("text=Test note.md")
+    page.click(".file-item.folder:has-text('Notes')")
+    page.click(".file-item:not(.folder):has-text('Test note.md')")
     page.wait_for_function("document.getElementById('btn-save').disabled === false", timeout=5000)
     print("✓ file opened")
 
@@ -658,8 +658,8 @@ with sync_playwright() as p:
     page.reload(wait_until="networkidle")
     page.wait_for_selector("#app-main:not(.hidden)", timeout=5000)
     page.wait_for_selector(".file-item", timeout=5000)
-    page.click("text=Notes")
-    page.click("text=Test note.md")
+    page.click(".file-item.folder:has-text('Notes')")
+    page.click(".file-item:not(.folder):has-text('Test note.md')")
     page.wait_for_function("document.getElementById('btn-save').disabled === false", timeout=5000)
     # Check for draft banner
     banner_visible = page.locator("#draft-banner:not(.hidden)").count() > 0
@@ -1143,7 +1143,7 @@ with sync_playwright() as p:
         print("⚠ page.html not in tree after refresh — skipped HTML preview check")
 
     # --- Space near inline image must not jump caret to end of document ---
-    page.click("text=Test note.md")
+    page.click(".file-item:not(.folder):has-text('Test note.md')")
     page.wait_for_timeout(400)
     page.click('#layout-toggle .layout-btn[data-mode="source"]')
     page.click(".CodeMirror")
