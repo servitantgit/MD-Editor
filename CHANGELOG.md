@@ -1,3 +1,30 @@
+## Unreleased
+
+### Changed — hybrid autosave (local idle, explicit remote)
+
+- **Idle and tab-hide no longer push to GitHub.** Drafts still write to IndexedDB
+  (400ms debounce + 10s idle checkpoint). Remote writes are **Save** (current file)
+  or **Commit** (working-tree batch).
+- Status copy: `○ Local only — Save or Commit to push` instead of implying a
+  background GitHub save after idle.
+- Unit and e2e tests updated so they assert **no** PUT on idle / tab switch.
+
+### Fixed / UX
+
+- Editor toolbar regrouped: Find·Wrap·Fold | Outline·Backlinks·Map | **PDF** | Save·Delete;
+  duplicate filename removed from the toolbar (tabs show the name).
+- GitHub Actions README badge paths (`../../actions/workflows/…/badge.svg`) map to
+  public `https://github.com/{owner}/{repo}/actions/...` URLs; external badge images
+  load without forcing CORS on `<img>`.
+- CodeMirror **material-darker** theme aligned with the dark app chrome.
+
+### Docs
+
+- `AGENTS.md` autosave state machine rewritten for the hybrid model.
+- `REGRESSION.md` checklist refreshed for Commit/Save, toolbar, badges, auth.
+
+---
+
 # Changelog
 
 All notable changes to this project will be documented in this file.

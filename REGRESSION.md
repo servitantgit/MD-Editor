@@ -1,61 +1,57 @@
 # Regression checklist
 
-Short manual pass after UI/editor changes. Automated coverage: `npm test` + `python e2e_smoke_test.py`.
+Manual / CI guards for behaviours that have broken more than once.
+Prefer automated coverage in `test/*.test.js` and `e2e_smoke_test.py` when practical.
 
-## Auth & shell
-- [ ] Start screen shows project info + GitHub repo link
-- [ ] Sign in (Cloudflare OAuth) or local session works
-- [ ] Header: repo label, branch pill, Source / Live / Preview, History, Commit, Sign out
+## Autosave / Commit (hybrid)
 
-## Files sidebar
-- [ ] Tree loads; expand/collapse folders
-- [ ] Active folder path shown under **Files**; **+ Add** → New file / New folder in that folder
-- [ ] Drop strip targets **active folder** (not only root)
-- [ ] Search finds notes; clear restores tree
-- [ ] Context menus: file (new here / rename / delete), folder (new file/folder / rename / delete)
+- [ ] Typing shows `● Unsaved` and **does not** PUT to GitHub.
+- [ ] After ~10s idle the status becomes `○ Local only — Save or Commit to push` and **still no** PUT.
+- [ ] **Save** pushes the current file once; status `✓ Saved to GitHub`.
+- [ ] Editing several files fills the **Commit** badge; Commit panel lists them; Commit/Push writes them and clears badges.
+- [ ] Switching tabs or hiding the browser tab does **not** auto-push (draft stays local).
+- [ ] Closing a dirty tab does **not** force a GitHub commit; neighbour tab activates; draft recoverable if needed.
+- [ ] Single 409 on Save is retried silently; two 409s show Reload / Overwrite.
+- [ ] `beforeunload` never starts a network write (only the browser prompt when dirty).
 
-## Editor layouts
-- [ ] **Source** — single editor pane
-- [ ] **Live** — source + preview side by side, preview has content
-- [ ] **Preview** — preview full width (source hidden), not empty
-- [ ] Switching layouts does not lose text or caret
-- [ ] Flip **Live ↔ Preview several times quickly**: preview stays filled every time (no alternating empty pane) and the `.html` iframe does NOT flash/reload 2-3× (content unchanged → zero reloads)
+## Editor / preview
 
-## File types
-- [ ] Open `.md` — markdown toolbar, Live/Preview render headings/lists
-- [ ] Open `.html` — Live shows iframe; relative images/CSS resolve when possible
-- [ ] `.html` in **Preview** layout: iframe content present (CodeMirror hidden there — the old jump/render paths silently targeted it)
-- [ ] Click relative `<a href="other.md">` inside **HTML** Live preview opens that file
-- [ ] Click relative link in **markdown** preview opens that file
-- [ ] Open `.js` / `.css` — source mode + code preview; md-only toolbar actions disabled
+- [ ] Source / Live / Preview layouts: Preview is full width with source hidden; Live is 50/50; Source is editor only.
+- [ ] Preview follows the active tab after a switch (no stale document).
+- [ ] Inline images: Space/Backspace near an image keep the caret local (no jump to end).
+- [ ] External images (`https://…`, shields.io) render; GitHub Actions badge paths like `../../actions/workflows/….yml/badge.svg` resolve to `https://github.com/{owner}/{repo}/actions/...`.
+- [ ] HTML files: Live/Preview show content in iframe; fullscreen stays in the current layout mode.
+- [ ] CodeMirror **material-darker** theme; caret remains light (`#e6edf3`).
 
-## Tabs & drafts
-- [ ] Open two files → two tabs; switch restores text / scroll
-- [ ] Dirty dot on unsaved tab; Save / idle clears it
-- [ ] Reload with local draft → banner Keep / Discard
-- [ ] 409 once → silent retry; twice → Reload / Overwrite banner
+## Toolbar / chrome
 
-## Save vs Commit
-- [ ] **Save** — single-file push; removes that path from Commit badge
-- [ ] **Commit** drawer — lists local changes; toggle closes; History mutually exclusive
-- [ ] Pre-commit diff + History restore still work
+- [ ] Toolbar groups: meta (lang) | Find Wrap Fold | Outline Backlinks Map | **PDF** | Save Delete (separators between groups).
+- [ ] Filename is **not** duplicated in the toolbar (tabs own the name).
+- [ ] Mobile: formatting toolbar collapsed by default; Save/Delete icon-only where designed.
+- [ ] Landscape mobile: editor still scrolls (no chrome eating the whole viewport).
 
-## Find / Map / Outline
-- [ ] Find / Replace (Ctrl+F / Ctrl+H)
-- [ ] Wrap, Fold headings
-- [ ] Outline: click jumps in **Source AND Live AND Preview** — in Preview the preview pane itself must scroll (CodeMirror is hidden there)
-- [ ] Outline: jump to a heading inside a folded section unfolds it first
-- [ ] Outline refreshes while typing; active heading (above the cursor) highlighted; `#` lines inside ``` fences are NOT listed, `C#` keeps its `#`
-- [ ] **Map** minimap: full document scale, click/drag scrolls, persists preference
+## Files / tree / auth
 
-## Images & PDF
-- [ ] Inline images in Source; Space/Backspace near image does not jump to EOF
-- [ ] Preview images load (data URLs)
-- [ ] PDF export for `.md` and `.html` produces non-empty file
+- [ ] New file allows non-`.md` extensions (html, js, css, …) with sensible defaults.
+- [ ] Create file/folder targets the **selected** folder, not a stale click path.
+- [ ] Drop-to-move uses the active folder path (including non-root).
+- [ ] Repo switcher in the header can change owner/repo without a full re-login.
+- [ ] Sign-in is GitHub-first; repo picker after OAuth (no mandatory owner/repo before login).
+- [ ] No PWA manifest / standalone (OAuth + sessionStorage isolation); responsive CSS remains.
 
-## Automated
+## Search / backlinks / history
+
+- [ ] Search replaces the tree with hits; clear restores the tree.
+- [ ] Backlinks panel lists notes that link to the current file.
+- [ ] History panel toggles open/closed; does not leave a stuck open state after Escape.
+
+## PDF / export
+
+- [ ] PDF export produces non-blank pages; images not split incorrectly across pages when covered by e2e.
+
+## After any change that touches autosave, tabs, or Commit
+
 ```bash
 npm test
-# with serve.mjs on :8080:
-python e2e_smoke_test.py
+python3 e2e_smoke_test.py
 ```

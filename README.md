@@ -72,7 +72,7 @@ js/
   diff-util.js             unified diff helpers for the History panel
   tabs.js                  tab model: ordered paths + active + persistence
   tabs-ui.js               tab strip rendering and click handling
-  autosave.js              two-tier autosave: local IndexedDB draft + GitHub commit
+  autosave.js              hybrid autosave: local draft on idle; GitHub on Save/Commit
   draft-store.js           per-repo/branch IndexedDB store for local drafts
   idb-backend.js           generic IndexedDB wrapper (open/degrade/quota/sweep)
   search-index.js           MiniSearch index over repo markdown
@@ -144,7 +144,7 @@ responses). Runs automatically in CI:
 ```bash
 pip install playwright && playwright install chromium
 node serve.mjs &                  # start the app on :8080
-python3 e2e_smoke_test.py         # editing, autosave + 409 handling, tabs, create/delete, search, PDF export, image previews
+python3 e2e_smoke_test.py         # editing, hybrid autosave + 409, tabs, create/delete, search, PDF, images, History/HTML
 ```
 
 ## Features
@@ -162,14 +162,12 @@ python3 e2e_smoke_test.py         # editing, autosave + 409 handling, tabs, crea
   mode. A dot on a tab means *not on GitHub yet*; closing a tab never loses
   work. Tabs are restored after a reload, and only the active one is fetched
   at startup.
-- **Two-tier autosave + local drafts** — typing is persisted to IndexedDB
-  within 400 ms (crash recovery), and a commit is pushed to GitHub when the
-  editor has been idle for 10 s, when 5 minutes have passed since the file
-  first became dirty, or when the user clicks Save. A status label next to
-  Save shows the live condition (`● Unsaved` / `○ Draft saved locally` /
-  `⟳ Saving to GitHub…` / `✓ Saved to GitHub` / `⚠ Save failed`). A draft
-  survives closing the tab and reload; reopening shows a one-time banner
-  *"Keep local / Discard"* — nothing is merged automatically.
+- **Hybrid autosave + local drafts** — typing is persisted to IndexedDB within
+  ~400 ms (and again after ~10 s idle) so a crash or reload does not lose work.
+  **GitHub is updated only on Save** (current file) or **Commit** (all dirty files).
+  Status next to Save: `● Unsaved` / `○ Local only — Save or Commit to push` /
+  `⟳ Saving to GitHub…` / `✓ Saved to GitHub` / `⚠ Save failed`. A draft
+
 - **409 conflicts handled gracefully** — the first sha conflict is retried
   silently with a freshly read sha; a second one in a row raises a banner
   offering *Reload from GitHub / Overwrite*.
