@@ -117,6 +117,8 @@ const els = {
   minimapWrap: document.getElementById('minimap-wrap'),
   minimapCanvas: document.getElementById('minimap'),
   btnSave: document.getElementById('btn-save'),
+  btnMoreFile: document.getElementById('btn-more-file'),
+  moreFileMenu: document.getElementById('more-file-menu'),
   btnExportPdf: document.getElementById('btn-export-pdf'),
   btnDelete: document.getElementById('btn-delete'),
   saveStatus: document.getElementById('save-status'),
@@ -2031,6 +2033,30 @@ function fillPreviewPane(node, plain, kind) {
     if (html === null) return;
     if (html != null) node.innerHTML = html;
   }
+}
+
+
+function setupMoreFileMenu() {
+  if (!els.btnMoreFile || els.btnMoreFile.dataset.bound) return;
+  els.btnMoreFile.dataset.bound = '1';
+  const close = () => {
+    if (els.moreFileMenu) els.moreFileMenu.classList.add('hidden');
+    els.btnMoreFile.setAttribute('aria-expanded', 'false');
+  };
+  els.btnMoreFile.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (!els.moreFileMenu) return;
+    const open = els.moreFileMenu.classList.toggle('hidden') === false;
+    els.btnMoreFile.setAttribute('aria-expanded', open ? 'true' : 'false');
+  });
+  document.addEventListener('click', (e) => {
+    if (!els.moreFileMenu || els.moreFileMenu.classList.contains('hidden')) return;
+    if (els.btnMoreFile.contains(e.target) || els.moreFileMenu.contains(e.target)) return;
+    close();
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') close();
+  });
 }
 
 function setupFindBar() {

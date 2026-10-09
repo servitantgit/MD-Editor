@@ -2656,3 +2656,96 @@ body.md-layout-source .editor-preview-active-side {
     padding: 4px 6px;
   }
 }
+
+/* ===== Editor toolbar groups ===== */
+
+.editor-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 0;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel);
+  min-height: 40px;
+}
+.tb-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 10px;
+  border-right: 1px solid var(--border);
+  min-height: 28px;
+}
+.tb-group:last-child,
+.tb-group.tb-file {
+  border-right: none;
+  margin-left: auto;
+  padding-right: 0;
+}
+.tb-group.tb-meta {
+  padding-left: 0;
+  max-width: min(40%, 280px);
+  min-width: 0;
+}
+.tb-group.tb-meta .current-file {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.lang-badge {
+  flex-shrink: 0;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: #21262d;
+  color: #58a6ff;
+  border: 1px solid #30363d;
+}
+#btn-save.tb-save,
+.editor-toolbar #btn-save {
+  background: var(--accent);
+  color: #fff;
+  border: 1px solid var(--accent);
+  font-weight: 600;
+}
+#btn-save.tb-save:hover:not(:disabled),
+.editor-toolbar #btn-save:hover:not(:disabled) {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+}
+#btn-save.tb-save:disabled,
+.editor-toolbar #btn-save:disabled {
+  opacity: 0.45;
+  background: #21262d;
+  border-color: var(--border);
+  color: var(--muted);
+}
+.tb-delete {
+  margin-left: 4px;
+}
+.tb-more-wrap {
+  position: relative;
+}
+.tb-more-menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 4px);
+  z-index: 40;
+  min-width: 160px;
+  padding: 6px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+}
+.tb-more-menu.hidden { display: none; }
+.tb-more-menu button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 8px 10px;
+  border-radius: 6px;
+}

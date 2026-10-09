@@ -309,28 +309,41 @@
       <!-- Open files, one tab each. Rendered by js/tabs-ui.js; hidden while no file is open. -->
       <div id="tab-bar" class="tab-bar hidden" role="tablist" aria-label="Open files"></div>
       <div class="editor-toolbar">
-        <span class="current-file" id="current-file">No file selected</span>
-        <span class="lang-badge" id="lang-badge" title="Language (from file extension)">—</span>
-        <button type="button" class="secondary mobile-only" id="btn-mobile-fmt" title="Show formatting tools" aria-expanded="false" aria-controls="easymde-toolbar">Aa</button>
-        <button class="secondary desktop-tool" id="btn-find" title="Find / Replace in file (Ctrl+F)">Find</button>
-        <button class="secondary desktop-tool" id="btn-wrap" title="Toggle word wrap">Wrap</button>
-        <button class="secondary desktop-tool" id="btn-fold" title="Fold / unfold markdown headings">Fold</button>
-        <button class="secondary desktop-tool" id="btn-outline" title="Document outline (headings)">Outline</button>
-        <button class="secondary desktop-tool" id="btn-backlinks" title="Backlinks: notes that link here">Backlinks</button>
-        <button class="secondary desktop-tool" id="btn-minimap" title="Document minimap">Map</button>
-        <button id="btn-save" disabled title="Save now (desktop). On phone: autosave runs on idle; status dot shows sync state.">
-          <i class="fa-solid fa-floppy-disk" aria-hidden="true"></i><span class="btn-lbl"> Save</span>
-        </button>
-        <!-- Autosave status, owned by js/autosave.js. Kept separate from
-             #save-status on purpose: that one auto-clears after 4s for every
-             other operation (moves, deletes, folder ops), while these states
-             describe the live condition of the open file and must not flicker. -->
-        <span id="autosave-status" class="autosave-status"></span>
-        <button class="secondary desktop-tool" id="btn-export-pdf" disabled title="Export the active page to PDF">📄 PDF</button>
-        <button class="secondary danger" id="btn-delete" disabled title="Delete the active file from the repository">
-          <i class="fa-solid fa-trash" aria-hidden="true"></i><span class="btn-lbl"> Delete</span>
-        </button>
-        <span id="save-status" class="status"></span>
+        <div class="tb-group tb-meta">
+          <span class="current-file" id="current-file">No file selected</span>
+          <span class="lang-badge" id="lang-badge" title="Language (from file extension)">—</span>
+          <button type="button" class="secondary mobile-only" id="btn-mobile-fmt" title="Show formatting tools" aria-expanded="false" aria-controls="easymde-toolbar">Aa</button>
+        </div>
+        <div class="tb-group tb-edit desktop-tool" role="group" aria-label="Edit tools">
+          <button class="secondary" id="btn-find" title="Find / Replace in file (Ctrl+F)">Find</button>
+          <button class="secondary" id="btn-wrap" title="Toggle word wrap">Wrap</button>
+          <button class="secondary" id="btn-fold" title="Fold / unfold markdown headings">Fold</button>
+        </div>
+        <div class="tb-group tb-view desktop-tool" role="group" aria-label="Panels">
+          <button class="secondary" id="btn-outline" title="Document outline (headings)">Outline</button>
+          <button class="secondary" id="btn-backlinks" title="Backlinks: notes that link here">Backlinks</button>
+          <button class="secondary" id="btn-minimap" title="Document minimap">Map</button>
+        </div>
+        <div class="tb-group tb-file" role="group" aria-label="File actions">
+          <button id="btn-save" class="tb-save" disabled title="Save now (desktop). On phone: autosave runs on idle; status dot shows sync state.">
+            <i class="fa-solid fa-floppy-disk" aria-hidden="true"></i><span class="btn-lbl"> Save</span>
+          </button>
+          <!-- Autosave status, owned by js/autosave.js. Kept separate from
+               #save-status on purpose: that one auto-clears after 4s for every
+               other operation (moves, deletes, folder ops), while these states
+               describe the live condition of the open file and must not flicker. -->
+          <span id="autosave-status" class="autosave-status"></span>
+          <div class="tb-more-wrap desktop-tool">
+            <button type="button" class="secondary" id="btn-more-file" title="More file actions" aria-expanded="false" aria-controls="more-file-menu">⋯</button>
+            <div id="more-file-menu" class="tb-more-menu hidden" role="menu">
+              <button type="button" class="secondary" id="btn-export-pdf" role="menuitem" disabled title="Export the active page to PDF">📄 Export PDF</button>
+            </div>
+          </div>
+          <button class="secondary danger tb-delete" id="btn-delete" disabled title="Delete the active file from the repository">
+            <i class="fa-solid fa-trash" aria-hidden="true"></i><span class="btn-lbl"> Delete</span>
+          </button>
+          <span id="save-status" class="status"></span>
+        </div>
       </div>
       <!-- Draft recovery / remote-changed banner. One element, two questions:
            "you have unsaved local changes" and "GitHub changed underneath
