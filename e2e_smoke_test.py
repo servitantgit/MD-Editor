@@ -813,26 +813,25 @@ with sync_playwright() as p:
     assert tab_labels() == ["Test note.md", "Second note.md"], tab_labels()
     print("✓ opening another file adds a tab and shows that file")
 
-    # Leaving the first tab commits it in the background, like switching files always did.
-    wait_until(lambda: any("G_TAB_A_EDIT" in w["text"] for w in CONTENT_WRITES), what="the flush commit of tab A")
-    a_writes = [w for w in CONTENT_WRITES if "G_TAB_A_EDIT" in w["text"]]
-    assert len(a_writes) == 1 and "Test%20note.md" in a_writes[0]["url"], \
-        f"leaving a dirty tab must commit it exactly once: {CONTENT_WRITES}"
-    page.wait_for_timeout(500)  # let the commit land, so the tab is clean again
-    assert page.locator("#tab-bar .tab.dirty").count() == 0, "a committed tab still shows the unsaved dot"
-    print("✓ leaving a dirty tab commits it once")
+    # Hybrid: leaving a tab keeps changes local — no GitHub put on switch.
+    page.wait_for_timeout(1500)
+    assert not any("G_TAB_A_EDIT" in w.get("text", "") for w in CONTENT_WRITES), \
+        f"leaving a dirty tab must not auto-commit: {CONTENT_WRITES}"
+    assert page.locator("#tab-bar .tab.dirty").count() >= 1, "dirty tab lost its unsaved mark"
+    print("✓ leaving a dirty tab keeps changes local (no auto-commit)")
 
-    # G2. Back to the first tab: it must come back from memory, exactly as it was left.
+    # G2. Back to the first tab: restored from memory with unsaved text intact.
     FETCH_LOG.clear()
     page.click("#tab-bar .tab:has-text('Test note.md') .tab-label")
     wait_until(lambda: active_tab() == "Test note.md", what="tab A to become active again")
     assert "G_TAB_A_EDIT" in editor_text(), "tab A lost its text when it was switched away and back"
     assert not any("Test%20note.md" in u for u in FETCH_LOG), \
-        f"a clean tab must come back from memory, but it was fetched again: {FETCH_LOG}"
+        f"a dirty tab must come back from memory, but it was fetched again: {FETCH_LOG}"
     assert page.evaluate(f"JSON.stringify({CM}.getCursor())") == cursor_before, "the cursor did not survive the switch"
     scroll_after = page.evaluate(f"{CM}.getScrollInfo().top")
     assert abs(scroll_after - scroll_before) <= 5, f"scroll position lost: {scroll_before} -> {scroll_after}"
-    assert page.locator("#draft-banner:not(.hidden)").count() == 0, "returning to a saved tab raised a draft banner"
+    assert page.locator("#tab-bar .tab.active.dirty").count() == 1, "unsaved mark lost after switch back"
+    assert page.locator("#draft-banner:not(.hidden)").count() == 0, "returning to an in-memory dirty tab raised a draft banner"
     print("✓ switching back restores text, cursor and scroll without a request")
 
     # Undo history is per tab, too: it survived being switched away.
