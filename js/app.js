@@ -224,6 +224,17 @@ async function init() {
   // in flight would build the app TWICE when an OAuth callback lands on a tab
   // that still holds a session — two editors, two ResizeObservers, two paste
   // handlers, with the first one nobody can reach to tear down.
+  // Ad-blockers often report net::ERR_BLOCKED_BY_CLIENT on jsDelivr / cdnjs.
+  // Surface that before the user completes OAuth and lands in a half-built app.
+  if (typeof window.EasyMDE !== 'function' || window.__mdCdnFail) {
+    const miss = (window.__mdCdnMiss || ['editor CDN']).join(', ');
+    setLoginStatus(
+      'Some scripts were blocked (' + miss + '). Turn off ad-block for this site '
+      + '(or allow cdn.jsdelivr.net), then reload. net::ERR_BLOCKED_BY_CLIENT is almost always an extension.',
+      true
+    );
+  }
+
   try {
     if (await consumeOAuthRedirect()) return;
   } catch (e) {
@@ -563,6 +574,21 @@ function showApp(owner, repo) {
   els.appHeader.classList.remove('hidden');
   els.appMain.classList.remove('hidden');
   els.repoLabel.textContent = `${owner}/${repo}`;
+
+  if (typeof window.EasyMDE !== 'function') {
+    const miss = (window.__mdCdnMiss || ['easymde']).join(', ');
+    const msg = 'Editor libraries failed to load (' + miss + '). '
+      + 'Usually an ad-blocker (ERR_BLOCKED_BY_CLIENT) blocked cdn.jsdelivr.net. '
+      + 'Disable the blocker for this site or allow jsdelivr, then reload.';
+    console.error(msg);
+    try {
+      els.loginScreen.classList.remove('hidden');
+      els.appHeader.classList.add('hidden');
+      els.appMain.classList.add('hidden');
+      setLoginStatus(msg, true);
+    } catch (_) {}
+    return;
+  }
 
   imageResolver = new ImageResolver(state.client);
 
@@ -2177,7 +2203,8 @@ function renderBacklinksPanel() {
 async function ensureBacklinksPopulated() {
   if (!backlinkIndex || backlinkIndex.size > 0) return;
   if (!searchSync || !searchSync.index) return;
-  // Prefer bodies already in the search LRU.
+  // Only use bodies already in memory (search sync / open files).
+  // Never fan-out hundreds of getFileB64 calls here — that froze mobile after login.
   try {
     const cache = searchSync.index.bodyCache;
     if (cache && typeof cache.forEach === 'function') {
@@ -2186,31 +2213,13 @@ async function ensureBacklinksPopulated() {
       });
     }
   } catch (_) {}
-  if (backlinkIndex.size > 0) {
-    renderBacklinksPanel();
-    return;
-  }
-  // Cold start after hydrate: fetch note bodies once to seed reverse links.
-  const paths = Object.keys(searchSync.manifest || {}).filter((p) => /\.(md|markdown|mdown)$/i.test(p));
-  const cap = Math.min(paths.length, 400);
-  for (let i = 0; i < cap; i++) {
-    const path = paths[i];
-    try {
-      const body = await searchSync.fetchBody(path);
-      if (body != null) backlinkIndex.setFile(path, body);
-    } catch (_) {}
-  }
   renderBacklinksPanel();
 }
 
 function setupBacklinks() {
   if (!els.btnBacklinks || els.btnBacklinks.dataset.bound) return;
   els.btnBacklinks.dataset.bound = '1';
-  const pref = localStorage.getItem('md_backlinks');
-  if (pref === '1' && els.backlinksPanel) {
-    els.backlinksPanel.classList.remove('hidden');
-    els.btnBacklinks.classList.add('active-panel');
-  }
+  // Do not auto-open on boot — panel work must stay opt-in after login.
   els.btnBacklinks.addEventListener('click', () => {
     if (!els.backlinksPanel) return;
     const open = els.backlinksPanel.classList.toggle('hidden') === false;
