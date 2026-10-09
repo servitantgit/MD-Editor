@@ -560,6 +560,8 @@ button.secondary:hover { background: #21262d; }
   border: none;
   background: var(--bg);
   color: var(--text);
+  font-size: 14px;
+  line-height: 1.5;
 }
 .EasyMDEContainer .CodeMirror-scroll {
   min-height: 0 !important;
@@ -569,6 +571,35 @@ button.secondary:hover { background: #21262d; }
 }
 .EasyMDEContainer .CodeMirror-selected {
   background: #264f78 !important;
+}
+
+/* material-darker: align gutters/background with app shell */
+.EasyMDEContainer .CodeMirror.cm-s-material-darker {
+  background: var(--bg) !important;
+  color: var(--text) !important;
+}
+.cm-s-material-darker .CodeMirror-gutters {
+  background: var(--panel) !important;
+  border-right: 1px solid var(--border) !important;
+  color: var(--muted);
+}
+.cm-s-material-darker .CodeMirror-linenumber {
+  color: var(--muted) !important;
+}
+.cm-s-material-darker .CodeMirror-cursor {
+  border-left: 2px solid var(--text) !important;
+}
+.cm-s-material-darker .CodeMirror-selected,
+.cm-s-material-darker.CodeMirror-focused .CodeMirror-selected {
+  background: #264f78 !important;
+}
+.cm-s-material-darker .CodeMirror-activeline-background {
+  background: rgba(56, 139, 253, 0.08) !important;
+}
+.cm-s-material-darker .CodeMirror-matchingbracket {
+  color: #7ee787 !important;
+  text-decoration: none;
+  outline: 1px solid #238636;
 }
 .editor-toolbar.editor-toolbar {
   background: var(--panel);

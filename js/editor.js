@@ -34,6 +34,8 @@ export function createEditor(textareaEl, deps) {
     element: textareaEl,
     spellChecker: false,
     autosave: { enabled: false },
+    // Dark syntax highlighting (CSS: material-darker.min.css in index.html)
+    theme: 'material-darker',
     // Keep side-by-side inside .editor-area so the file tree stays clickable
     // (EasyMDE default is fullscreen fixed overlay that steals all pointer events).
     sideBySideFullscreen: false,
