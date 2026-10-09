@@ -224,13 +224,13 @@ async function init() {
   // in flight would build the app TWICE when an OAuth callback lands on a tab
   // that still holds a session — two editors, two ResizeObservers, two paste
   // handlers, with the first one nobody can reach to tear down.
-  // Ad-blockers often report net::ERR_BLOCKED_BY_CLIENT on jsDelivr / cdnjs.
-  // Surface that before the user completes OAuth and lands in a half-built app.
-  if (typeof window.EasyMDE !== 'function' || window.__mdCdnFail) {
-    const miss = (window.__mdCdnMiss || ['editor CDN']).join(', ');
+  // Only the editor core is fatal. Optional CDNs (html2pdf, highlight, minisearch)
+  // must NOT paint a red banner — they often trip ad-block while EasyMDE is fine.
+  if (typeof window.EasyMDE !== 'function') {
+    const miss = (window.__mdCdnMiss || ['easymde']).join(', ');
     setLoginStatus(
-      'Some scripts were blocked (' + miss + '). Turn off ad-block for this site '
-      + '(or allow cdn.jsdelivr.net), then reload. net::ERR_BLOCKED_BY_CLIENT is almost always an extension.',
+      'Editor failed to load (' + miss + '). If the console shows ERR_BLOCKED_BY_CLIENT, '
+      + 'allow cdn.jsdelivr.net for this site and reload.',
       true
     );
   }
