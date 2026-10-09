@@ -80,13 +80,6 @@ export function injectCanonicalImageTags(text) {
       `<span class="md-img-resize-handle"></span>` +
       `<span class="md-img-size-badge"></span>` +
       `<span class="md-img-placeholder-text">⏳ ${escapeAttr(attrs.src)}</span>` +
-      `<a class="md-image-link" href="${escapeAttr(attrs.src)}" target="_blank" rel="noopener" ` +
-      `data-md-src="${escapeAttr(attrs.src)}" ` +
-      `data-md-filename="${escapeAttr(attrs.filename || '')}" ` +
-      `data-md-filepath="${escapeAttr(attrs.filepath || '')}">` +
-      `<span class="md-image-filename">${escapeAttr(attrs.filename || attrs.src)}</span>` +
-      `<span class="md-image-path">${escapeAttr(attrs.filepath || attrs.src)}</span>` +
-      `</a>` +
       `</span>`
     );
   });
