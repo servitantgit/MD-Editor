@@ -75,7 +75,12 @@
             <i class="fa-brands fa-github"></i>
             Sign in with GitHub
           </button>
+          <button type="button" id="btn-demo" class="cta-secondary">
+            Try demo
+            <span class="cta-secondary-hint">no login</span>
+          </button>
         </div>
+        <p class="demo-hint">Demo opens a local sandbox (sample notes, tabs, preview). GitHub push, History from the network, and private repos need Sign in.</p>
 
         <div class="hero-trust" id="login-trust">
           <span><i class="fa-solid fa-lock"></i> OAuth · 2FA on GitHub's side</span>
@@ -253,6 +258,13 @@
 
 
   <!-- ===== MAIN APP ===== -->
+  <div id="demo-banner" class="demo-banner hidden" role="status">
+    <strong>Demo mode</strong>
+    <span>— local sample files only. Nothing is sent to GitHub.
+      Network History, OAuth and real remotes are unavailable.
+      <button type="button" id="btn-demo-exit" class="demo-banner-exit">Exit demo</button>
+    </span>
+  </div>
   <header class="hidden" id="app-header">
     <button type="button" class="secondary mobile-only" id="btn-mobile-files" title="Files &amp; search" aria-label="Open file list">☰</button>
     <h1>MD Editor</h1>

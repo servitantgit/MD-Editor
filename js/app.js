@@ -3,6 +3,7 @@
 // All business logic lives in separate modules (paths/markdown-tokens/reference-rewriter/
 // file-mover/image-resolver) — only "wiring" and DOM event handlers here.
 
+import { DemoClient, isDemoSession } from './demo-client.js';
 import { GitHubClient, utf8ToB64, b64ToUtf8 } from './github-client.js';
 import { ImageResolver } from './image-resolver.js';
 import { createEditor } from './editor.js';
@@ -36,6 +37,8 @@ const els = {
   inputOwner: document.getElementById('input-owner'),
   inputRepo: document.getElementById('input-repo'),
   btnLogin: document.getElementById('btn-login'),
+  btnDemo: document.getElementById('btn-demo'),
+  demoBanner: document.getElementById('demo-banner'),
   loginCta: document.getElementById('login-cta'),
   loginTrust: document.getElementById('login-trust'),
   repoPicker: document.getElementById('repo-picker'),
@@ -145,6 +148,7 @@ const state = {
   branch: '',
   currentPath: null,
   currentSha: null,
+  demo: false,
   allFiles: [], // [{path, sha}]
   // False until the first getTree() succeeds. Distinguishes "not loaded yet"
   // (skip the sync) from "loaded and genuinely empty" (must still sync).
@@ -210,6 +214,17 @@ async function init() {
   // (search, backlinks, tree), the user must still be able to sign in again.
   if (els.btnLogin) els.btnLogin.onclick = onLoginClick;
   setupRepoSwitcher();
+  if (els.btnDemo) {
+    els.btnDemo.onclick = () => { startDemo(); };
+  }
+  const btnDemoExit = document.getElementById('btn-demo-exit');
+  if (btnDemoExit) {
+    btnDemoExit.onclick = () => {
+      if (autosave) try { autosave.destroy(); } catch (_) {}
+      sessionStorage.clear();
+      location.reload();
+    };
+  }
   if (els.btnLogout) {
     els.btnLogout.onclick = () => {
       // Defence in depth: logout reloads the page, which tears down every timer
@@ -262,6 +277,10 @@ async function init() {
     setLoginStatus('Login failed: ' + (e && e.message ? e.message : e), true);
   }
 
+  if (isDemoSession()) {
+    startDemo();
+    return;
+  }
   const saved = readSession();
   if (saved) {
     try {
@@ -272,6 +291,9 @@ async function init() {
     } catch (e) {
       console.error('Session restore failed', e);
       sessionStorage.removeItem('gh_token');
+      try { sessionStorage.removeItem('gh_demo'); } catch (_) {}
+      state.demo = false;
+      if (els.demoBanner) els.demoBanner.classList.add('hidden');
       sessionStorage.removeItem('gh_owner');
       sessionStorage.removeItem('gh_repo');
       setLoginStatus('Could not restore session: ' + (e && e.message ? e.message : e) + '. Sign in again.', true);
@@ -815,6 +837,40 @@ function setEditorValue(text) {
 }
 
 // ====================== APP SHELL ======================
+
+/** Landing "Try demo" — no OAuth, in-memory files only. */
+function startDemo() {
+  try {
+    sessionStorage.setItem('gh_demo', '1');
+    sessionStorage.removeItem('gh_token');
+  } catch (_) { /* ignore */ }
+  state.token = 'demo';
+  state.owner = 'demo';
+  state.repo = 'sandbox';
+  state.branch = 'main';
+  state.client = new DemoClient();
+  state.demo = true;
+  showApp('demo', 'sandbox');
+  if (els.demoBanner) els.demoBanner.classList.remove('hidden');
+  // Soft-disable GitHub-only chrome
+  if (els.btnHistory) {
+    els.btnHistory.disabled = true;
+    els.btnHistory.title = 'History needs a real GitHub repo — exit demo and sign in';
+  }
+  if (els.btnCommit) {
+    // Commit can still write into DemoClient — allow it, but label is fine
+    els.btnCommit.title = 'Demo: commits stay in this browser only (not GitHub)';
+  }
+  if (els.btnSwitchRepo) {
+    els.btnSwitchRepo.disabled = true;
+    els.btnSwitchRepo.title = 'Repo switch needs GitHub sign-in';
+  }
+  if (els.repoLabel) {
+    els.repoLabel.textContent = 'demo / sandbox';
+    els.repoLabel.title = 'Local demo — not a GitHub repository';
+  }
+}
+
 function showApp(owner, repo) {
   // A different repo means a different file list. Reset it here, not only on
   // logout, so a re-login cannot hand the new session the previous repo's tree
@@ -865,6 +921,10 @@ function showApp(owner, repo) {
   els.appHeader.classList.remove('hidden');
   els.appMain.classList.remove('hidden');
   els.repoLabel.textContent = `${owner}/${repo}`;
+  if (els.demoBanner) {
+    if (state.demo) els.demoBanner.classList.remove('hidden');
+    else els.demoBanner.classList.add('hidden');
+  }
 
   if (typeof window.EasyMDE !== 'function') {
     const miss = (window.__mdCdnMiss || ['easymde']).join(', ');
