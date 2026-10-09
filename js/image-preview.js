@@ -24,28 +24,14 @@ export async function resolveAllImages(previewEl, resolver, currentFilePath, sti
       try {
         const url = await resolver.resolve(orig, currentFilePath);
         if (!stillCurrent()) return;
-        // Shields.io / GitHub badge CDNs often soft-block missing Referer; no-referrer is safest.
+        // External badges (shields.io, GitHub Actions SVG) work as plain <img src>.
+        // Do NOT set crossorigin=anonymous — those CDNs omit CORS headers and the
+        // image then fails in the browser even though it would display without CORS.
+        // Do NOT await load/error — jsdom never fires them and hangs unit tests.
         if (/^https?:/i.test(url)) {
           img.setAttribute('referrerpolicy', 'no-referrer');
-          img.setAttribute('crossorigin', 'anonymous');
         }
-        // Wait for the browser to actually load the image so external 404s count as failures.
-        await new Promise((resolve, reject) => {
-          const onLoad = () => { cleanup(); resolve(); };
-          const onErr = () => { cleanup(); reject(new Error('image request failed')); };
-          const cleanup = () => {
-            img.removeEventListener('load', onLoad);
-            img.removeEventListener('error', onErr);
-          };
-          img.addEventListener('load', onLoad);
-          img.addEventListener('error', onErr);
-          img.src = url;
-          // Cached images may already be complete
-          if (img.complete && img.naturalWidth > 0) {
-            cleanup();
-            resolve();
-          }
-        });
+        img.src = url;
         wrap.classList.remove('loading');
       } catch (err) {
         if (!stillCurrent()) return;

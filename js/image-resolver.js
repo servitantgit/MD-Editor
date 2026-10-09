@@ -44,6 +44,8 @@ export class ImageResolver {
   async resolve(origSrc, currentFilePath) {
     if (!origSrc) throw new Error('empty image path');
     if (isExternalOrAnchor(origSrc)) return origSrc;
+    // Protocol-relative CDN URLs
+    if (origSrc.startsWith('//')) return 'https:' + origSrc;
 
     const path = origSrc.startsWith('/')
       ? origSrc.slice(1)
