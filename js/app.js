@@ -4,16 +4,15 @@
 // file-mover/image-resolver) — only "wiring" and DOM event handlers here.
 
 import { DemoClient, isDemoSession } from './demo-client.js';
-import { GitHubClient, utf8ToB64, b64ToUtf8 } from './github-client.js';
+import { GitHubClient, b64ToUtf8 } from './github-client.js';
 import { ImageResolver } from './image-resolver.js';
 import { createEditor } from './editor.js';
 import { FileTree } from './file-tree.js';
 import { setupImageDropzone, pickImageFiles, uploadImage } from './upload.js';
 import { setupFolderDropzone } from './folder-upload.js';
 import { exportCurrentPageToPdf } from './pdf-export.js';
-import { moveFile, renameFile } from './file-mover.js';
-import { createFolder, renameFolder, deleteFolder, getFolders, isFolderEmpty } from './folder-manager.js';
-import { basenameOf, dirnameOf, encodePathForApi, relativePathFromTo } from './paths.js';
+import { createFileOps } from './file-ops.js';
+import { basenameOf, dirnameOf, encodePathForApi } from './paths.js';
 import { createLoginUI } from './login-ui.js';
 import { SearchStore } from './search-store.js';
 import { SearchSync } from './search-sync.js';
@@ -24,7 +23,7 @@ import { TabsModel, tabLabels, tabsStorageKey } from './tabs.js';
 import { createTabBar } from './tabs-ui.js';
 import { WorkingTree } from './working-tree.js';
 import { createCommitHistoryUI } from './commit-history-ui.js';
-import { kindFromPath, isHtmlPath, isMarkdownPath, isEditableTextPath } from './file-kind.js';
+import { kindFromPath, isHtmlPath, isMarkdownPath } from './file-kind.js';
 import { parseHeadingOutline } from './doc-outline.js';
 import { createBacklinkIndex } from './backlinks.js';
 import { buildHtmlSrcdoc } from './html-preview.js';
@@ -159,6 +158,8 @@ const state = {
 
 let imageResolver = null;
 let fileTree = null;
+/** @type {ReturnType<typeof createFileOps>|null} */
+let fileOps = null;
 let editorHandle = null;
 let searchSync = null;
 /** @type {ReturnType<typeof createBacklinkIndex>} */
@@ -295,22 +296,9 @@ async function init() {
   if (els.btnRefresh) els.btnRefresh.onclick = () => loadTree();
   // Wrap in arrows: assigning the handler directly would hand it the click
   // event as `folderPath`, creating "[object PointerEvent]/name.md".
-  if (els.btnNewFile) {
-    els.btnNewFile.onclick = () => {
-      closeAddMenu();
-      onCreateNewFile();
-    };
-  }
-  if (els.btnNewFolder) {
-    els.btnNewFolder.onclick = () => {
-      closeAddMenu();
-      onCreateNewFolder();
-    };
-  }
-  try { setupAddMenu(); } catch (e) { console.warn('setupAddMenu', e); }
+  ensureFileOps().setupToolbar();
   if (els.btnSave) els.btnSave.onclick = onSaveFile;
   if (els.btnExportPdf) els.btnExportPdf.onclick = onExportPdf;
-  if (els.btnDelete) els.btnDelete.onclick = onDeleteFile;
 
   // Only the editor core is fatal. Optional CDNs (html2pdf, highlight, minisearch)
   // must NOT paint a red banner — they often trip ad-block while EasyMDE is fine.
@@ -608,21 +596,14 @@ function showApp(owner, repo) {
 
   imageResolver = new ImageResolver(state.client);
 
+  const ops = ensureFileOps();
   fileTree = new FileTree(els.fileTreeEl, {
     onOpenFile: openFile,
     onPreviewImage: previewImageFile,
-    onMoveFile: onMoveFile,
     getActivePath: () => state.currentPath,
-    onRenameFolder: onRenameFolder,
-    onDeleteFolder: onDeleteFolder,
-    onCreateFileIn,
-    onCreateFolderIn,
-    onRenameFile: onRenameFile,
-    onDeleteFileAt: onDeleteFileAt,
-    onCopyLinkToFile: (path) => onCopyLinkToFile(path),
-    onActiveFolderChange: (folderPath) => updateActiveFolderPathLabel(folderPath),
+    ...ops.treeHandlers(),
   });
-  updateActiveFolderPathLabel(fileTree.getActiveFolder());
+  ops.updateActiveFolderPathLabel(fileTree.getActiveFolder());
 
   editorHandle = createEditor(els.editorTextarea, {
     marked: window.marked,
@@ -677,7 +658,7 @@ function showApp(owner, repo) {
   // "+ Add" menu (same prompt, same default folder). Wrapped in an arrow so the
   // click event is not passed as the folderPath argument.
   if (els.emptyStateNewFile) {
-    els.emptyStateNewFile.onclick = () => onCreateNewFile();
+    els.emptyStateNewFile.onclick = () => ensureFileOps().onCreateNewFile();
   }
 
   // Hybrid layout + Commit / History panels (idempotent re-bind each showApp)
@@ -739,6 +720,37 @@ function showApp(owner, repo) {
 }
 
 /** Draft banner buttons + the two "the user is leaving" hooks. */
+
+
+function ensureFileOps() {
+  if (fileOps) return fileOps;
+  fileOps = createFileOps({
+    els: {
+      btnNewFile: els.btnNewFile,
+      btnNewFolder: els.btnNewFolder,
+      btnDelete: els.btnDelete,
+      btnSave: els.btnSave,
+      btnAddMenu: els.btnAddMenu,
+      addMenu: els.addMenu,
+      activeFolderPath: els.activeFolderPath,
+      currentFileLabel: els.currentFileLabel,
+    },
+    getState: () => state,
+    getFileTree: () => fileTree,
+    getTabs: () => tabs,
+    getImageResolver: () => imageResolver,
+    setSaveStatus,
+    openFile,
+    loadTree,
+    dropTabs,
+    moveTabDoc,
+    markStale,
+    persistTabs,
+    renderTabs,
+    insertMarkdownAtCursor: typeof insertMarkdownAtCursor === 'function' ? insertMarkdownAtCursor : undefined,
+  });
+  return fileOps;
+}
 
 function ensureCommitHistoryUI() {
   if (commitHistoryUI) return commitHistoryUI;
@@ -1000,75 +1012,6 @@ function previewImageFile(path) {
       console.warn('previewImageFile', path, err);
     });
 }
-
-async function onMoveFile(oldPath, targetFolder) {
-  setSaveStatus(`Moving ${oldPath}...`, false);
-  try {
-    let result;
-    try {
-      result = await moveFile(state.client, state.allFiles, oldPath, targetFolder);
-    } catch (e) {
-      // A file with the same name is already in the target folder — replacing it is
-      // destructive, so ask first instead of failing with a raw GitHub API error.
-      if (e.code !== 'target-exists') throw e;
-      const confirmed = confirm(
-        `"${e.targetPath}" already exists.\n\nReplace it with "${oldPath}"? This cannot be undone.`
-      );
-      if (!confirmed) {
-        setSaveStatus('Move cancelled', false);
-        return;
-      }
-      result = await moveFile(state.client, state.allFiles, oldPath, targetFolder, { overwrite: true });
-    }
-
-    const { newPath, updatedFiles, skipped, overwritten } = result;
-    if (skipped) {
-      setSaveStatus(`${oldPath} is already in that folder`, false);
-      return;
-    }
-
-    const wasCurrent = state.currentPath === oldPath;
-    tabs.rename(oldPath, newPath);
-    moveTabDoc(oldPath, newPath);
-    markStale(updatedFiles); // links were rewritten in these files
-
-    // Optimistic local update: GitHub's tree API has replication delay after a
-    // write, so loadTree() can return the pre-move tree and the file appears to
-    // stay in its old location until the user reloads. Patch allFiles locally
-    // so the tree re-renders correctly immediately; the eventual loadTree() will
-    // overwrite with authoritative state when GitHub catches up.
-    const movedIdx = state.allFiles.findIndex((f) => f.path === oldPath);
-    if (movedIdx !== -1) {
-      state.allFiles[movedIdx] = { ...state.allFiles[movedIdx], path: newPath };
-      fileTree.setFiles(state.allFiles);
-    }
-
-    if (wasCurrent) {
-      state.currentPath = newPath;
-      els.currentFileLabel.textContent = newPath;
-    }
-    if (state.currentPath && (wasCurrent || updatedFiles.includes(state.currentPath))) {
-      // Pull fresh contents/sha, and — for the moved file itself — rebind autosave
-      // to the NEW path. Left bound to the old one, the next keystroke would try
-      // to commit to a path that no longer exists.
-      await openFile(state.currentPath, { reload: true });
-    }
-    persistTabs();
-    renderTabs();
-
-    imageResolver.invalidate(oldPath);
-    await loadTree();
-    setSaveStatus(
-      `Moved: ${oldPath} → ${newPath}` +
-        (overwritten ? ' (replaced the existing file)' : '') +
-        (updatedFiles.length ? ` (updated links in ${updatedFiles.length} file(s))` : ''),
-      false
-    );
-  } catch (e) {
-    setSaveStatus('Move error: ' + e.message, true);
-  }
-}
-
 // ====================== TABS ======================
 function tabsKey() {
   return tabsStorageKey(state.client.owner, state.client.repo, state.branch);
@@ -1450,35 +1393,6 @@ async function onSaveFile() {
   if (!state.currentPath) return;
   await ensureAutosave().saveNow();
 }
-
-// Deleting the active file. The GitHub API requires the sha of that same blob, so
-// we take state.currentSha (it always matches the last known version of the file).
-async function onDeleteFile() {
-  const path = state.currentPath;
-  if (!path) return;
-
-  const confirmed = confirm(`Are you sure you want to delete this file?\n\n${path}\n\nThe file will be removed from the repository; this cannot be undone.`);
-  if (!confirmed) return;
-
-  els.btnDelete.disabled = true;
-  els.btnSave.disabled = true;
-  setSaveStatus('Deleting...', false);
-
-  try {
-    await state.client.deleteFile(path, state.currentSha, `Delete ${path}`);
-    imageResolver.invalidate(path);
-    await dropTabs([path]);
-    await loadTree();
-    setSaveStatus(`File deleted: ${path}`, false);
-  } catch (e) {
-    // The file is still in place — restore the buttons to a working state so you can
-    // either retry or save the remaining edits.
-    els.btnSave.disabled = false;
-    els.btnDelete.disabled = false;
-    setSaveStatus('Delete error: ' + e.message, true);
-  }
-}
-
 // After deletion (or when the last tab is closed) the editor must not keep the
 // file's contents: show an empty document, drop inline images, lock actions.
 // Tabs are the CALLER's business (dropTabs / closeTab) — this only resets the editor.
@@ -1506,358 +1420,6 @@ function closeCurrentFile({ flush = true } = {}) {
   // No file is open now: swap the (emptied) editor for the empty-state card.
   renderEmptyState();
 }
-
-/** Resolves a user-entered NAME into a full repo path inside folderPath ('' = root). */
-function resolvePathIn(folderPath, name) {
-  const clean = String(name == null ? '' : name).trim();
-  if (!clean) throw new Error('Name cannot be empty');
-  if (clean === '.' || clean === '..') throw new Error(`"${clean}" is not a valid name`);
-  // A name with slashes is accepted for backwards compatibility with the old
-  // "type the full path" prompt, but it is always resolved from the repository root.
-  const full = clean.includes('/') ? clean.replace(/^\/+|\/+$/g, '') : clean;
-  return folderPath ? `${folderPath}/${full}` : full;
-}
-
-function targetFolderLabel(folderPath) {
-  return folderPath ? `"${folderPath}"` : 'the repository root';
-}
-
-/** Coerces a "create here" target into a real folder path.
- *
- * The toolbar wires these handlers through `onclick`, and a click event can
- * reach here as `folderPath`. Returning '' (the repo root) for that would
- * silently drop the user's intent — the active folder is what they are looking
- * at, so fall back to it, exactly like the default parameter does for
- * `undefined`. Only an explicit empty string means the repo root. */
-function toFolderPath(value) {
-  if (typeof value === 'string') return value;
-  return fileTree ? fileTree.getActiveFolder() : '';
-}
-
-/**
- * Creates a new text file (.md, .html, .js, .css, …). folderPath defaults to the
- * tree's active folder so the file lands where the user is looking.
- */
-
-function formatActiveFolderPath(folderPath) {
-  const p = (folderPath || '').replace(/^\/+|\/+$/g, '');
-  return p ? p : '/';
-}
-
-function updateActiveFolderPathLabel(folderPath) {
-  if (!els.activeFolderPath) return;
-  const label = formatActiveFolderPath(folderPath);
-  els.activeFolderPath.textContent = label;
-  els.activeFolderPath.title = label === '/'
-    ? 'Target: repository root'
-    : 'Target folder: ' + label;
-}
-
-function closeAddMenu() {
-  if (els.addMenu) els.addMenu.classList.add('hidden');
-}
-
-function setupAddMenu() {
-  if (!els.btnAddMenu || els.btnAddMenu.dataset.bound) return;
-  els.btnAddMenu.dataset.bound = '1';
-  els.btnAddMenu.addEventListener('click', (e) => {
-    e.stopPropagation();
-    if (!els.addMenu) return;
-    els.addMenu.classList.toggle('hidden');
-  });
-  document.addEventListener('click', (e) => {
-    if (!els.addMenu || els.addMenu.classList.contains('hidden')) return;
-    if (els.addMenu.contains(e.target) || (els.btnAddMenu && els.btnAddMenu.contains(e.target))) return;
-    closeAddMenu();
-  });
-  document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') closeAddMenu();
-  });
-}
-
-async function onCreateNewFile(folderPath = fileTree.getActiveFolder()) {
-  folderPath = toFolderPath(folderPath);
-  const name = prompt(
-    `New file name (created in ${targetFolderLabel(folderPath)}):\n` +
-      `Examples: note.md, page.html, script.js, styles.css`,
-    'untitled.md'
-  );
-  if (!name) return;
-
-  let path;
-  try {
-    path = resolvePathIn(folderPath, name);
-    if (!isEditableTextPath(path)) {
-      throw new Error(
-        'Unsupported file type. Use a text extension (.md, .html, .js, .css, .json, .txt, …)'
-      );
-    }
-    if (state.allFiles.some((f) => f.path === path)) throw new Error(`"${path}" already exists`);
-  } catch (e) {
-    alert(e.message);
-    return;
-  }
-
-  try {
-    setSaveStatus(`Creating ${path}...`, false);
-    const starter = starterContentForPath(path);
-    await state.client.putFile(path, utf8ToB64(starter), `Create ${path}`);
-    await loadTree();
-    fileTree.setActiveFolder(folderPath, { expand: true }); // reveal the new file
-    await openFile(path);
-    setSaveStatus(`File created: ${path}`, false);
-  } catch (e) {
-    setSaveStatus('Create error: ' + e.message, true);
-  }
-}
-
-/** Initial body for a newly created file, by kind. */
-function starterContentForPath(path) {
-  const kind = kindFromPath(path);
-  if (kind.kind === 'html') {
-    return (
-      '<!DOCTYPE html>\n<html lang="en">\n<head>\n  <meta charset="UTF-8" />\n' +
-      '  <title>New page</title>\n</head>\n<body>\n  <h1>New page</h1>\n</body>\n</html>\n'
-    );
-  }
-  if (kind.kind === 'code') {
-    if (kind.ext === 'css') return '/* styles */\n\n';
-    if (kind.ext === 'json') return '{\n  \n}\n';
-    if (kind.ext === 'js' || kind.ext === 'mjs' || kind.ext === 'cjs' || kind.ext === 'ts' || kind.ext === 'jsx' || kind.ext === 'tsx') {
-      return '// script\n\n';
-    }
-    if (kind.ext === 'py') return '# script\n\n';
-    return '';
-  }
-  if (kind.kind === 'markdown') return '# New file\n';
-  return '';
-}
-
-async function onCreateNewFolder(folderPath = fileTree.getActiveFolder()) {
-  folderPath = toFolderPath(folderPath);
-  const name = prompt(`New folder name (created in ${targetFolderLabel(folderPath)}):`);
-  if (!name) return;
-
-  let path;
-  try {
-    path = resolvePathIn(folderPath, name);
-    if (getFolders(state.allFiles).includes(path)) throw new Error(`Folder "${path}" already exists`);
-  } catch (e) {
-    alert(e.message);
-    return;
-  }
-
-  try {
-    setSaveStatus(`Creating folder ${path}...`, false);
-    await createFolder(state.client, path);
-    await loadTree();
-    fileTree.setActiveFolder(path, { expand: true }); // show the folder that was just created
-    setSaveStatus(`Folder created: ${path}`, false);
-  } catch (e) {
-    setSaveStatus('Create error: ' + e.message, true);
-  }
-}
-
-// Context-menu entry points: always target the folder the user right-clicked.
-function onCreateFileIn(folderPath) {
-  return onCreateNewFile(folderPath);
-}
-
-function onCreateFolderIn(folderPath) {
-  return onCreateNewFolder(folderPath);
-}
-
-/** Renames a file from the tree context menu; keeps it in the same folder. */
-async function onRenameFile(path) {
-  const newName = prompt(`New name for "${basenameOf(path)}":`, basenameOf(path));
-  if (!newName) return;
-  const trimmed = newName.trim();
-  if (trimmed === basenameOf(path)) return;
-
-  try {
-    setSaveStatus(`Renaming ${path}...`, false);
-    const { newPath, updatedFiles, skipped } = await renameFile(state.client, state.allFiles, path, trimmed);
-    if (skipped) return;
-
-    const wasCurrent = state.currentPath === path;
-    tabs.rename(path, newPath);
-    moveTabDoc(path, newPath);
-    markStale(updatedFiles);
-
-    // Optimistic local update (see onMoveFile): renameFile() moved the file to
-    // newPath, but loadTree() may still return the pre-rename tree for a moment,
-    // so patch allFiles locally and re-render; the eventual loadTree() overwrites
-    // with authoritative state when GitHub catches up.
-    const renamedIdx = state.allFiles.findIndex((f) => f.path === path);
-    if (renamedIdx !== -1) {
-      state.allFiles[renamedIdx] = { ...state.allFiles[renamedIdx], path: newPath };
-      fileTree.setFiles(state.allFiles);
-    }
-
-    if (wasCurrent) {
-      state.currentPath = newPath;
-      els.currentFileLabel.textContent = newPath;
-    }
-    if (state.currentPath && (wasCurrent || updatedFiles.includes(state.currentPath))) {
-      await openFile(state.currentPath, { reload: true }); // refresh the editor + sha under the new path
-    }
-    persistTabs();
-    renderTabs();
-
-    imageResolver.invalidate(path);
-    await loadTree();
-    setSaveStatus(
-      `Renamed: ${path} → ${newPath}` +
-        (updatedFiles.length ? ` (updated links in ${updatedFiles.length} file(s))` : ''),
-      false
-    );
-  } catch (e) {
-    setSaveStatus('Rename error: ' + e.message, true);
-  }
-}
-
-/** Deletes a file from the tree context menu (works for any file, not just the open one). */
-async function onDeleteFileAt(path) {
-  const confirmed = confirm(
-    `Are you sure you want to delete this file?\n\n${path}\n\nThe file will be removed from the repository; this cannot be undone.`
-  );
-  if (!confirmed) return;
-
-  try {
-    setSaveStatus(`Deleting ${path}...`, false);
-    const entry = state.allFiles.find((f) => f.path === path);
-    const sha = state.currentPath === path ? state.currentSha : entry && entry.sha;
-    if (!sha) throw new Error(`No sha known for ${path} — refresh the tree and try again`);
-
-    await state.client.deleteFile(path, sha, `Delete ${path}`);
-    imageResolver.invalidate(path);
-    await dropTabs([path]);
-    await loadTree();
-    setSaveStatus(`File deleted: ${path}`, false);
-  } catch (e) {
-    setSaveStatus('Delete error: ' + e.message, true);
-  }
-}
-
-/**
- * Builds a markdown link to `targetPath` and copies it to the clipboard.
- * Relative to the currently open file when there is one; falls back to
- * repo-root absolute (/path) otherwise. For .md files the display name
- * strips the extension; everything else keeps its extension (images,
- * html, code files).
- */
-async function onCopyLinkToFile(targetPath) {
-  const basename = basenameOf(targetPath);
-  const displayName = basename.replace(/\.md$/i, '');
-
-  let linkPath;
-  if (state.currentPath) {
-    linkPath = relativePathFromTo(dirnameOf(state.currentPath), targetPath);
-  } else {
-    // No open file — root-absolute link. The leading slash is a convention
-    // the editor already understands (see reference-rewriter.js).
-    linkPath = '/' + targetPath;
-  }
-  // DO NOT percent-encode here. marked (the markdown renderer) captures the
-  // link URL verbatim and percent-encodes it once at HTML serialization — so a
-  // pre-encoded %20 would come back out as %20 and then be re-encoded to %25 by
-  // encodePathForApi on the way to GitHub (a 404). The raw path with real
-  // spaces/unicode is the correct wire format for markdown link syntax —
-  // GitHub, Obsidian and VS Code all accept and prefer this.
-  //
-  // Markdown has one real escaping concern: parentheses terminate link syntax,
-  // and a bare space inside (...) is not parsed as a link at all. Wrap the URL
-  // in <...> when it contains spaces or parens — the standard markdown escape
-  // for arbitrary URLs. marked strips the angle brackets and encodes the
-  // spaces into the href, and the click handler decodes them back.
-  const needsAngleBrackets = /[()\s]/.test(linkPath);
-  const urlPart = needsAngleBrackets ? `<${linkPath}>` : linkPath;
-  const markdown = `[${displayName}](${urlPart})`;
-
-  try {
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      await navigator.clipboard.writeText(markdown);
-      setSaveStatus(`Link copied: ${basename}`, false);
-    } else {
-      throw new Error('clipboard API unavailable');
-    }
-  } catch (e) {
-    // Fallback: prompt with text pre-selected so user can Ctrl+C.
-    // Not pretty, but works in insecure contexts and older browsers.
-    const ok = window.prompt(
-      `Copy this link (Ctrl+C):`,
-      markdown
-    );
-    if (ok !== null) {
-      setSaveStatus(`Link ready: ${basename}`, false);
-    }
-  }
-}
-
-// ====================== FOLDER OPERATIONS ======================
-async function onRenameFolder(folderPath) {
-  const newName = prompt(`New name for folder "${basenameOf(folderPath)}":`);
-  if (!newName || newName.trim() === '') return;
-  const newPath = `${dirnameOf(folderPath)}/${newName.trim()}`.replace(/^\/+/, '');
-  if (newPath === folderPath) return;
-
-  try {
-    setSaveStatus(`Renaming ${folderPath}...`, false);
-    const { moved, updatedFiles } = await renameFolder(state.client, state.allFiles, folderPath, newPath);
-    for (const [from, to] of tabs.renameFolder(folderPath, newPath)) moveTabDoc(from, to);
-    markStale(updatedFiles);
-
-    // Optimistic local update (see onMoveFile), but a folder rename moves MANY
-    // files. renameFolder() reads state.allFiles without mutating it, so every
-    // entry still names its OLD path; repoint them all under the new prefix so
-    // the whole folder visibly moves at once. The eventual loadTree() overwrites
-    // with authoritative state when GitHub catches up.
-    const folderPrefix = folderPath + '/';
-    const newFolderPrefix = newPath + '/';
-    let folderPatched = false;
-    for (let i = 0; i < state.allFiles.length; i++) {
-      const f = state.allFiles[i];
-      if (f.path.startsWith(folderPrefix)) {
-        state.allFiles[i] = { ...f, path: newFolderPrefix + f.path.slice(folderPrefix.length) };
-        folderPatched = true;
-      }
-    }
-    if (folderPatched) fileTree.setFiles(state.allFiles);
-
-    if (state.currentPath && state.currentPath.startsWith(folderPath + '/')) {
-      state.currentPath = newPath + state.currentPath.slice(folderPath.length);
-      els.currentFileLabel.textContent = state.currentPath;
-      await openFile(state.currentPath, { reload: true });
-    }
-    persistTabs();
-    renderTabs();
-    await loadTree();
-    setSaveStatus(`Renamed: ${folderPath} → ${newPath} (files: ${moved.length})`, false);
-  } catch (e) {
-    setSaveStatus('Error: ' + e.message, true);
-  }
-}
-
-async function onDeleteFolder(folderPath) {
-  if (!isFolderEmpty(state.allFiles, folderPath)) {
-    const confirmed = confirm(`Folder "${folderPath}" is not empty. Delete all files in it?\nThis cannot be undone.`);
-    if (!confirmed) return;
-  } else {
-    const confirmed = confirm(`Delete empty folder "${folderPath}"?`);
-    if (!confirmed) return;
-  }
-
-  try {
-    setSaveStatus(`Deleting folder ${folderPath}...`, false);
-    await deleteFolder(state.client, state.allFiles, folderPath);
-    await dropTabs(tabs.paths.filter((p) => p.startsWith(folderPath + '/')));
-    await loadTree();
-    setSaveStatus(`Folder deleted: ${folderPath}`, false);
-  } catch (e) {
-    setSaveStatus('Error: ' + e.message, true);
-  }
-}
-
 async function onExportPdf() {
   els.btnExportPdf.disabled = true;
   try {
