@@ -80,7 +80,8 @@ MD_CONTENT = MD_INTRO + MD_FILLER + LONG_BODY + "\n"
 
 def complete_new_file_dialog(page, filename: str):
     """Drive the in-app New file dialog (name + type). Replaces window.prompt for files."""
-    page.wait_for_selector("#new-file-overlay:not(.hidden)", timeout=8000)
+    # Open: visible overlay (no .hidden)
+    page.wait_for_selector("#new-file-overlay:not(.hidden)", state="visible", timeout=8000)
     stem, _, ext = filename.rpartition(".")
     if not stem:
         stem, ext = filename, "md"
@@ -90,7 +91,9 @@ def complete_new_file_dialog(page, filename: str):
     label = page.locator("#new-file-folder-label").inner_text()
     assert "PointerEvent" not in label and "object" not in label.lower(), label
     page.click("#btn-new-file-ok")
-    page.wait_for_selector("#new-file-overlay.hidden", timeout=8000)
+    # Closed overlay has class "hidden" → not visible. Default wait_for_selector
+    # requires visible=true, so waiting for "#new-file-overlay.hidden" always times out.
+    page.wait_for_selector("#new-file-overlay", state="hidden", timeout=8000)
 
 
 
