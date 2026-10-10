@@ -12,7 +12,6 @@ import { setupImageDropzone, pickImageFiles, uploadImage } from './upload.js';
 import { setupFolderDropzone } from './folder-upload.js';
 import { exportCurrentPageToPdf } from './pdf-export.js';
 import { createFileOps } from './file-ops.js';
-import { basenameOf, dirnameOf, encodePathForApi } from './paths.js';
 import { createLoginUI } from './login-ui.js';
 import { SearchStore } from './search-store.js';
 import { SearchSync } from './search-sync.js';

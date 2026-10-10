@@ -30,6 +30,54 @@ import { kindFromPath, isEditableTextPath } from './file-kind.js';
 export function createFileOps(deps) {
   const els = deps.els;
 
+  /**
+   * GitHub's git tree can lag a few seconds after Contents API writes.
+   * loadTree() alone may re-show the pre-move layout; keep a local patch until
+   * the remote tree contains newPath and no longer lists oldPath.
+   */
+  function patchAllFilesPath(oldPath, newPath) {
+    const state = deps.getState();
+    const tree = deps.getFileTree();
+    const prev = state.allFiles || [];
+    const oldEntry = prev.find((f) => f.path === oldPath);
+    const existingNew = prev.find((f) => f.path === newPath);
+    let files = prev.filter((f) => f.path !== oldPath && f.path !== newPath);
+    const entry = existingNew || (oldEntry ? { ...oldEntry, path: newPath } : { path: newPath, sha: 'local' });
+    if (!entry.path) entry.path = newPath;
+    else entry.path = newPath;
+    files.push(entry);
+    files.sort((a, b) => a.path.localeCompare(b.path));
+    state.allFiles = files;
+    if (tree) {
+      tree.setFiles(files);
+      const folder = dirnameOf(newPath);
+      // Expand destination so the moved file is visible without a full reload.
+      if (folder) tree.setActiveFolder(folder, { expand: true });
+      else tree.setActiveFolder('', { expand: false });
+    }
+  }
+
+  async function refreshTreeAfterPathChange(oldPath, newPath) {
+    try {
+      await deps.loadTree();
+    } catch (_) {
+      /* network — still apply local patch below */
+    }
+    const files = deps.getState().allFiles || [];
+    const hasNew = files.some((f) => f.path === newPath);
+    const hasOld = files.some((f) => f.path === oldPath);
+    if (!hasNew || hasOld) {
+      patchAllFilesPath(oldPath, newPath);
+    } else {
+      const tree = deps.getFileTree();
+      if (tree) {
+        const folder = dirnameOf(newPath);
+        if (folder) tree.setActiveFolder(folder, { expand: true });
+      }
+    }
+  }
+
+
 
   async function onMoveFile(oldPath, targetFolder) {
     deps.setSaveStatus(`Moving ${oldPath}...`, false);
@@ -62,16 +110,8 @@ export function createFileOps(deps) {
       deps.moveTabDoc(oldPath, newPath);
       deps.markStale(updatedFiles); // links were rewritten in these files
 
-      // Optimistic local update: GitHub's tree API has replication delay after a
-      // write, so deps.loadTree() can return the pre-move tree and the file appears to
-      // stay in its old location until the user reloads. Patch allFiles locally
-      // so the tree re-renders correctly immediately; the eventual deps.loadTree() will
-      // overwrite with authoritative state when GitHub catches up.
-      const movedIdx = deps.getState().allFiles.findIndex((f) => f.path === oldPath);
-      if (movedIdx !== -1) {
-        deps.getState().allFiles[movedIdx] = { ...deps.getState().allFiles[movedIdx], path: newPath };
-        deps.getFileTree().setFiles(deps.getState().allFiles);
-      }
+      // Show the new location immediately (GitHub tree API often lags).
+      patchAllFilesPath(oldPath, newPath);
 
       if (wasCurrent) {
         deps.getState().currentPath = newPath;
@@ -87,7 +127,8 @@ export function createFileOps(deps) {
       deps.renderTabs();
 
       deps.getImageResolver().invalidate(oldPath);
-      await deps.loadTree();
+      // loadTree may return the pre-move tree; reconcile keeps the local move visible.
+      await refreshTreeAfterPathChange(oldPath, newPath);
       deps.setSaveStatus(
         `Moved: ${oldPath} → ${newPath}` +
           (overwritten ? ' (replaced the existing file)' : '') +
@@ -318,15 +359,7 @@ export function createFileOps(deps) {
       deps.moveTabDoc(path, newPath);
       deps.markStale(updatedFiles);
 
-      // Optimistic local update (see onMoveFile): renameFile() moved the file to
-      // newPath, but deps.loadTree() may still return the pre-rename tree for a moment,
-      // so patch allFiles locally and re-render; the eventual deps.loadTree() overwrites
-      // with authoritative state when GitHub catches up.
-      const renamedIdx = deps.getState().allFiles.findIndex((f) => f.path === path);
-      if (renamedIdx !== -1) {
-        deps.getState().allFiles[renamedIdx] = { ...deps.getState().allFiles[renamedIdx], path: newPath };
-        deps.getFileTree().setFiles(deps.getState().allFiles);
-      }
+      patchAllFilesPath(path, newPath);
 
       if (wasCurrent) {
         deps.getState().currentPath = newPath;
@@ -339,7 +372,7 @@ export function createFileOps(deps) {
       deps.renderTabs();
 
       deps.getImageResolver().invalidate(path);
-      await deps.loadTree();
+      await refreshTreeAfterPathChange(path, newPath);
       deps.setSaveStatus(
         `Renamed: ${path} → ${newPath}` +
           (updatedFiles.length ? ` (updated links in ${updatedFiles.length} file(s))` : ''),
