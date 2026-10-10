@@ -50,6 +50,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Inline-image cursor jumps on Space/Backspace
 - History / Commit panel positioning; ResizeObserver scroll jitter
 - `titleFromPath` must only strip markdown extensions (unit test)
+- HTML preview height handshake race (commit d6d7fcc) — iframe bridge now posts height immediately and at 50/200/500ms, so at least one post lands after the parent listener registers. Previously the first message could be lost if the iframe loaded faster than editor init, leaving the iframe at pane fallback height.
+- Blank HTML preview for large files (commit 7cb7555) — renderHtmlPreview no longer assigns srcdoc twice (raw first, then resolved). On large files (3.7MB confirmed), the second assignment interrupted parsing mid-flight and left the sandboxed iframe blank. Resolved srcdoc now lands exactly once.
+
 
 ## [Unreleased]
 

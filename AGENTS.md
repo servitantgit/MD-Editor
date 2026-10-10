@@ -196,6 +196,96 @@ test decodes each one in the browser and counts red pixels. A split shows a
 large red block on one page plus red starting at row 0 of the next. Verified to
 fail when the fix is removed.
 
+## Diagnosing sandboxed iframes (HTML preview, PDF export)
+
+Two HTML-preview bugs — the height-handshake race (`d6d7fcc`) and the
+blank-frame-on-large-files bug (`7cb7555`) — took ~3 hours to diagnose, mostly
+because the obvious tools give false comfort. The lessons are general: they apply
+anywhere the app touches a sandboxed iframe, a race, or parent↔child
+`postMessage`. Read this before the next one and it should be a 20-minute fix.
+
+**Why parent-side inspection is limited.** The preview iframe is created with
+`sandbox="allow-scripts allow-forms allow-modals"` — deliberately **without**
+`allow-same-origin`. That gives the frame an *opaque origin*, so from the parent
+`iframe.contentDocument` is `null` and `iframe.contentWindow` is the only handle.
+This is by design and must stay: adding `allow-same-origin` would let the
+sandboxed script reach the parent's cookies/storage and defeat the whole point of
+sandboxing untrusted HTML. html2canvas (PDF export) cannot capture the iframe
+interior for the same reason — it can capture the pane element (parent-side
+chrome), which proves the *positioning*, but not that the inner document painted.
+So render success must be inferred from **indirect signals readable from the
+parent window**.
+
+Reliable parent-side signals (all proven today):
+
+| Signal | What it means |
+|---|---|
+| `iframe.offsetHeight` | Exceeds the pane fallback (~500–600px) **only** after the height handshake completes with the real content height. Stuck at the fallback ⇒ handshake never fired. |
+| `iframe.style.getPropertyPriority('height') === 'important'` | Set **only** by the handshake handler (`onParentMessage` in `editor.js`), never by CSS. Present ⇒ a real `postMessage` landed and was applied. |
+| `postMessage` traffic of type `md-editor-frame-height` within a time window | Install a temporary `window.addEventListener('message', …)`, filter by `ev.source === iframe.contentWindow`. Presence ⇒ the bridge script ran inside the frame. |
+| `iframe.srcdoc` length + substring check for `__mdPostHeight` | Proves the bridge was injected into the document that was actually assigned. A short/srcdoc-less frame ⇒ the assignment that carried the bridge never happened. |
+
+**The three visual tests.** When metrics give ambiguous answers, isolate the cause
+visually. Create side-by-side test iframes appended to `document.body` with
+`position: fixed`:
+
+- **Red** — copy the production iframe's `srcdoc` and use the **same** sandbox
+  attributes (`allow-scripts allow-forms allow-modals`). Reproduces the production
+  case.
+- **Orange** — same srcdoc but add `allow-same-origin`. Confirms whether the
+  sandbox is the issue (and, once you can read `contentDocument`, lets you inspect
+  the parsed DOM).
+- **Lime** — a tiny known-good HTML string with the same sandbox. Confirms the
+  sandbox itself works at all.
+
+Compare visually. **If all three render but the production iframe stays blank, the
+issue is NOT sandbox, NOT size, NOT content — it is lifecycle**: multiple `srcdoc`
+assignments, DOM manipulation during render, etc. That is exactly how `7cb7555`
+was pinned down: three identical-sandbox test frames rendered fine, so the
+production frame's double `srcdoc` assignment (not the 3.7MB size) was the
+culprit.
+
+**Prototype-level `srcdoc` instrumentation.** To catch *every* `srcdoc`
+assignment, patch the prototype rather than a single iframe instance — the preview
+iframe is recreated on each render (`previewEl.innerHTML = ''` + fresh
+`createElement`), so an instance-level patch is gone the moment the frame is
+rebuilt:
+
+```js
+const proto = HTMLIFrameElement.prototype;
+const desc = Object.getOwnPropertyDescriptor(proto, 'srcdoc');
+Object.defineProperty(proto, 'srcdoc', {
+  configurable: true,
+  get() { return desc.get.call(this); },
+  set(v) {
+    if (this.classList.contains('html-preview-frame')) {
+      console.log('srcdoc set:', v.length, new Error().stack);
+    }
+    desc.set.call(this, v);
+  }
+});
+// Always restore: Object.defineProperty(proto, 'srcdoc', desc);
+```
+
+This caught the double assignment (raw, then resolved ~40ms later) that per-instance
+patching missed. Leave the prototype patched only while debugging.
+
+**Why Playwright is not enough.** `e2e_smoke_test.py` mocks `cdn.jsdelivr.net`
+from local `node_modules`, which **changes timing**. Race conditions that trigger
+in production (slow CDN, multi-MB content, real network latency) may not reproduce
+under Playwright at all. For HTML-preview, sandbox, or `postMessage` bugs, open the
+**F12 Console on the actual production site** before concluding anything. Reference
+`7cb7555`: Playwright said PASS and pixel analysis in the demo said PASS, but a
+3.7MB file (`WinLase.html`) broke in production in a way neither test could see.
+
+**The "no placeholder" rule for async rendering.** If placeholder content arrives
+less than ~100ms before the real content, **do not render a placeholder at all.**
+On small payloads the user never sees it; on large payloads the second assignment
+interrupts the parser and may leave the frame in a broken state (blank). Prefer a
+**single render after the async step completes**, with an explicit loading state
+(empty frame or spinner) during the wait. This is precisely what `renderHtmlPreview`
+does now: it `await`s `buildHtmlSrcdoc()` and assigns `srcdoc` exactly once.
+
 ## Never assign a handler with a parameter straight to `onclick`
 
 `els.btnNewFile.onclick = onCreateNewFile;` looks fine and is a classic

@@ -22,6 +22,10 @@ Prefer automated coverage in `test/*.test.js` and `e2e_smoke_test.py` when pract
 - [ ] Inline images: Space/Backspace near an image keep the caret local (no jump to end).
 - [ ] External images (`https://…`, shields.io) render; GitHub Actions badge paths like `../../actions/workflows/….yml/badge.svg` resolve to `https://github.com/{owner}/{repo}/actions/...`.
 - [ ] HTML files: Live/Preview show content in iframe; fullscreen stays in the current layout mode.
+- [ ] Open a large HTML file (>1MB srcdoc) in Live layout on first open — must render, no toggle needed.
+- [ ] Open any HTML file in Live layout before any other file — must render on first click.
+- [ ] Toggle Source → Live → Source → Live rapidly on an HTML file — content must stay visible, no flicker, no blank frame.
+
 - [ ] CodeMirror **material-darker** theme; caret remains light (`#e6edf3`).
 
 ## Toolbar / chrome
