@@ -329,11 +329,15 @@ export class FileTree {
   _showFileContextMenu(x, y, filePath) {
     this._showContextMenu(x, y, [
       { action: 'new-file-here', label: '📄 New file in this folder' },
+      { action: 'copy-link', label: '🔗 Copy as link' },
       { action: 'rename', label: '✏️ Rename' },
       { action: 'delete', label: '🗑 Delete', className: 'danger' },
     ], (action) => {
       if (action === 'new-file-here' && this.handlers?.onCreateFileIn) {
         this.handlers.onCreateFileIn(dirnameOf(filePath));
+      }
+      if (action === 'copy-link' && this.handlers?.onCopyLinkToFile) {
+        this.handlers.onCopyLinkToFile(filePath);
       }
       if (action === 'rename' && this.handlers?.onRenameFile) this.handlers.onRenameFile(filePath);
       if (action === 'delete' && this.handlers?.onDeleteFileAt) this.handlers.onDeleteFileAt(filePath);

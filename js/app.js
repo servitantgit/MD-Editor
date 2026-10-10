@@ -13,7 +13,7 @@ import { setupFolderDropzone } from './folder-upload.js';
 import { exportCurrentPageToPdf } from './pdf-export.js';
 import { moveFile, renameFile } from './file-mover.js';
 import { createFolder, renameFolder, deleteFolder, getFolders, isFolderEmpty } from './folder-manager.js';
-import { basenameOf, dirnameOf, encodePathForApi } from './paths.js';
+import { basenameOf, dirnameOf, encodePathForApi, relativePathFromTo, encodeLinkPath } from './paths.js';
 import { looksLikeGitHubUrl, parseGitHubOwnerRepo } from './github-repo-url.js';
 import { SearchStore } from './search-store.js';
 import { SearchSync } from './search-sync.js';
@@ -964,6 +964,7 @@ function showApp(owner, repo) {
     onCreateFolderIn,
     onRenameFile: onRenameFile,
     onDeleteFileAt: onDeleteFileAt,
+    onCopyLinkToFile: (path) => onCopyLinkToFile(path),
     onActiveFolderChange: (folderPath) => updateActiveFolderPathLabel(folderPath),
   });
   updateActiveFolderPathLabel(fileTree.getActiveFolder());
@@ -2013,6 +2014,49 @@ async function onDeleteFileAt(path) {
     setSaveStatus(`File deleted: ${path}`, false);
   } catch (e) {
     setSaveStatus('Delete error: ' + e.message, true);
+  }
+}
+
+/**
+ * Builds a markdown link to `targetPath` and copies it to the clipboard.
+ * Relative to the currently open file when there is one; falls back to
+ * repo-root absolute (/path) otherwise. For .md files the display name
+ * strips the extension; everything else keeps its extension (images,
+ * html, code files).
+ */
+async function onCopyLinkToFile(targetPath) {
+  const basename = basenameOf(targetPath);
+  const displayName = basename.replace(/\.md$/i, '');
+
+  let linkPath;
+  if (state.currentPath) {
+    linkPath = relativePathFromTo(dirnameOf(state.currentPath), targetPath);
+  } else {
+    // No open file — root-absolute link. The leading slash is a convention
+    // the editor already understands (see reference-rewriter.js).
+    linkPath = '/' + targetPath;
+  }
+  // Percent-encode spaces, parens etc. so the markdown link doesn't break.
+  const encoded = encodeLinkPath(linkPath);
+  const markdown = `[${displayName}](${encoded})`;
+
+  try {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      await navigator.clipboard.writeText(markdown);
+      setSaveStatus(`Link copied: ${basename}`, false);
+    } else {
+      throw new Error('clipboard API unavailable');
+    }
+  } catch (e) {
+    // Fallback: prompt with text pre-selected so user can Ctrl+C.
+    // Not pretty, but works in insecure contexts and older browsers.
+    const ok = window.prompt(
+      `Copy this link (Ctrl+C):`,
+      markdown
+    );
+    if (ok !== null) {
+      setSaveStatus(`Link ready: ${basename}`, false);
+    }
   }
 }
 
