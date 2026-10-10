@@ -13,7 +13,7 @@ import { setupFolderDropzone } from './folder-upload.js';
 import { exportCurrentPageToPdf } from './pdf-export.js';
 import { moveFile, renameFile } from './file-mover.js';
 import { createFolder, renameFolder, deleteFolder, getFolders, isFolderEmpty } from './folder-manager.js';
-import { basenameOf, dirnameOf, encodePathForApi, relativePathFromTo, encodeLinkPath } from './paths.js';
+import { basenameOf, dirnameOf, encodePathForApi, relativePathFromTo } from './paths.js';
 import { looksLikeGitHubUrl, parseGitHubOwnerRepo } from './github-repo-url.js';
 import { SearchStore } from './search-store.js';
 import { SearchSync } from './search-sync.js';
@@ -2036,9 +2036,21 @@ async function onCopyLinkToFile(targetPath) {
     // the editor already understands (see reference-rewriter.js).
     linkPath = '/' + targetPath;
   }
-  // Percent-encode spaces, parens etc. so the markdown link doesn't break.
-  const encoded = encodeLinkPath(linkPath);
-  const markdown = `[${displayName}](${encoded})`;
+  // DO NOT percent-encode here. marked (the markdown renderer) captures the
+  // link URL verbatim and percent-encodes it once at HTML serialization — so a
+  // pre-encoded %20 would come back out as %20 and then be re-encoded to %25 by
+  // encodePathForApi on the way to GitHub (a 404). The raw path with real
+  // spaces/unicode is the correct wire format for markdown link syntax —
+  // GitHub, Obsidian and VS Code all accept and prefer this.
+  //
+  // Markdown has one real escaping concern: parentheses terminate link syntax,
+  // and a bare space inside (...) is not parsed as a link at all. Wrap the URL
+  // in <...> when it contains spaces or parens — the standard markdown escape
+  // for arbitrary URLs. marked strips the angle brackets and encodes the
+  // spaces into the href, and the click handler decodes them back.
+  const needsAngleBrackets = /[()\s]/.test(linkPath);
+  const urlPart = needsAngleBrackets ? `<${linkPath}>` : linkPath;
+  const markdown = `[${displayName}](${urlPart})`;
 
   try {
     if (navigator.clipboard && navigator.clipboard.writeText) {

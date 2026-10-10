@@ -269,7 +269,13 @@ export function createEditor(textareaEl, deps) {
       let target = href.replace(/^\//, '');
       try {
         if (!href.startsWith('/')) {
-          target = resolveRelativePath(dirnameOf(cur || ''), href);
+          // marked percent-encodes the href (spaces -> %20 etc.), so decode it
+          // before resolving — otherwise the literal %20 survives into the repo
+          // path and encodePathForApi turns the % into %25, 404-ing on GitHub.
+          // This also revives links that were written pre-encoded (%20) by an
+          // older build, which otherwise stay permanently broken.
+          const decoded = (() => { try { return decodeURIComponent(href); } catch (_) { return href; } })();
+          target = resolveRelativePath(dirnameOf(cur || ''), decoded);
         }
       } catch (_) { /* keep target */ }
       // drop hash/query
