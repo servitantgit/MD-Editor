@@ -2499,6 +2499,16 @@ body.md-layout-source .editor-preview-active-side {
 }
 
 
+/* App header brand icon (next to the "MD Editor" <h1> text).
+   Sized to sit comfortably beside the 14px header title. */
+.app-header-icon {
+  width: 24px;
+  height: 24px;
+  vertical-align: middle;
+  margin-right: 8px;
+}
+
+
 /* ===== Post-OAuth repo picker ===== */
 .repo-picker {
   margin-top: 20px;
