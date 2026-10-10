@@ -192,7 +192,7 @@ export function createEditor(textareaEl, deps) {
    * reuses the live iframe and refreshes its srcdoc, none wipes the pane.
    * Returns a promise resolving to the srcdoc (or null when superseded).
    */
-  function renderHtmlPreview(previewEl, plainText, { syncSrcdoc = true } = {}) {
+  function renderHtmlPreview(previewEl, plainText) {
     if (!previewEl) return Promise.resolve(null);
     let state = htmlPaneStates.get(previewEl);
     if (!state) {
@@ -218,14 +218,14 @@ export function createEditor(textareaEl, deps) {
         // (The set token still supersedes older in-flight passes correctly.)
         return iframe.srcdoc || null;
       }
-      const raw = plainText || '<!-- empty -->';
-      // Compare before assigning: even an identical value reloads the frame.
-      // Drop the stale handshake height first — the OLD document's height
-      // must not outlive its reload (a shorter page would keep the tall frame).
-      if (syncSrcdoc && iframe.srcdoc !== raw) {
-        iframe.style.removeProperty('height');
-        iframe.srcdoc = raw;
-      }
+      // Assign srcdoc EXACTLY ONCE — the fully-resolved document below. A
+      // previous version pre-assigned the raw text here and overwrote it ~40ms
+      // later with the resolved version (bridge + resolved assets). On small
+      // files both landed in time; on large files (multi-MB srcdoc, confirmed
+      // in production) the SECOND assignment interrupted the first parser
+      // mid-work and Chromium left the sandboxed iframe unparsed — a blank
+      // white pane whose height handshake never fired. The resolved srcdoc
+      // already contains everything the raw one had, so nothing is lost.
       const path = deps.getCurrentPath ? deps.getCurrentPath() : null;
       let srcdoc;
       try {
