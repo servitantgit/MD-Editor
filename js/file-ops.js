@@ -31,9 +31,30 @@ export function createFileOps(deps) {
   const els = deps.els;
 
   /**
-   * GitHub's git tree can lag a few seconds after Contents API writes.
-   * loadTree() alone may re-show the pre-move layout; keep a local patch until
-   * the remote tree contains newPath and no longer lists oldPath.
+   * Expand every ancestor of `folderPath` so a nested destination is actually
+   * visible. setActiveFolder({expand:true}) only opens ONE folder — parents
+   * that stay in collapsedFolders never render their children (create/delete
+   * work because the user already had that folder open).
+   */
+  function expandFolderChain(folderPath) {
+    const tree = deps.getFileTree();
+    if (!tree) return;
+    const chain = [];
+    let d = folderPath || '';
+    while (d) {
+      chain.push(d);
+      d = dirnameOf(d);
+    }
+    for (let i = chain.length - 1; i >= 0; i--) {
+      tree.collapsedFolders.delete(chain[i]);
+    }
+    tree.setActiveFolder(folderPath || '', { expand: true, render: true });
+  }
+
+  /**
+   * Local tree truth after a path change. GitHub's recursive tree often lags
+   * behind Contents API put+delete (move), so loadTree alone is not enough —
+   * same class of bug create/delete used to hit before optimistic updates.
    */
   function patchAllFilesPath(oldPath, newPath) {
     const state = deps.getState();
@@ -42,39 +63,30 @@ export function createFileOps(deps) {
     const oldEntry = prev.find((f) => f.path === oldPath);
     const existingNew = prev.find((f) => f.path === newPath);
     let files = prev.filter((f) => f.path !== oldPath && f.path !== newPath);
-    const entry = existingNew || (oldEntry ? { ...oldEntry, path: newPath } : { path: newPath, sha: 'local' });
-    if (!entry.path) entry.path = newPath;
-    else entry.path = newPath;
+    const entry = existingNew
+      ? { ...existingNew, path: newPath }
+      : (oldEntry ? { ...oldEntry, path: newPath } : { path: newPath, sha: 'local' });
+    entry.path = newPath;
     files.push(entry);
     files.sort((a, b) => a.path.localeCompare(b.path));
     state.allFiles = files;
     if (tree) {
       tree.setFiles(files);
-      const folder = dirnameOf(newPath);
-      // Expand destination so the moved file is visible without a full reload.
-      if (folder) tree.setActiveFolder(folder, { expand: true });
-      else tree.setActiveFolder('', { expand: false });
+      expandFolderChain(dirnameOf(newPath));
     }
   }
 
+  /**
+   * Mirror create/delete: call loadTree for search/draft hooks, then ALWAYS
+   * re-apply the local path patch. Never trust the post-write tree alone.
+   */
   async function refreshTreeAfterPathChange(oldPath, newPath) {
     try {
       await deps.loadTree();
     } catch (_) {
-      /* network — still apply local patch below */
+      /* still patch below */
     }
-    const files = deps.getState().allFiles || [];
-    const hasNew = files.some((f) => f.path === newPath);
-    const hasOld = files.some((f) => f.path === oldPath);
-    if (!hasNew || hasOld) {
-      patchAllFilesPath(oldPath, newPath);
-    } else {
-      const tree = deps.getFileTree();
-      if (tree) {
-        const folder = dirnameOf(newPath);
-        if (folder) tree.setActiveFolder(folder, { expand: true });
-      }
-    }
+    patchAllFilesPath(oldPath, newPath);
   }
 
 
