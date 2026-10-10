@@ -65,7 +65,7 @@ Link to [[Welcome]] or [Getting started](./Getting%20started.md).
 
 An image from the demo store:
 
-![Demo diagram](assets/demo-note.svg)
+![Demo diagram](../assets/demo-note.svg)
 
 Type below this line:
 
