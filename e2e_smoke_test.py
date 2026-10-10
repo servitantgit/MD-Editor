@@ -495,11 +495,11 @@ with sync_playwright() as p:
     # a file name, the delete confirmation with the default (OK).
     create_prompts = []
     seen_dialogs = []
+    # Only folder creation still uses window.prompt. New-file uses the in-app dialog
+    # (complete_new_file_dialog) and must NOT consume entries from this list.
     create_responses = [
-        "root-new.md",      # First new file (existing test)
-        "root-new.md",      # First new folder (existing test)
-        "new-file-in-notes.md",  # Scenario A
-        "new-folder-in-notes",   # Scenario B
+        "root-new.md",           # First new folder (toolbar smoke)
+        "new-folder-in-notes",   # Scenario B — folder inside Notes
     ]
     create_response_idx = [0]
     # Set to True right before an action whose confirm() the test wants to CANCEL;
