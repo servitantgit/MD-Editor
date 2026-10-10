@@ -110,6 +110,14 @@ export async function buildHtmlSrcdoc(html, currentPath, resolver) {
     'try{if(window.ResizeObserver){new ResizeObserver(__mdPostHeight).observe(document.documentElement);}}catch(_){}',
     'window.addEventListener("load",__mdPostHeight);',
     '__mdPostHeight();',
+    // The parent-side 'message' listener (onParentMessage in editor.js) is
+    // registered inside createEditor(), which can race the immediate posting
+    // above when srcdoc loads (deterministic in demo mode). Post again after
+    // short delays so at least one lands once the listener is up. The parent
+    // handler is idempotent — assigning the same height is a CSS no-op.
+    'setTimeout(__mdPostHeight,50);',
+    'setTimeout(__mdPostHeight,200);',
+    'setTimeout(__mdPostHeight,500);',
   ].join('');
 
   // Attach the bridge where the frame will actually parse it: right after the
