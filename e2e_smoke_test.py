@@ -78,6 +78,22 @@ MD_FILLER = ("\n\n".join(f"Filler paragraph {i}." for i in range(30))
 LONG_BODY = "\n".join(f"Line {i} - text to force the editor to overflow vertically." for i in range(400))
 MD_CONTENT = MD_INTRO + MD_FILLER + LONG_BODY + "\n"
 
+def complete_new_file_dialog(page, filename: str):
+    """Drive the in-app New file dialog (name + type). Replaces window.prompt for files."""
+    page.wait_for_selector("#new-file-overlay:not(.hidden)", timeout=8000)
+    stem, _, ext = filename.rpartition(".")
+    if not stem:
+        stem, ext = filename, "md"
+    page.fill("#new-file-name", stem)
+    page.select_option("#new-file-type", ext)
+    # Folder label must not contain PointerEvent (same regression as the old prompt)
+    label = page.locator("#new-file-folder-label").inner_text()
+    assert "PointerEvent" not in label and "object" not in label.lower(), label
+    page.click("#btn-new-file-ok")
+    page.wait_for_selector("#new-file-overlay.hidden", timeout=8000)
+
+
+
 FAKE_TREE = {
     "tree": [
         {"path": "Asset/pic.jpg", "type": "blob", "sha": "sha-pic"},
@@ -511,13 +527,12 @@ with sync_playwright() as p:
 
     page.click("#btn-add-menu")
     page.click("#btn-new-file")
-    page.wait_for_timeout(1000)
+    complete_new_file_dialog(page, "root-new.md")
+    page.wait_for_timeout(300)
     page.click("#btn-add-menu")
     page.click("#btn-new-folder")
     page.wait_for_timeout(1000)
 
-    assert "PointerEvent" not in " ".join(create_prompts), \
-        f"toolbar prompt shows the click event instead of a folder: {create_prompts}"
     assert write_urls, "new file/folder never reached the API"
     for url in write_urls:
         assert "object" not in url.lower() and "PointerEvent" not in url, \
@@ -529,6 +544,10 @@ with sync_playwright() as p:
         f"created path is not inside the active folder: {write_urls}"
     assert any(u.endswith("root-new.md/.gitkeep") for u in write_urls), \
         f"new folder did not create its .gitkeep: {write_urls}"
+    # Folder still uses window.prompt — must name the real folder, not the click event
+    assert create_prompts, "expected a New folder prompt"
+    assert "PointerEvent" not in " ".join(create_prompts), \
+        f"toolbar prompt shows the click event instead of a folder: {create_prompts}"
     print(f"✓ toolbar create targets the real folder, not the click event ({create_prompts[0]})")
     page.unroute(re.compile(r"https://api\.github\.com/.*/contents/.*"))
 
@@ -550,8 +569,9 @@ with sync_playwright() as p:
     CONTENT_WRITES.clear()
     page.click("#btn-add-menu")
     page.click("#btn-new-file")
-    page.wait_for_timeout(1000)
-    # Dialog handler will accept with "new-file-in-notes.md"
+    complete_new_file_dialog(page, "new-file-in-notes.md")
+    page.wait_for_timeout(300)
+    # In-app dialog (no window.prompt for files)
     create_write = [w for w in CONTENT_WRITES if w["method"] == "PUT" and "new-file-in-notes.md" in w["url"]]
     assert len(create_write) == 1, f"expected one PUT for new file in Notes, got {CONTENT_WRITES}"
     assert "Notes/new-file-in-notes.md" in create_write[0]["url"], f"file not created in Notes folder: {create_write[0]['url']}"

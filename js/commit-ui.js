@@ -152,11 +152,18 @@ export function bindHistoryPanel(opts) {
     renderDetail(detail) {
       panelEl.classList.add('with-detail');
       detailEl.innerHTML = '';
+      // REST /commits/{sha}: message is under commit.message
+      const sha = String((detail && detail.sha) || '');
+      const rawMsg =
+        (detail && detail.message) ||
+        (detail && detail.commit && detail.commit.message) ||
+        '';
+      const msgFirst = String(rawMsg).split('\n')[0] || '(no message)';
       const head = document.createElement('div');
       head.className = 'hist-detail-h';
       head.innerHTML =
-        `<span class="hist-sha">${escapeAttr(detail.sha.slice(0, 7))}</span> ` +
-        `<span>${escapeAttr(detail.message.split('\n')[0])}</span>`;
+        `<span class="hist-sha">${escapeAttr(sha.slice(0, 7) || '???????')}</span> ` +
+        `<span>${escapeAttr(msgFirst)}</span>`;
       detailEl.appendChild(head);
 
       for (const f of detail.files || []) {
@@ -191,7 +198,7 @@ export function bindHistoryPanel(opts) {
         if (f.patch) {
           const pre = document.createElement('pre');
           pre.className = 'diff-patch';
-          for (const line of f.patch.split('\n')) {
+          for (const line of String(f.patch || '').split('\n')) {
             const div = document.createElement('div');
             if (line.startsWith('+') && !line.startsWith('+++')) div.className = 'diff-add';
             else if (line.startsWith('-') && !line.startsWith('---')) div.className = 'diff-del';
