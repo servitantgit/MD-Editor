@@ -119,22 +119,35 @@ export class FileTree {
       this.collapsedFolders = collectFolderPaths(files);
     }
 
-    // Drop strip: moves a file into the *current target folder* (activeFolder),
-    // not only the repo root. Label updates with the selection.
-    const targetFolder = this.activeFolder || '';
-    const dropStrip = document.createElement('div');
-    dropStrip.className = 'tree-root-drop';
-    dropStrip.dataset.targetFolder = targetFolder;
-    if (targetFolder) {
-      const short = targetFolder.length > 42 ? '…' + targetFolder.slice(-40) : targetFolder;
-      dropStrip.textContent = `⬆ drag here to move into «${short}»`;
-      dropStrip.title = `Drop to move into ${targetFolder}`;
-    } else {
-      dropStrip.textContent = '⬆ drag here to move to the root';
-      dropStrip.title = 'Drop to move to the repository root';
+    // Contextual drop zone — moves a file into the currently-active (non-root)
+    // folder. Hidden when the active folder IS the root, otherwise it would
+    // duplicate the permanent root zone below. It used to be the only strip and
+    // it targeted activeFolder, which is almost never empty (opening any file or
+    // folder sets it), so "move to the repository root" was effectively
+    // unreachable via drag.
+    if (this.activeFolder) {
+      const contextualStrip = document.createElement('div');
+      contextualStrip.className = 'tree-root-drop';
+      contextualStrip.dataset.targetFolder = this.activeFolder;
+      const short = this.activeFolder.length > 42
+        ? '…' + this.activeFolder.slice(-40)
+        : this.activeFolder;
+      contextualStrip.textContent = `⬆ drag here to move into «${short}»`;
+      contextualStrip.title = `Drop to move into ${this.activeFolder}`;
+      this.containerEl.appendChild(contextualStrip);
+      this._wireDropTarget(contextualStrip, this.activeFolder);
     }
-    this.containerEl.appendChild(dropStrip);
-    this._wireDropTarget(dropStrip, targetFolder);
+
+    // Root drop zone — ALWAYS visible, so "move to repository root" is reachable
+    // no matter which folder is active. When the active folder is the root this
+    // is the only strip shown (the contextual one above is hidden), so there is
+    // never a confusing duplicate.
+    const rootStrip = document.createElement('div');
+    rootStrip.className = 'tree-root-drop tree-root-drop-root';
+    rootStrip.textContent = '📁 drag here to move to repository root';
+    rootStrip.title = 'Drop to move to the repository root';
+    this.containerEl.appendChild(rootStrip);
+    this._wireDropTarget(rootStrip, '');
 
     const root = buildTreeStructure(files);
     this._renderLevel(root, this.containerEl, 0);

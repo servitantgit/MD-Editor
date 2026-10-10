@@ -1332,6 +1332,18 @@ async function onMoveFile(oldPath, targetFolder) {
     tabs.rename(oldPath, newPath);
     moveTabDoc(oldPath, newPath);
     markStale(updatedFiles); // links were rewritten in these files
+
+    // Optimistic local update: GitHub's tree API has replication delay after a
+    // write, so loadTree() can return the pre-move tree and the file appears to
+    // stay in its old location until the user reloads. Patch allFiles locally
+    // so the tree re-renders correctly immediately; the eventual loadTree() will
+    // overwrite with authoritative state when GitHub catches up.
+    const movedIdx = state.allFiles.findIndex((f) => f.path === oldPath);
+    if (movedIdx !== -1) {
+      state.allFiles[movedIdx] = { ...state.allFiles[movedIdx], path: newPath };
+      fileTree.setFiles(state.allFiles);
+    }
+
     if (wasCurrent) {
       state.currentPath = newPath;
       els.currentFileLabel.textContent = newPath;
@@ -1972,6 +1984,17 @@ async function onRenameFile(path) {
     tabs.rename(path, newPath);
     moveTabDoc(path, newPath);
     markStale(updatedFiles);
+
+    // Optimistic local update (see onMoveFile): renameFile() moved the file to
+    // newPath, but loadTree() may still return the pre-rename tree for a moment,
+    // so patch allFiles locally and re-render; the eventual loadTree() overwrites
+    // with authoritative state when GitHub catches up.
+    const renamedIdx = state.allFiles.findIndex((f) => f.path === path);
+    if (renamedIdx !== -1) {
+      state.allFiles[renamedIdx] = { ...state.allFiles[renamedIdx], path: newPath };
+      fileTree.setFiles(state.allFiles);
+    }
+
     if (wasCurrent) {
       state.currentPath = newPath;
       els.currentFileLabel.textContent = newPath;
@@ -2084,6 +2107,24 @@ async function onRenameFolder(folderPath) {
     const { moved, updatedFiles } = await renameFolder(state.client, state.allFiles, folderPath, newPath);
     for (const [from, to] of tabs.renameFolder(folderPath, newPath)) moveTabDoc(from, to);
     markStale(updatedFiles);
+
+    // Optimistic local update (see onMoveFile), but a folder rename moves MANY
+    // files. renameFolder() reads state.allFiles without mutating it, so every
+    // entry still names its OLD path; repoint them all under the new prefix so
+    // the whole folder visibly moves at once. The eventual loadTree() overwrites
+    // with authoritative state when GitHub catches up.
+    const folderPrefix = folderPath + '/';
+    const newFolderPrefix = newPath + '/';
+    let folderPatched = false;
+    for (let i = 0; i < state.allFiles.length; i++) {
+      const f = state.allFiles[i];
+      if (f.path.startsWith(folderPrefix)) {
+        state.allFiles[i] = { ...f, path: newFolderPrefix + f.path.slice(folderPrefix.length) };
+        folderPatched = true;
+      }
+    }
+    if (folderPatched) fileTree.setFiles(state.allFiles);
+
     if (state.currentPath && state.currentPath.startsWith(folderPath + '/')) {
       state.currentPath = newPath + state.currentPath.slice(folderPath.length);
       els.currentFileLabel.textContent = state.currentPath;
