@@ -76,6 +76,25 @@ export class FileTree {
     return this.activeFolder;
   }
 
+  /**
+   * Expand `folderPath` and every ancestor so nested files are visible after a move.
+   * (collapsedFolders hides entire subtrees — expanding only the leaf is not enough.)
+   */
+  expandFolderChain(folderPath) {
+    let d = folderPath || '';
+    while (d) {
+      this.collapsedFolders.delete(d);
+      const i = d.lastIndexOf('/');
+      d = i === -1 ? '' : d.slice(0, i);
+    }
+    if (folderPath) this.collapsedFolders.delete(folderPath);
+    this.activeFolder = folderPath || '';
+    this.render();
+    if (typeof this.handlers?.onActiveFolderChange === 'function') {
+      try { this.handlers.onActiveFolderChange(this.activeFolder || ''); } catch (_) {}
+    }
+  }
+
   /** Sets the "create here" folder; an already-known folder is expanded so the user sees the result. */
   setActiveFolder(folderPath, { expand = false, render = true } = {}) {
     const prev = this.activeFolder;

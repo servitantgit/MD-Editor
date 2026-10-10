@@ -958,13 +958,36 @@ function insertMarkdownAtCursor(text) {
 }
 
 // ====================== FILE TREE ======================
-async function loadTree() {
+/**
+ * Reload the file tree from GitHub.
+ * @param {{ rewritePath?: { from: string, to: string }, expandFolder?: string }} [opts]
+ *   rewritePath — after a move/rename the recursive tree API often still lists
+ *   `from` and not `to` for a few seconds. Apply the local rename before
+ *   setFiles so the UI matches what we just wrote (create/delete don't need
+ *   this: a single put/delete shows up in the tree more reliably).
+ *   expandFolder — folder path to expand (and all ancestors) after render.
+ */
+async function loadTree(opts = {}) {
   els.fileTreeEl.innerHTML = '<div class="tree-loading">Loading...</div>';
   try {
-    const files = await state.client.getTree(state.branch);
+    let files = await state.client.getTree(state.branch);
+
+    if (opts.rewritePath && opts.rewritePath.from && opts.rewritePath.to
+        && opts.rewritePath.from !== opts.rewritePath.to) {
+      const { from, to } = opts.rewritePath;
+      const prev = files.find((f) => f.path === from);
+      files = files.filter((f) => f.path !== from && f.path !== to);
+      if (prev) files.push({ ...prev, path: to });
+      else files.push({ path: to, sha: 'local' });
+      files = files.slice().sort((a, b) => a.path.localeCompare(b.path));
+    }
+
     state.allFiles = files;
     state.treeLoaded = true;
     fileTree.setFiles(files);
+    if (opts.expandFolder != null && typeof fileTree.expandFolderChain === 'function') {
+      fileTree.expandFolderChain(opts.expandFolder || '');
+    }
     restoreTabsOnce(files);
     // Every local write (save/delete/move/rename/create/upload) ends in a
     // loadTree(), so this ONE hook covers them all. The diff makes it cheap:

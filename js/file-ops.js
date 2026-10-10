@@ -30,64 +30,6 @@ import { kindFromPath, isEditableTextPath } from './file-kind.js';
 export function createFileOps(deps) {
   const els = deps.els;
 
-  /**
-   * Expand every ancestor of `folderPath` so a nested destination is actually
-   * visible. setActiveFolder({expand:true}) only opens ONE folder — parents
-   * that stay in collapsedFolders never render their children (create/delete
-   * work because the user already had that folder open).
-   */
-  function expandFolderChain(folderPath) {
-    const tree = deps.getFileTree();
-    if (!tree) return;
-    const chain = [];
-    let d = folderPath || '';
-    while (d) {
-      chain.push(d);
-      d = dirnameOf(d);
-    }
-    for (let i = chain.length - 1; i >= 0; i--) {
-      tree.collapsedFolders.delete(chain[i]);
-    }
-    tree.setActiveFolder(folderPath || '', { expand: true, render: true });
-  }
-
-  /**
-   * Local tree truth after a path change. GitHub's recursive tree often lags
-   * behind Contents API put+delete (move), so loadTree alone is not enough —
-   * same class of bug create/delete used to hit before optimistic updates.
-   */
-  function patchAllFilesPath(oldPath, newPath) {
-    const state = deps.getState();
-    const tree = deps.getFileTree();
-    const prev = state.allFiles || [];
-    const oldEntry = prev.find((f) => f.path === oldPath);
-    const existingNew = prev.find((f) => f.path === newPath);
-    let files = prev.filter((f) => f.path !== oldPath && f.path !== newPath);
-    const entry = existingNew
-      ? { ...existingNew, path: newPath }
-      : (oldEntry ? { ...oldEntry, path: newPath } : { path: newPath, sha: 'local' });
-    entry.path = newPath;
-    files.push(entry);
-    files.sort((a, b) => a.path.localeCompare(b.path));
-    state.allFiles = files;
-    if (tree) {
-      tree.setFiles(files);
-      expandFolderChain(dirnameOf(newPath));
-    }
-  }
-
-  /**
-   * Mirror create/delete: call loadTree for search/draft hooks, then ALWAYS
-   * re-apply the local path patch. Never trust the post-write tree alone.
-   */
-  async function refreshTreeAfterPathChange(oldPath, newPath) {
-    try {
-      await deps.loadTree();
-    } catch (_) {
-      /* still patch below */
-    }
-    patchAllFilesPath(oldPath, newPath);
-  }
 
 
 
@@ -122,25 +64,24 @@ export function createFileOps(deps) {
       deps.moveTabDoc(oldPath, newPath);
       deps.markStale(updatedFiles); // links were rewritten in these files
 
-      // Show the new location immediately (GitHub tree API often lags).
-      patchAllFilesPath(oldPath, newPath);
-
+      // Same path as create/delete: loadTree drives setFiles. rewritePath forces
+      // old→new even when GitHub's recursive tree still lags behind the Contents write.
       if (wasCurrent) {
         deps.getState().currentPath = newPath;
-        els.currentFileLabel.textContent = newPath;
-      }
-      if (deps.getState().currentPath && (wasCurrent || updatedFiles.includes(deps.getState().currentPath))) {
-        // Pull fresh contents/sha, and — for the moved file itself — rebind autosave
-        // to the NEW path. Left bound to the old one, the next keystroke would try
-        // to commit to a path that no longer exists.
-        await deps.openFile(deps.getState().currentPath, { reload: true });
+        if (els.currentFileLabel) els.currentFileLabel.textContent = newPath;
       }
       deps.persistTabs();
       deps.renderTabs();
-
       deps.getImageResolver().invalidate(oldPath);
-      // loadTree may return the pre-move tree; reconcile keeps the local move visible.
-      await refreshTreeAfterPathChange(oldPath, newPath);
+
+      await deps.loadTree({
+        rewritePath: { from: oldPath, to: newPath },
+        expandFolder: dirnameOf(newPath),
+      });
+
+      if (deps.getState().currentPath && (wasCurrent || updatedFiles.includes(deps.getState().currentPath))) {
+        await deps.openFile(deps.getState().currentPath, { reload: true });
+      }
       deps.setSaveStatus(
         `Moved: ${oldPath} → ${newPath}` +
           (overwritten ? ' (replaced the existing file)' : '') +
@@ -371,20 +312,22 @@ export function createFileOps(deps) {
       deps.moveTabDoc(path, newPath);
       deps.markStale(updatedFiles);
 
-      patchAllFilesPath(path, newPath);
-
       if (wasCurrent) {
         deps.getState().currentPath = newPath;
-        els.currentFileLabel.textContent = newPath;
-      }
-      if (deps.getState().currentPath && (wasCurrent || updatedFiles.includes(deps.getState().currentPath))) {
-        await deps.openFile(deps.getState().currentPath, { reload: true }); // refresh the editor + sha under the new path
+        if (els.currentFileLabel) els.currentFileLabel.textContent = newPath;
       }
       deps.persistTabs();
       deps.renderTabs();
-
       deps.getImageResolver().invalidate(path);
-      await refreshTreeAfterPathChange(path, newPath);
+
+      await deps.loadTree({
+        rewritePath: { from: path, to: newPath },
+        expandFolder: dirnameOf(newPath),
+      });
+
+      if (deps.getState().currentPath && (wasCurrent || updatedFiles.includes(deps.getState().currentPath))) {
+        await deps.openFile(deps.getState().currentPath, { reload: true });
+      }
       deps.setSaveStatus(
         `Renamed: ${path} → ${newPath}` +
           (updatedFiles.length ? ` (updated links in ${updatedFiles.length} file(s))` : ''),
