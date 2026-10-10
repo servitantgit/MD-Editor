@@ -14,7 +14,7 @@ import { exportCurrentPageToPdf } from './pdf-export.js';
 import { moveFile, renameFile } from './file-mover.js';
 import { createFolder, renameFolder, deleteFolder, getFolders, isFolderEmpty } from './folder-manager.js';
 import { basenameOf, dirnameOf, encodePathForApi, relativePathFromTo } from './paths.js';
-import { looksLikeGitHubUrl, parseGitHubOwnerRepo } from './github-repo-url.js';
+import { createLoginUI } from './login-ui.js';
 import { SearchStore } from './search-store.js';
 import { SearchSync } from './search-sync.js';
 import { createSearchUI, formatAge } from './search-ui.js';
@@ -210,13 +210,78 @@ let openSeq = 0;
 let tabsRestored = false;
 
 // ====================== LOGIN ======================
+const loginUI = createLoginUI({
+  // DOM — sign-in screen
+  btnLogin: els.btnLogin,
+  btnLogout: els.btnLogout,
+  inputOwner: els.inputOwner,
+  inputRepo: els.inputRepo,
+  loginStatus: els.loginStatus,
+  loginScreen: els.loginScreen,
+  loginCta: els.loginCta,
+  loginTrust: els.loginTrust,
+
+  // DOM — picker
+  repoPicker: els.repoPicker,
+  repoPickerUser: els.repoPickerUser,
+  repoList: els.repoList,
+  repoSearch: els.repoSearch,
+  btnOpenRepo: els.btnOpenRepo,
+
+  // DOM — switcher
+  btnSwitchRepo: els.btnSwitchRepo,
+  repoSwitchOverlay: els.repoSwitchOverlay,
+  repoSwitchList: els.repoSwitchList,
+  repoSwitchSearch: els.repoSwitchSearch,
+  btnRepoSwitchClose: els.btnRepoSwitchClose,
+  switchInputOwner: els.switchInputOwner,
+  switchInputRepo: els.switchInputRepo,
+  btnSwitchOpenPath: els.btnSwitchOpenPath,
+  repoSwitchStatus: els.repoSwitchStatus,
+
+  // DOM — misc
+  branchLabel: els.branchLabel,
+
+  // Callbacks for the shell
+  onSignedIn: (owner, repo, token, branch) => {
+    state.client = new GitHubClient({ token, owner, repo });
+    state.branch = branch;
+    showApp(owner, repo);
+    loadTree();
+  },
+  onSignOut: () => {
+    if (autosave) autosave.destroy();
+    sessionStorage.clear();
+    location.reload();
+  },
+  onSessionRestoreFailed: () => {
+    state.demo = false;
+    if (els.demoBanner) els.demoBanner.classList.add('hidden');
+  },
+
+  // Demo bridge (login-ui doesn't own demo, it just delegates)
+  isDemoSession: () => isDemoSession(),
+  startDemo: () => startDemo(),
+
+  // Status reporting
+  setSaveStatus: (msg, isError) => setSaveStatus(msg, isError),
+
+  // Autosave bridge (narrow)
+  hasUnsavedDraft: () => !!(autosave && autosave.hasUnsavedDraft()),
+  flushBeforeSwitch: async () => {
+    if (autosave && typeof autosave.saveNow === 'function') {
+      await autosave.saveNow();
+    }
+  },
+});
+
 init();
 
 async function init() {
-  // Wire chrome controls BEFORE any showApp/OAuth work. If a later step throws
-  // (search, backlinks, tree), the user must still be able to sign in again.
-  if (els.btnLogin) els.btnLogin.onclick = onLoginClick;
-  setupRepoSwitcher();
+  // Non-login chrome controls get wired here; the Sign in / Sign out buttons and
+  // the repo switcher are wired inside loginUI.bootstrap() below (which runs
+  // before any showApp/OAuth work, so a later throw still leaves a working
+  // sign-in button).
   if (els.btnDemo) {
     els.btnDemo.onclick = () => { startDemo(); };
   }
@@ -224,15 +289,6 @@ async function init() {
   if (btnDemoExit) {
     btnDemoExit.onclick = () => {
       if (autosave) try { autosave.destroy(); } catch (_) {}
-      sessionStorage.clear();
-      location.reload();
-    };
-  }
-  if (els.btnLogout) {
-    els.btnLogout.onclick = () => {
-      // Defence in depth: logout reloads the page, which tears down every timer
-      // anyway, but an autosave aimed at the old token should not outlive it.
-      if (autosave) autosave.destroy();
       sessionStorage.clear();
       location.reload();
     };
@@ -257,62 +313,29 @@ async function init() {
   if (els.btnExportPdf) els.btnExportPdf.onclick = onExportPdf;
   if (els.btnDelete) els.btnDelete.onclick = onDeleteFile;
 
-  // Must be awaited, and must be allowed to end init() on its own: finishLogin()
-  // calls showApp() itself. Reading the session while the token check is still
-  // in flight would build the app TWICE when an OAuth callback lands on a tab
-  // that still holds a session — two editors, two ResizeObservers, two paste
-  // handlers, with the first one nobody can reach to tear down.
   // Only the editor core is fatal. Optional CDNs (html2pdf, highlight, minisearch)
   // must NOT paint a red banner — they often trip ad-block while EasyMDE is fine.
   if (typeof window.EasyMDE !== 'function') {
     const miss = (window.__mdCdnMiss || ['easymde']).join(', ');
-    setLoginStatus(
+    loginUI.setStatus(
       'Editor failed to load (' + miss + '). If the console shows ERR_BLOCKED_BY_CLIENT, '
       + 'allow cdn.jsdelivr.net for this site and reload.',
       true
     );
   }
 
-  try {
-    if (await consumeOAuthRedirect()) return;
-  } catch (e) {
-    console.error('OAuth callback failed', e);
-    setLoginStatus('Login failed: ' + (e && e.message ? e.message : e), true);
-  }
-
-  if (isDemoSession()) {
-    startDemo();
-    return;
-  }
-  const saved = readSession();
-  if (saved) {
-    try {
-      state.client = new GitHubClient(saved);
-      state.branch = saved.branch;
-      showApp(saved.owner, saved.repo);
-      loadTree();
-    } catch (e) {
-      console.error('Session restore failed', e);
-      sessionStorage.removeItem('gh_token');
-      try { sessionStorage.removeItem('gh_demo'); } catch (_) {}
-      state.demo = false;
-      if (els.demoBanner) els.demoBanner.classList.add('hidden');
-      sessionStorage.removeItem('gh_owner');
-      sessionStorage.removeItem('gh_repo');
-      setLoginStatus('Could not restore session: ' + (e && e.message ? e.message : e) + '. Sign in again.', true);
-      restorePendingLoginFields();
-    }
-  } else {
-    const tokenOnly = sessionStorage.getItem('gh_token');
-    if (tokenOnly) {
-      // OAuth done, repo not chosen yet (reload mid-picker)
-      void showRepoPicker(tokenOnly);
-    } else {
-      restorePendingLoginFields();
-    }
-  }
-  setupRepoPickerOnce();
-  setupRepoSwitcher();
+  // bootstrap() must be awaited, and must be allowed to end init() on its own:
+  // onSignedIn() → showApp() is reached from inside it (fresh OAuth and session
+  // restore both complete there). Reading the session while the token check is
+  // still in flight would build the app TWICE when an OAuth callback lands on a
+  // tab that still holds a session — two editors, two ResizeObservers, two paste
+  // handlers, with the first one nobody can reach to tear down.
+  //
+  // `terminal` is true for fresh OAuth or demo start — the old code returned
+  // early in those cases and did NOT attach the listeners below. Preserved
+  // verbatim; see the matching note in js/login-ui.js bootstrap().
+  const terminal = await loginUI.bootstrap();
+  if (terminal) return;
 
   // Switching tabs is the natural checkpoint Google Docs uses too: commit a
   // dirty draft immediately instead of making the user wait out the 10s window.
@@ -334,373 +357,6 @@ async function init() {
     e.preventDefault();
     e.returnValue = '';
   });
-}
-
-function readSession() {
-  const token = sessionStorage.getItem('gh_token');
-  const owner = sessionStorage.getItem('gh_owner');
-  const repo = sessionStorage.getItem('gh_repo');
-  const branch = sessionStorage.getItem('gh_branch');
-  if (!token || !owner || !repo) return null;
-  return { token, owner, repo, branch };
-}
-
-function onLoginClick() {
-  // Repo is chosen AFTER OAuth — only send the user to GitHub.
-  setLoginStatus('Redirecting to GitHub...', false);
-  location.href = '/auth/login';
-}
-
-/**
- * If we just returned from /auth/callback, the Worker appended the token to the
- * URL fragment (#gh_token=...). A fragment never goes to the server, so this is
- * a safe way to hand the token back to client-side JS. We pick it up,
- * immediately clean the address bar, and complete the same "login" that
- * onLoginClick used to do with a PAT.
- * @returns {Promise<boolean>} true when this callback finished the login itself
- *   (the app has been shown, so the caller must not build it a second time).
- */
-async function consumeOAuthRedirect() {
-  const hash = location.hash || '';
-  const match = hash.match(/(?:^#|&)gh_token=([^&]+)/);
-  if (!match) return false;
-
-  const token = decodeURIComponent(match[1]);
-  history.replaceState(null, '', location.pathname + location.search);
-
-  // Optional: pre-filled owner/repo from a previous "manual path" attempt
-  const pendingOwner = sessionStorage.getItem('gh_pending_owner');
-  const pendingRepo = sessionStorage.getItem('gh_pending_repo');
-  sessionStorage.removeItem('gh_pending_owner');
-  sessionStorage.removeItem('gh_pending_repo');
-
-  sessionStorage.setItem('gh_token', token);
-
-  if (pendingOwner && pendingRepo) {
-    await finishLogin(token, pendingOwner, pendingRepo);
-    return true;
-  }
-
-  // Default path: pick a repo from the authenticated account.
-  await showRepoPicker(token);
-  return true;
-}
-
-function restorePendingLoginFields() {
-  const owner = sessionStorage.getItem('gh_pending_owner');
-  const repo = sessionStorage.getItem('gh_pending_repo');
-  if (owner) els.inputOwner.value = owner;
-  if (repo) els.inputRepo.value = repo;
-}
-
-
-/** @type {Array<{full_name: string, name: string, owner: string, private: boolean, description: string}>} */
-let cachedRepos = [];
-
-async function showRepoPicker(token) {
-  setLoginStatus('Loading your repositories…', false);
-  if (els.loginCta) els.loginCta.classList.add('hidden');
-  if (els.loginTrust) els.loginTrust.classList.add('hidden');
-  if (els.repoPicker) els.repoPicker.classList.remove('hidden');
-
-  const client = new GitHubClient({ token, owner: '', repo: '' });
-  try {
-    const user = await client.getAuthenticatedUser();
-    if (els.repoPickerUser) {
-      els.repoPickerUser.textContent = 'Signed in as @' + (user.login || 'user')
-        + ' — pick a repository to open.';
-    }
-    const raw = await client.listUserRepos();
-    cachedRepos = (raw || []).map((r) => ({
-      full_name: r.full_name,
-      name: r.name,
-      owner: r.owner && r.owner.login ? r.owner.login : String(r.full_name || '').split('/')[0],
-      private: !!r.private,
-      description: r.description || '',
-      pushed_at: r.pushed_at || '',
-    }));
-    renderRepoList('');
-    setLoginStatus(
-      cachedRepos.length
-        ? 'Select a repository to continue.'
-        : 'No repositories found. Use “Open a repo by path” below, or create one on GitHub.',
-      !cachedRepos.length
-    );
-    if (els.repoSearch) {
-      els.repoSearch.value = '';
-      els.repoSearch.focus();
-    }
-  } catch (e) {
-    setLoginStatus('Could not list repositories: ' + (e && e.message ? e.message : e), true);
-    // Still allow manual owner/repo entry.
-    if (els.repoPicker) els.repoPicker.classList.remove('hidden');
-  }
-  setupRepoPickerOnce();
-}
-
-function renderRepoList(filter) {
-  if (!els.repoList) return;
-  const q = String(filter || '').trim().toLowerCase();
-  const items = !q
-    ? cachedRepos
-    : cachedRepos.filter((r) =>
-        r.full_name.toLowerCase().includes(q)
-        || (r.description && r.description.toLowerCase().includes(q))
-      );
-  els.repoList.innerHTML = '';
-  if (!items.length) {
-    const empty = document.createElement('div');
-    empty.className = 'repo-list-empty';
-    empty.textContent = q ? 'No match for “' + filter + '”.' : 'No repositories to show.';
-    els.repoList.appendChild(empty);
-    return;
-  }
-  for (const r of items.slice(0, 100)) {
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    btn.className = 'repo-list-item';
-    btn.setAttribute('role', 'option');
-    const title = document.createElement('span');
-    title.className = 'repo-full';
-    title.textContent = r.full_name + (r.private ? ' 🔒' : '');
-    btn.appendChild(title);
-    if (r.description) {
-      const meta = document.createElement('span');
-      meta.className = 'repo-meta';
-      meta.textContent = r.description;
-      btn.appendChild(meta);
-    }
-    btn.addEventListener('click', () => {
-      const token = sessionStorage.getItem('gh_token');
-      if (!token) {
-        setLoginStatus('Session lost — sign in again.', true);
-        return;
-      }
-      finishLogin(token, r.owner, r.name);
-    });
-    els.repoList.appendChild(btn);
-  }
-}
-
-
-function setRepoSwitchStatus(msg, isError) {
-  if (!els.repoSwitchStatus) return;
-  els.repoSwitchStatus.textContent = msg || '';
-  els.repoSwitchStatus.className = 'status' + (isError ? ' err' : msg ? ' ok' : '');
-}
-
-function closeRepoSwitcher() {
-  if (!els.repoSwitchOverlay) return;
-  els.repoSwitchOverlay.classList.add('hidden');
-  els.repoSwitchOverlay.setAttribute('aria-hidden', 'true');
-}
-
-function renderSwitchRepoList(filter) {
-  if (!els.repoSwitchList) return;
-  const q = String(filter || '').trim().toLowerCase();
-  const items = !q
-    ? cachedRepos
-    : cachedRepos.filter((r) =>
-        r.full_name.toLowerCase().includes(q)
-        || (r.description && r.description.toLowerCase().includes(q))
-      );
-  els.repoSwitchList.innerHTML = '';
-  if (!items.length) {
-    const empty = document.createElement('div');
-    empty.className = 'repo-list-empty';
-    empty.textContent = q ? 'No match.' : 'No repositories loaded.';
-    els.repoSwitchList.appendChild(empty);
-    return;
-  }
-  const cur = (sessionStorage.getItem('gh_owner') || '') + '/' + (sessionStorage.getItem('gh_repo') || '');
-  for (const r of items.slice(0, 100)) {
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    btn.className = 'repo-list-item';
-    const title = document.createElement('span');
-    title.className = 'repo-full';
-    title.textContent = r.full_name + (r.private ? ' 🔒' : '')
-      + (r.full_name === cur ? ' · current' : '');
-    btn.appendChild(title);
-    if (r.description) {
-      const meta = document.createElement('span');
-      meta.className = 'repo-meta';
-      meta.textContent = r.description;
-      btn.appendChild(meta);
-    }
-    btn.addEventListener('click', () => {
-      void switchRepository(r.owner, r.name);
-    });
-    els.repoSwitchList.appendChild(btn);
-  }
-}
-
-async function openRepoSwitcher() {
-  if (!els.repoSwitchOverlay) return;
-  const token = sessionStorage.getItem('gh_token');
-  if (!token) {
-    setSaveStatus('Not signed in', true);
-    return;
-  }
-  els.repoSwitchOverlay.classList.remove('hidden');
-  els.repoSwitchOverlay.setAttribute('aria-hidden', 'false');
-  setRepoSwitchStatus('Loading repositories…', false);
-  if (els.repoSwitchSearch) els.repoSwitchSearch.value = '';
-  try {
-    const client = new GitHubClient({ token, owner: '', repo: '' });
-    const raw = await client.listUserRepos();
-    cachedRepos = (raw || []).map((r) => ({
-      full_name: r.full_name,
-      name: r.name,
-      owner: r.owner && r.owner.login ? r.owner.login : String(r.full_name || '').split('/')[0],
-      private: !!r.private,
-      description: r.description || '',
-      pushed_at: r.pushed_at || '',
-    }));
-    renderSwitchRepoList('');
-    setRepoSwitchStatus(cachedRepos.length ? '' : 'No repositories found.', !cachedRepos.length);
-    if (els.repoSwitchSearch) els.repoSwitchSearch.focus();
-  } catch (e) {
-    setRepoSwitchStatus('Failed to load: ' + (e && e.message ? e.message : e), true);
-  }
-}
-
-async function switchRepository(owner, repo) {
-  const token = sessionStorage.getItem('gh_token');
-  if (!token) {
-    setRepoSwitchStatus('Session expired — sign in again.', true);
-    return;
-  }
-  if (
-    owner === sessionStorage.getItem('gh_owner')
-    && repo === sessionStorage.getItem('gh_repo')
-  ) {
-    closeRepoSwitcher();
-    return;
-  }
-  // Best-effort: push local dirty work for the current file before tearing down.
-  try {
-    if (autosave && typeof autosave.saveNow === 'function' && autosave.hasUnsavedDraft
-        && autosave.hasUnsavedDraft()) {
-      setRepoSwitchStatus('Saving current file…', false);
-      await autosave.saveNow();
-    }
-  } catch (_) { /* continue switch even if save fails */ }
-
-  setRepoSwitchStatus('Opening ' + owner + '/' + repo + '…', false);
-  try {
-    await finishLogin(token, owner, repo);
-    closeRepoSwitcher();
-  } catch (e) {
-    setRepoSwitchStatus('Could not open: ' + (e && e.message ? e.message : e), true);
-  }
-}
-
-function setupRepoSwitcher() {
-  if (!els.btnSwitchRepo || els.btnSwitchRepo.dataset.bound) return;
-  els.btnSwitchRepo.dataset.bound = '1';
-  els.btnSwitchRepo.addEventListener('click', () => { void openRepoSwitcher(); });
-  if (els.btnRepoSwitchClose) {
-    els.btnRepoSwitchClose.addEventListener('click', closeRepoSwitcher);
-  }
-  if (els.repoSwitchOverlay) {
-    els.repoSwitchOverlay.addEventListener('click', (e) => {
-      if (e.target === els.repoSwitchOverlay) closeRepoSwitcher();
-    });
-  }
-  if (els.repoSwitchSearch) {
-    els.repoSwitchSearch.addEventListener('input', () => {
-      renderSwitchRepoList(els.repoSwitchSearch.value);
-    });
-  }
-  if (els.btnSwitchOpenPath) {
-    els.btnSwitchOpenPath.addEventListener('click', () => {
-      let owner = (els.switchInputOwner && els.switchInputOwner.value || '').trim();
-      let repo = (els.switchInputRepo && els.switchInputRepo.value || '').trim();
-      const parsed = parseGitHubOwnerRepo(owner) || parseGitHubOwnerRepo(repo);
-      if (parsed) {
-        owner = parsed.owner;
-        repo = parsed.repo;
-      }
-      if (!owner || !repo) {
-        setRepoSwitchStatus('Enter owner and repository.', true);
-        return;
-      }
-      void switchRepository(owner, repo);
-    });
-  }
-  document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && els.repoSwitchOverlay
-        && !els.repoSwitchOverlay.classList.contains('hidden')) {
-      closeRepoSwitcher();
-    }
-  });
-}
-
-function setupRepoPickerOnce() {
-  if (document.documentElement.dataset.repoPickerBound) return;
-  document.documentElement.dataset.repoPickerBound = '1';
-  if (els.repoSearch) {
-    els.repoSearch.addEventListener('input', () => {
-      renderRepoList(els.repoSearch.value);
-    });
-  }
-  if (els.btnOpenRepo) {
-    els.btnOpenRepo.addEventListener('click', onManualOpenRepo);
-  }
-}
-
-function onManualOpenRepo() {
-  let owner = (els.inputOwner && els.inputOwner.value || '').trim();
-  let repo = (els.inputRepo && els.inputRepo.value || '').trim();
-  const parsed = parseGitHubOwnerRepo(owner) || parseGitHubOwnerRepo(repo);
-  if (parsed) {
-    owner = parsed.owner;
-    repo = parsed.repo;
-    if (els.inputOwner) els.inputOwner.value = owner;
-    if (els.inputRepo) els.inputRepo.value = repo;
-  }
-  if (!owner || !repo) {
-    setLoginStatus('Enter both owner and repository name.', true);
-    return;
-  }
-  const token = sessionStorage.getItem('gh_token');
-  if (!token) {
-    // Not signed in yet — stash and start OAuth
-    sessionStorage.setItem('gh_pending_owner', owner);
-    sessionStorage.setItem('gh_pending_repo', repo);
-    setLoginStatus('Redirecting to GitHub...', false);
-    location.href = '/auth/login';
-    return;
-  }
-  finishLogin(token, owner, repo);
-}
-
-async function finishLogin(token, owner, repo) {
-  setLoginStatus('Checking access...', false);
-  try {
-    const client = new GitHubClient({ token, owner, repo });
-    const repoInfo = await client.getRepoInfo();
-    const branch = repoInfo.default_branch || 'main';
-
-    sessionStorage.setItem('gh_token', token);
-    sessionStorage.setItem('gh_owner', owner);
-    sessionStorage.setItem('gh_repo', repo);
-    sessionStorage.setItem('gh_branch', branch);
-
-    state.client = client;
-    state.branch = branch;
-    if (els.branchLabel) els.branchLabel.textContent = branch;
-    showApp(owner, repo);
-    loadTree();
-  } catch (e) {
-    setLoginStatus('Error: ' + e.message, true);
-  }
-}
-
-function setLoginStatus(msg, isError) {
-  els.loginStatus.textContent = msg;
-  els.loginStatus.className = 'status ' + (isError ? 'err' : 'ok');
 }
 
 // Informational statuses ("Moved: ...", "Saved ✓") must not stay on screen forever —
@@ -946,7 +602,7 @@ function showApp(owner, repo) {
       els.loginScreen.classList.remove('hidden');
       els.appHeader.classList.add('hidden');
       els.appMain.classList.add('hidden');
-      setLoginStatus(msg, true);
+      loginUI.setStatus(msg, true);
     } catch (_) {}
     return;
   }
