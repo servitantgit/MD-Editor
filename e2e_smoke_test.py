@@ -970,7 +970,9 @@ with sync_playwright() as p:
     assert active_tab() == "Test note.md" and "# Test note" in editor_text(), "the active tab was disturbed"
     print("✓ deleting a file from the tree closes its background tab only")
 
-    # G7. Closing the LAST tab commits what it holds, then leaves an empty editor that goes nowhere.
+    # G7. Closing the LAST tab commits what it holds, then shows the empty state.
+    # The dead, typable-but-inert editor is gone: with no file open there is no
+    # CodeMirror to type into at all, so nothing can be committed by accident.
     CONTENT_WRITES.clear()
     page.click(".CodeMirror")
     page.keyboard.type("G_LAST_TAB_EDIT")
@@ -981,12 +983,14 @@ with sync_playwright() as p:
     wait_until(lambda: page.locator("#tab-bar.hidden").count() == 1, what="the tab bar to hide")
     assert editor_text() == "", "the editor still shows the closed file"
     assert page.evaluate("document.getElementById('btn-save').disabled") is True
-    page.click(".CodeMirror")
-    page.keyboard.type("G_NOWHERE_MARKER")
-    page.wait_for_timeout(11500)  # past the 10s idle window: a bug would commit by now
-    assert not any("G_NOWHERE_MARKER" in w["text"] for w in CONTENT_WRITES if w["method"] == "PUT"), \
-        f"text typed with no file open was committed: {CONTENT_WRITES}"
-    print("✓ closing the last tab empties the editor; typing there commits nothing")
+    # No file is open: the empty-state card replaces the editor chrome.
+    wait_until(lambda: page.locator("#editor-empty-state:not(.hidden)").count() == 1,
+               what="the empty-state card to appear after the last tab closed")
+    assert page.locator(".editor-body.hidden").count() == 1, "the editor body is still visible with no file open"
+    assert page.locator(".editor-toolbar.hidden").count() == 1, "the toolbar is still visible with no file open"
+    assert page.locator("#empty-state-new-file:not(.hidden)").count() == 1, "the empty-state New file button is missing"
+    assert page.locator(".CodeMirror:visible").count() == 0, "a CodeMirror editor is still visible with no file open"
+    print("✓ closing the last tab shows the empty state, not a dead editor")
 
     # The tabs scenario above ends with no file open. The PDF checks below need
     # one, so open the note again (the mock's tree still lists it).

@@ -321,6 +321,23 @@
     <div class="editor-area">
       <!-- Open files, one tab each. Rendered by js/tabs-ui.js; hidden while no file is open. -->
       <div id="tab-bar" class="tab-bar hidden" role="tablist" aria-label="Open files"></div>
+      <!-- Empty state: shown by renderEmptyState() (js/app.js) when no file is open
+           (state.currentPath === null). The editor chrome below is hidden together
+           with it, so this must stay a SIBLING of the toolbar/body, not a child. -->
+      <div id="editor-empty-state" class="editor-empty-state hidden">
+        <div class="empty-state-card">
+          <div class="empty-state-icon" aria-hidden="true">📝</div>
+          <h2 class="empty-state-title">No file open</h2>
+          <p class="empty-state-hint">
+            Choose a file from the tree on the left,
+            search for one (<kbd>Ctrl</kbd>+<kbd>K</kbd>),
+            or create a new one.
+          </p>
+          <button type="button" class="empty-state-cta" id="empty-state-new-file">
+            + New file
+          </button>
+        </div>
+      </div>
       <div class="editor-toolbar">
         <div class="tb-group tb-meta">
           <!-- Filename lives in the tab strip; keep #current-file for JS, hide visually -->

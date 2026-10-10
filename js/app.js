@@ -141,6 +141,9 @@ const els = {
   editorTextarea: document.getElementById('editor'),
   dropOverlay: document.getElementById('editor-dropzone-overlay'),
   imageFileInput: document.getElementById('image-file-input'),
+
+  emptyState: document.getElementById('editor-empty-state'),
+  emptyStateNewFile: document.getElementById('empty-state-new-file'),
 };
 
 const state = {
@@ -1014,6 +1017,13 @@ function showApp(owner, repo) {
   });
   renderTabs();
 
+  // The empty-state "+ New file" button runs the exact same flow as the sidebar
+  // "+ Add" menu (same prompt, same default folder). Wrapped in an arrow so the
+  // click event is not passed as the folderPath argument.
+  if (els.emptyStateNewFile) {
+    els.emptyStateNewFile.onclick = () => onCreateNewFile();
+  }
+
   // Hybrid layout + Commit / History panels (idempotent re-bind each showApp)
   try { applyLayoutMode(layoutMode); } catch (e) { console.warn(e); }
   try { setupLayoutToggle(); } catch (e) { console.warn(e); }
@@ -1065,6 +1075,11 @@ function showApp(owner, repo) {
 
   setupAutosaveUI(owner, repo);
   setupSearch(owner, repo);
+
+  // Initial chrome: no file is open yet, so show the empty-state card. If a tab
+  // is restored from the previous session, loadTree() -> restoreTabsOnce() ->
+  // openFile() will flip this back to the editor on its own.
+  renderEmptyState();
 }
 
 /** Draft banner buttons + the two "the user is leaving" hooks. */
@@ -1400,6 +1415,38 @@ function restoreChrome() {
   else fileTree.clearActive();
 }
 
+/**
+ * Shows the empty-state card when no file is open and hides the editor chrome
+ * (toolbar, find bar, draft banner, editor body) in one place; does the inverse
+ * when a file IS open.
+ *
+ * The tab bar hides itself via renderTabs() when there are 0 tabs, so it is not
+ * touched here. The find bar and draft banner are on-demand panels — they are
+ * only ever force-HIDDEN while the empty state is up, never force-shown, so a
+ * stray Find bar or a pending-draft banner cannot be resurrected next to the
+ * card. openFile() shows the draft banner itself when there is a draft to offer.
+ */
+function renderEmptyState() {
+  if (!els.emptyState) return;
+  const hasFile = !!state.currentPath;
+  els.emptyState.classList.toggle('hidden', hasFile);
+
+  // Always-on chrome: visible with a file, hidden without.
+  for (const sel of ['.editor-toolbar', '.editor-body']) {
+    const node = document.querySelector(sel);
+    if (node) node.classList.toggle('hidden', !hasFile);
+  }
+
+  // On-demand chrome: only force-hide while empty; leave their own state intact
+  // when a file is open.
+  if (!hasFile) {
+    for (const id of ['find-bar', 'draft-banner']) {
+      const node = document.getElementById(id);
+      if (node) node.classList.add('hidden');
+    }
+  }
+}
+
 /** Shows a tab's document. swapDoc fires no 'change', but guard anyway. */
 function showDocInEditor(doc) {
   suppressEditorChange = true;
@@ -1546,6 +1593,9 @@ async function openFile(path, { reload = false } = {}) {
     state.currentPath = path;
     if (isMobileShell()) setMobileSidebarOpen(false);
     state.currentSha = sha;
+    // A file is now open: hide the empty-state card and show the editor chrome.
+    // Both success paths (opening from cache, opening fresh) converge here.
+    renderEmptyState();
     ensureAutosave();
     try { await draftStoreReady; } catch (_) { /* degraded store */ }
     const opened = await ensureAutosave().onOpen(path, remoteText, sha);
@@ -1652,9 +1702,13 @@ async function dropTabs(paths) {
   }
   persistTabs();
   renderTabs();
-  if (!activeGone) return;
+  if (!activeGone) {
+    renderEmptyState();
+    return;
+  }
   closeCurrentFile({ flush: false });
   if (tabs.active) await openFile(tabs.active);
+  renderEmptyState();
 }
 
 /** A tab's cached document no longer matches GitHub; it is re-fetched next time it is shown. */
@@ -1737,6 +1791,8 @@ function closeCurrentFile({ flush = true } = {}) {
   els.btnSave.disabled = true;
   els.btnExportPdf.disabled = true;
   els.btnDelete.disabled = true;
+  // No file is open now: swap the (emptied) editor for the empty-state card.
+  renderEmptyState();
 }
 
 /** Resolves a user-entered NAME into a full repo path inside folderPath ('' = root). */
