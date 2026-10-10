@@ -40,6 +40,8 @@ Prefer automated coverage in `test/*.test.js` and `e2e_smoke_test.py` when pract
 - [ ] New file allows non-`.md` extensions (html, js, css, …) with sensible defaults.
 - [ ] Create file/folder targets the **selected** folder, not a stale click path.
 - [ ] Drop-to-move uses the active folder path (including non-root).
+- [ ] Drag-to-move updates the tree without F5: after PUT+DELETE the file leaves the source folder within ~2s, even while "updating links…" still runs on a large repo (do not wait for every .md GET to finish).
+- [ ] Rename from the context menu also refreshes the tree without reload (same onMoved → loadTree rewritePath path).
 - [ ] Repo switcher in the header can change owner/repo without a full re-login.
 - [ ] Sign-in is GitHub-first; repo picker after OAuth (no mandatory owner/repo before login).
 - [ ] No PWA manifest / standalone (OAuth + sessionStorage isolation); responsive CSS remains.

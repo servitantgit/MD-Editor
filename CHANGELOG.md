@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+### Fixed
+- **Drag-and-drop move: tree refreshes before link rewrite.** PUT+DELETE already moved the blob on GitHub, but the sidebar waited for `updateReferencesEverywhere` (one request per `.md` in the repo) and could also be overwritten by a lagging recursive `git/trees` response — so the file looked stuck until F5. `onMoved` now runs `loadTree({ rewritePath, expandFolder })` immediately after the Contents write; link updates continue afterward with status `Moved: … (updating links…)`. Documented in `AGENTS.md` / `REGRESSION.md`.
+
 ## [Unreleased]
 
 ### Added

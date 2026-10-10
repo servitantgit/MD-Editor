@@ -344,6 +344,60 @@ The `sha` is deliberately left stale there: `updateReferencesEverywhere()`
 re-fetches it per file, and a clash sha is only read under `{ overwrite: true }`,
 which a folder rename never passes.
 
+
+## Drag-and-drop move: never block the tree on link rewriting
+
+**Symptom (hit more than once):** drag a file to another folder → GitHub PUT+DELETE
+succeed and a full page reload shows the new location, but the sidebar still shows
+the *old* path until F5. Create/delete look fine. Easy to mis-diagnose as "tree lag"
+or "collapsed folders".
+
+**Root cause (two layers):**
+
+1. `moveToPath` does `putFile(new)` + `deleteFile(old)`, then
+   `updateReferencesEverywhere` — a sequential GET (+ optional PUT) for **every**
+   `.md` in the repo. On a real knowledge base that is hundreds of requests and
+   can take **minutes**. Until that loop finishes, `onMoveFile` never reaches
+   `loadTree` / `setFiles`, so the UI looks frozen even though the blob already
+   moved on GitHub.
+
+2. Even after the loop, `client.getTree()` (recursive git tree) can still list the
+   *pre-move* paths for a few seconds. A bare `loadTree()` then **overwrites** any
+   optimistic local patch with the stale remote list — same visual as (1).
+
+**Required shape (do not "simplify"):**
+
+```js
+await putFile(newPath, …)
+await deleteFile(oldPath, …)
+// UI refresh MUST happen here — not after updateReferencesEverywhere
+await options.onMoved?.({ oldPath, newPath })  // → loadTree({ rewritePath, expandFolder })
+const updated = await updateReferencesEverywhere(…)  // may take a long time
+```
+
+- `loadTree({ rewritePath: { from, to }, expandFolder })` applies the local
+  old→new rename **after** the GitHub tree response and **before** `setFiles`,
+  so a lagging recursive tree cannot resurrect the old path.
+- `expandFolderChain` opens the destination and every ancestor (leaf-only expand
+  still hides the file under a collapsed parent).
+- Status text: `Moved: … (updating links…)` during the rewrite pass, then the
+  final count when it finishes.
+
+Create/delete only need a normal `loadTree()` because a single Contents write
+usually shows up in the next tree response; move is put+delete plus optional
+mass link edits — different failure mode.
+
+**Regression check:** drag `Notes/a.md` → `Notes/Other/` on a repo with many
+`.md` files. The row must leave the source folder within ~1–2s of the DELETE
+(200), *without* waiting for the link-rewrite storm to finish. F5 must not be
+required. Console (optional): PUT 201 → DELETE 200 → soon after, `git/trees`
+GET and a DOM update; reference GETs may continue in the background.
+
+Related: `js/file-mover.js` (`onMoved`), `js/file-ops.js` (`onMoveFile` /
+`onRenameFile`), `js/app.js` (`loadTree` rewritePath), `js/file-tree.js`
+(`expandFolderChain`).
+
+
 ## The active folder must be re-validated on every tree load
 
 `FileTree.activeFolder` is the "create here" target, and it outlives the folder it
