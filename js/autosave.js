@@ -4,7 +4,7 @@
 //   LOCAL  (IndexedDB) — every keystroke, debounced 400ms. Crash recovery.
 //                        Nothing here talks to GitHub.
 //   REMOTE (GitHub)    — only on explicit Save (or multi-file Commit in app.js).
-//                        Idle / max timers do NOT push — they only finish the
+//                        The idle timer does NOT push — it only finishes the
 //                        local draft so Commit can accumulate changes.
 //
 // No DOM at all: the UI hands in a status setter and gets back a label to
@@ -18,7 +18,11 @@ import { b64ToUtf8, utf8ToB64 } from './github-client.js';
 export const LOCAL_WRITE_DEBOUNCE_MS = 400;
 /** No keystrokes for this long means commit. Reset by every onChange. */
 export const IDLE_MS = 10_000;
-/** Hard ceiling: commit even mid-sentence. NOT reset by onChange. */
+/**
+ * @deprecated kept for test compat — the hybrid model never auto-pushes on a max
+ * timer, so nothing in the app reads this any more. Remote writes are explicit
+ * Save / Commit only.
+ */
 export const MAX_MS = 5 * 60 * 1000;
 
 /**
@@ -226,7 +230,6 @@ export class Autosave {
     this._setStatus(STATUS.unsaved);
     this._armDraftWrite();
     this._armIdle();
-    this._armMax();
   }
 
   /** Writing the draft is not user activity: this timer is NOT restarted by a
@@ -251,12 +254,6 @@ export class Autosave {
     }, this.idleMs);
   }
 
-  /** Max timer kept for API compat but no longer auto-pushes. */
-  _armMax() {
-    // Intentionally empty: continuous typing no longer forces a GitHub commit.
-    // Remote writes are Save / multi-file Commit only.
-  }
-
   async _onIdleLocal() {
     if (this.destroyed || !this.path) return;
     if (this.state === STATE.PUSHING || this.state === STATE.CLEAN) return;
@@ -264,11 +261,6 @@ export class Autosave {
     this._cancel(this._draftTimer);
     this._draftTimer = null;
     await this._writeDraft();
-    if (this.destroyed) return;
-    if (this.state === STATE.DIRTY_LOCAL || this.state === STATE.DIRTY_IDLE) {
-      this.state = STATE.DIRTY_IDLE;
-      this._setStatus(STATUS.drafted);
-    }
   }
 
   /** The LOCAL layer. Nothing here can touch the network. */

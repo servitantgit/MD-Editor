@@ -1,30 +1,3 @@
-## Unreleased
-
-### Changed — hybrid autosave (local idle, explicit remote)
-
-- **Idle and tab-hide no longer push to GitHub.** Drafts still write to IndexedDB
-  (400ms debounce + 10s idle checkpoint). Remote writes are **Save** (current file)
-  or **Commit** (working-tree batch).
-- Status copy: `○ Local only — Save or Commit to push` instead of implying a
-  background GitHub save after idle.
-- Unit and e2e tests updated so they assert **no** PUT on idle / tab switch.
-
-### Fixed / UX
-
-- Editor toolbar regrouped: Find·Wrap·Fold | Outline·Backlinks·Map | **PDF** | Save·Delete;
-  duplicate filename removed from the toolbar (tabs show the name).
-- GitHub Actions README badge paths (`../../actions/workflows/…/badge.svg`) map to
-  public `https://github.com/{owner}/{repo}/actions/...` URLs; external badge images
-  load without forcing CORS on `<img>`.
-- CodeMirror **material-darker** theme aligned with the dark app chrome.
-
-### Docs
-
-- `AGENTS.md` autosave state machine rewritten for the hybrid model.
-- `REGRESSION.md` checklist refreshed for Commit/Save, toolbar, badges, auth.
-
----
-
 # Changelog
 
 All notable changes to this project will be documented in this file.
@@ -44,19 +17,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Full-text search extended beyond `.md` (html, txt, code, …)
 - PDF export for HTML as well as Markdown
 - Regression checklist: [REGRESSION.md](./REGRESSION.md)
-
-### Fixed
-- Preview pane empty / wrong split; tab switch not updating Preview
-- Inline-image cursor jumps on Space/Backspace
-- History / Commit panel positioning; ResizeObserver scroll jitter
-- `titleFromPath` must only strip markdown extensions (unit test)
-- HTML preview height handshake race (commit d6d7fcc) — iframe bridge now posts height immediately and at 50/200/500ms, so at least one post lands after the parent listener registers. Previously the first message could be lost if the iframe loaded faster than editor init, leaving the iframe at pane fallback height.
-- Blank HTML preview for large files (commit 7cb7555) — renderHtmlPreview no longer assigns srcdoc twice (raw first, then resolved). On large files (3.7MB confirmed), the second assignment interrupted parsing mid-flight and left the sandboxed iframe blank. Resolved srcdoc now lands exactly once.
-
-
-## [Unreleased]
-
-### Added
 - **Hybrid Live + Commit / Push / History** — layout modes (Source/Live/Preview), multi-file Commit panel (Git Data API), History with diffs, dirty M/A badges (`js/working-tree.js`, `js/commit-ui.js`, GitHubClient Git Data methods)
 - **Hybrid Live layout modes** — Source / Live (side-by-side) / Preview toggle in the header; preference stored in `localStorage` (`md_layout`)
 - **Commit panel** — multi-file commits with a message via Git Data API (`commitFiles`: blobs → tree → commit → update ref). Dirty files show **M**/**A** badges in the file tree; header **Commit** button with change count
@@ -64,8 +24,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `js/working-tree.js` — tracks local dirty state across files/tabs
 - `js/commit-ui.js` — Commit + History panel DOM helpers
 - `GitHubClient` extensions: `getRefSha`, `createBlob`, `createTree`, `createCommitObject`, `updateRef`, `commitFiles`, `listCommits`, `getCommitDetail`
-
-### Added
 - **Tabs: several documents open at once.** Opening a file from the tree or from search adds a tab above the toolbar (or just activates the one that is already open). Each tab keeps its own CodeMirror document, so **text, undo history, cursor and scroll position survive switching away and back**, and a tab that was saved comes back instantly without a request. A dot on a tab means *not on GitHub yet*; × or middle-click closes it, the arrow keys / Home / End move between tabs, and identically named files are told apart by their parent folder (`a/notes.md`, `b/notes.md`). Tabs survive a page reload (`sessionStorage`, like the token) and only the active one is fetched on load. Moving, renaming or deleting a file or folder keeps the tabs consistent with it (`js/tabs.js`, `js/tabs-ui.js`, `js/app.js`)
   - **Nothing is lost by leaving or closing a tab.** Switching away does what switching files always did — the draft is written at once and the commit continues in the background — and closing a tab does the same, including the last one. A tab left with something GitHub did not have yet is re-fetched on return and the usual draft banner offers the local text, because after a background commit only GitHub and the draft store know the truth
   - `Autosave.release()` lets go of the current file without stopping the instance. Closing the last tab or deleting the open file used to `destroy()` it, and a destroyed instance skips the clean-up of a push still in flight — the draft stayed behind and later looked like unsaved work
@@ -85,12 +43,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **New dependency: [`minisearch`](https://github.com/lucaong/minisearch) ^7.2.0** (MIT, ~20KB, zero dependencies), loaded from jsdelivr as a `<script>` tag like `marked`/`html2pdf.js` — still no bundler. `fake-indexeddb` was added as a devDependency for the IndexedDB tests
 - Project info on the homepage — the start screen is now a landing card: what the app is ("Browser-based Markdown editor for any GitHub repo"), a feature list (OAuth login without manual tokens, full file/folder CRUD with automatic link rewriting on move, inline image previews via the GitHub API, PDF export, no local clone / no build step) and a link to the repository + author (`index.html`, `css/app.css`)
 - A GitHub icon link to the repository in the app header, next to "Sign out"
-
-### Added
 - **Files got a context menu** — right-clicking a file in the tree now offers "New file in this folder" / "Rename" / "Delete", the same way folders already did. Renaming a file rewrites every link to it across the repo exactly like a move does (`renameFile()` in `js/file-mover.js`)
 - Folders' context menu also gained "New file here" / "New folder here", and both menus now stay on screen when right-clicking near the window edge (`js/file-tree.js`)
 
 ### Changed
+
+- **Idle and tab-hide no longer push to GitHub.** Drafts still write to IndexedDB
+  (400ms debounce + 10s idle checkpoint). Remote writes are **Save** (current file)
+  or **Commit** (working-tree batch).
+- Status copy: `○ Local only — Save or Commit to push` instead of implying a
+  background GitHub save after idle.
+- Unit and e2e tests updated so they assert **no** PUT on idle / tab switch.
 - **Moving or renaming the open file now rebinds autosave to the new path.** Previously, unless the move happened to rewrite links inside that very file, autosave stayed bound to the old path and the next keystroke would try to commit there. The open file is now always re-opened under its new path
 - **Deleting a file no longer flushes it first** — committing to a path that was just deleted is pointless
 - **`html2pdf.js` is pinned to exactly `0.10.1` in `package.json`**, the version `index.html` loads from the CDN. It used to read `^0.14.0` there, and since the e2e test serves the library from `node_modules` under the 0.10.1 URL, the PDF checks were exercising a different release than production. The lockfile was regenerated with it (`package.json`, `package-lock.json`). `index.html`, `package.json` and `CDN_MOCKS` in `e2e_smoke_test.py` must be changed together
@@ -98,6 +61,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - "New file" / "New folder" are created in the **folder selected in the tree** instead of always at the repository root — the folder you last opened or expanded becomes the target, and the sidebar buttons' tooltips say so. The prompt shows where the item will land, and names containing `/` still work and are resolved from the root (`onCreateNewFile()` / `onCreateNewFolder()` in `js/app.js`)
 
 ### Fixed
+
+- Editor toolbar regrouped: Find·Wrap·Fold | Outline·Backlinks·Map | **PDF** | Save·Delete;
+  duplicate filename removed from the toolbar (tabs show the name).
+- GitHub Actions README badge paths (`../../actions/workflows/…/badge.svg`) map to
+  public `https://github.com/{owner}/{repo}/actions/...` URLs; external badge images
+  load without forcing CORS on `<img>`.
+- CodeMirror **material-darker** theme aligned with the dark app chrome.
+- Preview pane empty / wrong split; tab switch not updating Preview
+- Inline-image cursor jumps on Space/Backspace
+- History / Commit panel positioning; ResizeObserver scroll jitter
+- `titleFromPath` must only strip markdown extensions (unit test)
+- HTML preview height handshake race (commit d6d7fcc) — iframe bridge now posts height immediately and at 50/200/500ms, so at least one post lands after the parent listener registers. Previously the first message could be lost if the iframe loaded faster than editor init, leaving the iframe at pane fallback height.
+- Blank HTML preview for large files (commit 7cb7555) — renderHtmlPreview no longer assigns srcdoc twice (raw first, then resolved). On large files (3.7MB confirmed), the second assignment interrupted parsing mid-flight and left the sandboxed iframe blank. Resolved srcdoc now lands exactly once.
 - **UTF-8 conversion used the deprecated `escape`/`unescape`** (Annex B, deprecated since 1999) — `github-client.js` now encodes with `TextEncoder` and decodes with `TextDecoder`. The decoder's `fatal: true` is load-bearing and must not be dropped: `moveToPath()` and `updateReferencesEverywhere()` rely on a thrown error to detect content that is not valid UTF-8 and leave its bytes untouched, whereas the default decoder silently substitutes U+FFFD and would PUT the corrupted text back to GitHub. Pinned against `Buffer` as an independent UTF-8 reference (`js/github-client.js`, new `test/base64-utf8.test.js`, new case in `test/file-mover.test.js`)
 - **Closing the tree context menu by clicking away was unreliable** — the dismiss listeners were armed inside a `setTimeout(…, 0)`, leaving a window where the menu was visible but not yet listening, so a click landing there did nothing. That flaked the e2e dismissal check about 1 run in 3. They are registered synchronously again, and the document handler now ignores clicks that land inside the menu (`js/file-tree.js`)
 - **Renaming a folder left stale absolute links between its own files** — `moveFile()` only ever reads the `allFiles` snapshot and never updates it, so `renameFolder()` was looping over a list that went stale after the very first move. `updateReferencesEverywhere()` then asked for `Notes/a.md`, got a 404, swallowed it and moved on, leaving root-absolute links inside an already-moved file pointing at a folder that no longer existed (`Docs/a.md` kept `[b](/Notes/b.md)`). The loop now keeps a private copy of the snapshot and repoints each entry as its file moves; relative links were never affected, which is why this only surfaced for `/`-style links (`js/folder-manager.js`, new `test/folder-manager.test.js`)
@@ -116,6 +92,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Dragging a file into a folder that already contains a file with the same name failed with the raw GitHub API error `Invalid request. "sha" wasn't supplied.` — the Contents API requires the current `sha` of a file to update it, and `moveFile()` never sent one. Now the collision is detected up front from the file tree, `moveFile()` refuses to replace anything silently and accepts an explicit `{ overwrite: true }` (passing the destination's sha, with a retry on a stale sha), the UI asks for confirmation via `confirm()` and reports the replacement, and `renameFolder()` checks for collisions before moving the first file instead of failing halfway through (`js/file-mover.js`, `js/folder-manager.js`, `js/app.js`, regression tests in `test/file-mover.test.js`)
 - Dropping a file into the folder it is already in now says so in the status bar instead of silently doing nothing
 - The expand/collapse arrows next to folders in the file tree did nothing when clicked: the folder row's click handler explicitly bailed out on clicks inside `.folder-toggle`, so the arrow — the most obvious thing to click — was inert (only the folder name/icon worked). Now a click anywhere on the row toggles the folder, and the arrow additionally reacts to Enter/Space (`js/file-tree.js`, `css/app.css`, regression test in `test/file-tree.test.js`)
+### Docs
+
+- `AGENTS.md` autosave state machine rewritten for the hybrid model.
+- `REGRESSION.md` checklist refreshed for Commit/Save, toolbar, badges, auth.
+
+
 - Pasting a full GitHub link (e.g. `https://github.com/owner/repo.git` from the address bar) into the Owner/Repository field no longer produces a broken `/repos/{owner}/https://github.com/...` API URL (surfaced by the browser as a "CORS policy" error): `onLoginClick()` now detects such a paste in either field and auto-splits it into owner + repo (`js/github-repo-url.js`, covered by `test/github-repo-url.test.js`)
 
 ## [2.2.0] - 2026-09-27

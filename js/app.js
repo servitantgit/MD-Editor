@@ -318,6 +318,12 @@ async function init() {
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'hidden' && autosave) autosave.onVisibilityChange(true);
   });
+  // In the hybrid model, hasUnsavedDraft() is true for anything not on GitHub —
+  // even for a safely-written IndexedDB draft. Prompt anyway: IndexedDB can be
+  // cleared (private mode, "clear site data"), and work inside the 400ms debounce
+  // window exists only in JS memory. "On GitHub or nothing" is the right prompt
+  // threshold here. Do NOT narrow this to DIRTY_LOCAL — a draft is not durable
+  // enough to count as "safe to close".
   window.addEventListener('beforeunload', (e) => {
     if (!autosave || !autosave.hasUnsavedDraft()) return;
     // The draft is already in IndexedDB by now; this is only the courtesy

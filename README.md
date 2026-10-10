@@ -17,8 +17,9 @@ sees the one-time code-for-token exchange (setup:
 
 No build step: plain ES modules. Edit **Markdown**, **HTML**, **JS/CSS** and
 other text files with three layouts (**Source / Live / Preview**), multi-tab
-editing, full-text search, autosave + local drafts, **Commit / History**
-drawers, find/replace, outline, minimap, and PDF export.
+editing, full-text search, local drafts (IndexedDB) + explicit Save/Commit to
+GitHub, **Commit / History** drawers, find/replace, outline, minimap, and PDF
+export.
 
 ## Screenshots
 
@@ -54,6 +55,8 @@ js/
                             (pure functions, no network)
   github-client.js         thin GitHub REST API client (auth, contents, trees,
                             Git Data API)
+  demo-client.js           in-memory GitHubClient stand-in for "Try demo" (local sandbox)
+
   github-repo-url.js       parses a pasted GitHub repo URL into owner/repo
   file-kind.js             file extension -> kind mapping (md/html/js/css/…)
   image-resolver.js        markdown path -> data: URL via the GitHub API, cached
