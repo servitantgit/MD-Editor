@@ -25,13 +25,13 @@ export.
 
 
 <p align="center">
-  <img width="1920" height="1200" alt="landpage" src="https://github.com/user-attachments/assets/5b3a581e-19f3-4ced-819f-deb50cf9f243" /><br>
+  <img width="1920" height="1199" alt="landpage" src="https://github.com/user-attachments/assets/fc7f14d1-cbbc-4a83-aecc-da1d7d164e52" /><br>
   <sub><b>Sign in with GitHub</b> — OAuth login, no manual token to create or paste.</sub>
 </p>
 
 
 <p align="center">
-  <img width="1920" height="1080" alt="hero" src="https://github.com/user-attachments/assets/a8ac5554-3455-4bec-9b34-a1d71fe0bffd" /><br>
+  <img width="1920" height="1199" alt="landpage" src="https://github.com/user-attachments/assets/251bab67-a94c-416a-a20c-05f9596088a7" /><br>
   <sub>File tree, tabs, live preview and toolbar side by side while editing a note.</sub>
 </p>
 
