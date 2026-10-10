@@ -851,6 +851,7 @@ function startDemo() {
   state.client = new DemoClient();
   state.demo = true;
   showApp('demo', 'sandbox');
+  loadTree();
   if (els.demoBanner) els.demoBanner.classList.remove('hidden');
   // Soft-disable GitHub-only chrome
   if (els.btnHistory) {
