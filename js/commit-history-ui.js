@@ -89,7 +89,9 @@ export function createCommitHistoryUI(deps) {
     historyPanel.setLoading('Loading ' + String(sha).slice(0, 7) + '…');
     try {
       const state = deps.getState();
-      const detail = await state.client.getCommit(sha);
+      const detail = typeof state.client.getCommitDetail === 'function'
+        ? await state.client.getCommitDetail(sha)
+        : await state.client.getCommit(sha);
       if (!historyPanel.isOpen()) return;
       historyPanel.renderDetail(detail);
     } catch (e) {
