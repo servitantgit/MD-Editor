@@ -1095,7 +1095,13 @@ function closeCurrentFile({ flush = true } = {}) {
   state.currentSha = null;
   els.currentFileLabel.textContent = 'No file selected';
   fileTree.clearActive();
-  showDocInEditor(editorHandle.createDoc(''));
+  // showDocInEditor lives in tabs-session; inline the same suppress+show here
+  suppressEditorChange = true;
+  try {
+    if (editorHandle) editorHandle.showDoc(editorHandle.createDoc(''));
+  } finally {
+    suppressEditorChange = false;
+  }
   els.btnSave.disabled = true;
   els.btnExportPdf.disabled = true;
   els.btnDelete.disabled = true;
