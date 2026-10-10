@@ -2933,3 +2933,43 @@ body.md-layout-source .editor-preview-active-side {
   background: var(--accent-hover);
 }
 
+
+/* ===== New file dialog (name + extension pick) ===== */
+.new-file-dialog {
+  max-width: 420px;
+}
+.new-file-folder {
+  font-size: 13px;
+  color: var(--muted);
+  margin: 0 0 12px;
+}
+.new-file-label {
+  display: block;
+  font-size: 12px;
+  color: var(--muted);
+  margin: 0 0 4px;
+}
+.new-file-dialog .repo-search,
+.new-file-type {
+  width: 100%;
+  margin-bottom: 12px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  font-size: 14px;
+}
+.new-file-type {
+  cursor: pointer;
+}
+.new-file-preview {
+  font-size: 12px;
+  margin: -4px 0 14px;
+  word-break: break-all;
+}
+.new-file-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}

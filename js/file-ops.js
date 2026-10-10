@@ -8,7 +8,7 @@ import { utf8ToB64 } from './github-client.js';
 import { moveFile, renameFile } from './file-mover.js';
 import { createFolder, renameFolder, deleteFolder, getFolders, isFolderEmpty } from './folder-manager.js';
 import { basenameOf, dirnameOf, relativePathFromTo } from './paths.js';
-import { kindFromPath, isEditableTextPath } from './file-kind.js';
+import { kindFromPath, isEditableTextPath, isCreatableFilePath, hasFileExtension, CREATE_FILE_TYPES, extOfPath } from './file-kind.js';
 
 /**
  * @param {object} deps
@@ -209,21 +209,147 @@ export function createFileOps(deps) {
   }
 
 
+
+  // New-file dialog elements (optional until first open)
+  function newFileEls() {
+    return {
+      overlay: document.getElementById('new-file-overlay'),
+      nameInput: document.getElementById('new-file-name'),
+      typeSelect: document.getElementById('new-file-type'),
+      folderLabel: document.getElementById('new-file-folder-label'),
+      preview: document.getElementById('new-file-preview'),
+      btnOk: document.getElementById('btn-new-file-ok'),
+      btnCancel: document.getElementById('btn-new-file-cancel'),
+      btnDismiss: document.getElementById('btn-new-file-dismiss'),
+    };
+  }
+
+  function fillTypeSelect(select) {
+    if (!select || select.dataset.filled) return;
+    select.innerHTML = '';
+    for (const t of CREATE_FILE_TYPES) {
+      const opt = document.createElement('option');
+      opt.value = t.ext;
+      opt.textContent = t.label;
+      select.appendChild(opt);
+    }
+    select.dataset.filled = '1';
+  }
+
+  function composeFileName(stem, ext) {
+    const s = String(stem || '').trim() || 'untitled';
+    const e = String(ext || 'md').replace(/^\./, '');
+    const existing = extOfPath(s);
+    if (existing && existing === e) return s;
+    if (existing && isCreatableFilePath(s)) return s;
+    return s + '.' + e;
+  }
+
+  function updateNewFilePreview() {
+    const nf = newFileEls();
+    if (!nf.preview || !nf.nameInput || !nf.typeSelect) return;
+    const composed = composeFileName(nf.nameInput.value, nf.typeSelect.value);
+    nf.preview.textContent = '→ ' + composed;
+  }
+
+  /**
+   * Notepad++-style dialog: name + required type/extension.
+   * @returns {Promise<string|null>} basename with extension, or null if cancelled
+   */
+  function promptNewFileName(folderPath) {
+    return new Promise((resolve) => {
+      const nf = newFileEls();
+      if (!nf.overlay || !nf.nameInput || !nf.typeSelect) {
+        const raw = window.prompt(
+          'New file name (extension required, e.g. note.md):',
+          'untitled.md'
+        );
+        if (!raw) return resolve(null);
+        const composed = extOfPath(raw.trim()) ? raw.trim() : raw.trim() + '.md';
+        if (!isCreatableFilePath(composed)) {
+          alert('Choose a name with a supported extension (.md, .html, .js, …)');
+          return resolve(null);
+        }
+        return resolve(composed);
+      }
+
+      fillTypeSelect(nf.typeSelect);
+      nf.typeSelect.value = 'md';
+      nf.nameInput.value = 'untitled';
+      if (nf.folderLabel) {
+        nf.folderLabel.textContent = folderPath
+          ? 'Created in "' + folderPath + '"'
+          : 'Created in repository root';
+      }
+      updateNewFilePreview();
+
+      const close = (value) => {
+        nf.overlay.classList.add('hidden');
+        nf.overlay.setAttribute('aria-hidden', 'true');
+        nf.btnOk.onclick = null;
+        nf.btnCancel.onclick = null;
+        if (nf.btnDismiss) nf.btnDismiss.onclick = null;
+        nf.nameInput.oninput = null;
+        nf.typeSelect.onchange = null;
+        nf.nameInput.onkeydown = null;
+        nf.overlay.onclick = null;
+        resolve(value);
+      };
+
+      const submit = () => {
+        const composed = composeFileName(nf.nameInput.value, nf.typeSelect.value);
+        if (!composed || composed === '.' + nf.typeSelect.value) {
+          alert('Enter a file name');
+          nf.nameInput.focus();
+          return;
+        }
+        if (!hasFileExtension(composed) || !isCreatableFilePath(composed)) {
+          alert('A supported file extension is required. Pick a type from the list.');
+          return;
+        }
+        close(composed);
+      };
+
+      nf.btnOk.onclick = submit;
+      nf.btnCancel.onclick = () => close(null);
+      if (nf.btnDismiss) nf.btnDismiss.onclick = () => close(null);
+      nf.nameInput.oninput = updateNewFilePreview;
+      nf.typeSelect.onchange = updateNewFilePreview;
+      nf.nameInput.onkeydown = (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          submit();
+        } else if (e.key === 'Escape') {
+          e.preventDefault();
+          close(null);
+        }
+      };
+      nf.overlay.onclick = (e) => {
+        if (e.target === nf.overlay) close(null);
+      };
+      nf.overlay.classList.remove('hidden');
+      nf.overlay.setAttribute('aria-hidden', 'false');
+      requestAnimationFrame(() => {
+        nf.nameInput.focus();
+        nf.nameInput.select();
+      });
+    });
+  }
+
   async function onCreateNewFile(folderPath = deps.getFileTree().getActiveFolder()) {
     folderPath = toFolderPath(folderPath);
-    const name = prompt(
-      `New file name (created in ${targetFolderLabel(folderPath)}):\n` +
-        `Examples: note.md, page.html, script.js, styles.css`,
-      'untitled.md'
-    );
+    const name = await promptNewFileName(folderPath);
     if (!name) return;
 
     let path;
     try {
       path = resolvePathIn(folderPath, name);
-      if (!isEditableTextPath(path)) {
+      if (!hasFileExtension(path)) {
+        throw new Error('A file extension is required (e.g. .md, .html, .js)');
+      }
+      if (!isCreatableFilePath(path)) {
         throw new Error(
-          'Unsupported file type. Use a text extension (.md, .html, .js, .css, .json, .txt, …)'
+          'Unsupported file type. Choose a type from the list (.md, .html, .js, .css, …)'
         );
       }
       if (deps.getState().allFiles.some((f) => f.path === path)) throw new Error(`"${path}" already exists`);
@@ -312,6 +438,14 @@ export function createFileOps(deps) {
     if (!newName) return;
     const trimmed = newName.trim();
     if (trimmed === basenameOf(path)) return;
+    if (!hasFileExtension(trimmed)) {
+      alert('Keep a file extension (e.g. .md). Names without an extension cannot be opened reliably.');
+      return;
+    }
+    if (!isCreatableFilePath(trimmed) && !isEditableTextPath(trimmed)) {
+      alert('Unsupported file type for the editor.');
+      return;
+    }
 
     try {
       deps.setSaveStatus(`Renaming ${path}...`, false);

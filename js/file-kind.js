@@ -59,3 +59,36 @@ export function isMarkdownPath(path) {
 export function isHtmlPath(path) {
   return kindFromPath(path).kind === 'html';
 }
+
+/**
+ * Types offered when creating a new file (Notepad++-style: name + extension pick).
+ * First entry is the default (.md).
+ */
+export const CREATE_FILE_TYPES = [
+  { ext: 'md', label: 'Markdown (*.md)' },
+  { ext: 'html', label: 'HTML (*.html)' },
+  { ext: 'js', label: 'JavaScript (*.js)' },
+  { ext: 'css', label: 'CSS (*.css)' },
+  { ext: 'json', label: 'JSON (*.json)' },
+  { ext: 'ts', label: 'TypeScript (*.ts)' },
+  { ext: 'py', label: 'Python (*.py)' },
+  { ext: 'txt', label: 'Plain text (*.txt)' },
+  { ext: 'yml', label: 'YAML (*.yml)' },
+  { ext: 'sh', label: 'Shell (*.sh)' },
+];
+
+/** True when the basename has a non-empty extension (e.g. note.md). */
+export function hasFileExtension(path) {
+  return !!extOfPath(path);
+}
+
+/**
+ * Paths we allow *creating* from the UI. Must have a known editable extension —
+ * bare names like "README" or "notes" are rejected (they open/delete poorly and
+ * confuse the language badge).
+ */
+export function isCreatableFilePath(path) {
+  if (!hasFileExtension(path)) return false;
+  const k = kindFromPath(path);
+  return k.kind === 'markdown' || k.kind === 'html' || k.kind === 'code' || k.kind === 'text';
+}
