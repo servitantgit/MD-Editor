@@ -18,8 +18,7 @@ import { SearchSync } from './search-sync.js';
 import { createSearchUI, formatAge } from './search-ui.js';
 import { DraftStore } from './draft-store.js';
 import { Autosave } from './autosave.js';
-import { TabsModel, tabLabels, tabsStorageKey } from './tabs.js';
-import { createTabBar } from './tabs-ui.js';
+import { createTabsSession } from './tabs-session.js';
 import { WorkingTree } from './working-tree.js';
 import { createCommitHistoryUI } from './commit-history-ui.js';
 import { kindFromPath, isHtmlPath, isMarkdownPath } from './file-kind.js';
@@ -179,34 +178,74 @@ let pendingDraft = null;
 // Set while a background reindex is running, so a second one is not started.
 let syncing = false;
 
-// ---- Tabs ----
-// `tabs` is only the ordered list + which one is active (js/tabs.js). The heavy
-// per-tab state lives here, keyed by path:
-//   doc        the tab's own CodeMirror document, so undo history, cursor and
-//              scroll position survive switching away and back
-//   sha        the last blob sha we know GitHub has for this file
-//   unsaved    we left the tab with something GitHub does not have yet (hybrid
-//              model: local draft / working tree). The cached CodeMirror doc is
-//              still trusted on return — do NOT refetch, or the in-memory edits
-//              and undo history are wiped. Draft banner is for cold reload only.
-//   stale      the file was renamed/moved or its links were rewritten, so the cached
-//              document no longer matches GitHub
-//   commitSeen a commit for this path landed since we started leaving it
-// A path with no entry here is a tab that was restored but never opened yet.
-let tabs = new TabsModel();
-let tabBar = null;
+// ---- Tabs (session owned by tabs-session.js) ----
+/** @type {ReturnType<typeof createTabsSession>|null} */
+let tabsSession = null;
 let workingTree = new WorkingTree();
 /** @type {ReturnType<typeof createCommitHistoryUI>|null} */
 let commitHistoryUI = null;
 let layoutMode = localStorage.getItem('md_layout') || 'source';
-const tabDocs = new Map();
-// Whether the ACTIVE file differs from GitHub, derived from the autosave label.
-let activeFileUnsaved = false;
-// Bumped by every openFile(); a slower, older open compares against it and gives
-// up instead of overwriting the editor with a file the user has moved on from.
-let openSeq = 0;
-// The persisted tab list is read once per session, on the first tree load.
-let tabsRestored = false;
+
+function ensureTabsSession() {
+  if (tabsSession) return tabsSession;
+  tabsSession = createTabsSession({
+    els: {
+      tabBar: els.tabBar,
+      emptyState: els.emptyState,
+      currentFileLabel: els.currentFileLabel,
+      btnSave: els.btnSave,
+      btnExportPdf: els.btnExportPdf,
+      btnDelete: els.btnDelete,
+      docOutline: els.docOutline,
+      minimapWrap: els.minimapWrap,
+    },
+    getState: () => state,
+    getFileTree: () => fileTree,
+    getEditorHandle: () => editorHandle,
+    getAutosave: () => autosave,
+    ensureAutosave: () => ensureAutosave(),
+    getDraftStore: () => draftStore,
+    draftStoreReady: typeof draftStoreReady !== 'undefined' ? draftStoreReady : Promise.resolve(),
+    setSaveStatus,
+    setAutosaveStatus: typeof setAutosaveStatus === 'function' ? setAutosaveStatus : () => {},
+    hideDraftBanner: () => { if (typeof hideDraftBanner === 'function') hideDraftBanner(); },
+    showDraftBanner: (msg, kind) => { if (typeof showDraftBanner === 'function') showDraftBanner(msg, kind); },
+    setPendingDraft: (v) => { pendingDraft = v; },
+    resurfaceDraftBanner: (path) => (typeof resurfaceDraftBanner === 'function' ? resurfaceDraftBanner(path) : Promise.resolve()),
+    isMobileShell: () => (typeof isMobileShell === 'function' ? isMobileShell() : false),
+    setMobileSidebarOpen: (open) => { if (typeof setMobileSidebarOpen === 'function') setMobileSidebarOpen(open); },
+    updateLangBadge: (k) => { if (typeof updateLangBadge === 'function') updateLangBadge(k); },
+    renderDocOutline: () => { if (typeof renderDocOutline === 'function') renderDocOutline(); },
+    ensureMinimap: () => { if (typeof ensureMinimap === 'function') ensureMinimap(); },
+    refreshCommitBadge: () => { try { ensureCommitHistoryUI().refreshBadge(); } catch (_) {} },
+    getWorkingTree: () => workingTree,
+    setSuppressEditorChange: (v) => { suppressEditorChange = !!v; },
+    formatAge: typeof formatAge === 'function' ? formatAge : undefined,
+    closeCurrentFile: (opts) => closeCurrentFile(opts),
+  });
+  return tabsSession;
+}
+
+// Thin shims so existing call sites (file-ops, commit-history, loadTree) stay stable.
+function openFile(path, opts) { return ensureTabsSession().openFile(path, opts); }
+function closeTab(path) { return ensureTabsSession().closeTab(path); }
+function dropTabs(paths) { return ensureTabsSession().dropTabs(paths); }
+function markStale(paths) { ensureTabsSession().markStale(paths); }
+function moveTabDoc(a, b) { ensureTabsSession().moveTabDoc(a, b); }
+function persistTabs() { ensureTabsSession().persistTabs(); }
+function renderTabs() { ensureTabsSession().renderTabs(); }
+function noteCommit(path, sha) { ensureTabsSession().noteCommit(path, sha); }
+function restoreTabsOnce(files) { ensureTabsSession().restoreTabsOnce(files); }
+function renderEmptyState() { ensureTabsSession().renderEmptyState(); }
+function restoreChrome() { ensureTabsSession().restoreChrome(); }
+// Note: `tabs` and `tabDocs` are no longer free variables — use
+// ensureTabsSession().getTabs() / getTabDocs(). Call sites that need them
+// go through the shims or ensureTabsSession().
+let activeFileUnsaved = false; // mirrored; writers also call setActiveFileUnsaved on session
+function setActiveFileUnsaved(v) {
+  activeFileUnsaved = !!v;
+  if (tabsSession) tabsSession.setActiveFileUnsaved(v);
+}
 
 // ====================== LOGIN ======================
 const loginUI = createLoginUI({
@@ -379,7 +418,7 @@ function setAutosaveStatus(status) {
   // has something GitHub does not — that is what the dot on its tab shows.
   const unsaved = !!status && status.variant !== 'ok';
   if (unsaved !== activeFileUnsaved) {
-    activeFileUnsaved = unsaved;
+    setActiveFileUnsaved(unsaved);
     renderTabs();
   }
   clearTimeout(autosaveClearTimer);
@@ -458,7 +497,7 @@ function createAutosave(owner, repo) {
     onReloadRemote: (path, text, sha) => {
       if (state.currentPath !== path) return;
       state.currentSha = sha;
-      const tab = tabDocs.get(path);
+      const tab = ensureTabsSession().getTabDocs().get(path);
       if (tab) tab.sha = sha;
       setEditorValue(text);
       hideDraftBanner();
@@ -559,15 +598,10 @@ function showApp(owner, repo) {
   syncing = false;
   if (fileTree) fileTree = null;
   // Tabs belong to one session of one repository.
-  if (tabBar) {
-    tabBar.destroy();
-    tabBar = null;
+  if (tabsSession) {
+    tabsSession.resetForNewSession();
   }
-  tabs = new TabsModel();
-  tabDocs.clear();
   activeFileUnsaved = false;
-  tabsRestored = false;
-  openSeq++; // abandon any open still in flight from the previous session
 
   els.loginScreen.classList.add('hidden');
   els.appHeader.classList.remove('hidden');
@@ -647,10 +681,7 @@ function showApp(owner, repo) {
       setSaveStatus(`Preview: failed to load ${count} image(s) — details shown in place of the image`, true),
   });
 
-  tabBar = createTabBar(els.tabBar, {
-    onActivate: (path) => openFile(path),
-    onClose: (path) => closeTab(path),
-  });
+  ensureTabsSession().setupTabBar();
   renderTabs();
 
   // The empty-state "+ New file" button runs the exact same flow as the sidebar
@@ -736,7 +767,7 @@ function ensureFileOps() {
     },
     getState: () => state,
     getFileTree: () => fileTree,
-    getTabs: () => tabs,
+    getTabs: () => ensureTabsSession().getTabs(),
     getImageResolver: () => imageResolver,
     setSaveStatus,
     openFile,
@@ -777,15 +808,15 @@ function ensureCommitHistoryUI() {
     getWorkingTree: () => workingTree,
     getState: () => state,
     getEditorHandle: () => editorHandle,
-    getTabs: () => tabs,
-    getTabDocs: () => tabDocs,
+    getTabs: () => ensureTabsSession().getTabs(),
+    getTabDocs: () => ensureTabsSession().getTabDocs(),
     getFileTree: () => fileTree,
     setSaveStatus,
     openFile,
     setEditorValue,
     ensureAutosave,
-    setActiveFileUnsaved: (v) => { activeFileUnsaved = !!v; },
-    getActiveFileUnsaved: () => activeFileUnsaved,
+    setActiveFileUnsaved: (v) => setActiveFileUnsaved(v),
+    getActiveFileUnsaved: () => (tabsSession ? tabsSession.getActiveFileUnsaved() : activeFileUnsaved),
     noteCommit,
     renderTabs,
     loadTree,
@@ -1034,379 +1065,8 @@ function previewImageFile(path) {
       console.warn('previewImageFile', path, err);
     });
 }
-// ====================== TABS ======================
-function tabsKey() {
-  return tabsStorageKey(state.client.owner, state.client.repo, state.branch);
-}
 
-/** The open tabs survive a page reload (sessionStorage, like the token: gone with the browser tab). */
-function persistTabs() {
-  if (!state.client) return;
-  try {
-    sessionStorage.setItem(tabsKey(), JSON.stringify(tabs.toJSON()));
-  } catch (_) { /* storage disabled or full — tabs just will not survive a reload */ }
-}
-
-function renderTabs() {
-  if (!tabBar) return;
-  const dirty = new Set();
-  for (const path of tabs.paths) {
-    const isActive = path === state.currentPath;
-    if (isActive ? activeFileUnsaved : (tabDocs.get(path) || {}).unsaved) dirty.add(path);
-  }
-  tabBar.render({ paths: tabs.paths, active: tabs.active, labels: tabLabels(tabs.paths), dirty });
-  // Landscape mobile hides the tab strip when only one file is open (saves a row).
-  document.body.classList.toggle('mobile-single-tab', (tabs.paths || []).length <= 1);
-}
-
-/** A commit for `path` landed (maybe in the background, for a tab the user already left). */
-function noteCommit(path, sha) {
-  const tab = tabDocs.get(path);
-  if (tab) {
-    if (sha) tab.sha = sha;
-    tab.commitSeen = true;
-    if (state.currentPath !== path && tab.unsaved) {
-      tab.unsaved = false;
-      renderTabs();
-    }
-  }
-  // Single-file Save / autosave also clears multi-file dirty tracking for this path
-  if (path && workingTree) {
-    workingTree.clear(path);
-    ensureCommitHistoryUI().refreshBadge();
-    if (fileTree) fileTree.setDirtyMap(workingTree.statusMap());
-  }
-}
-
-/**
- * Brings the toolbar back in line with the file that is REALLY open, after an
- * open that was started but did not happen (network error, not valid UTF-8).
- */
-function restoreChrome() {
-  const path = state.currentPath;
-  els.currentFileLabel.textContent = path || 'No file selected';
-  els.btnSave.disabled = !path;
-  els.btnExportPdf.disabled = !path;
-  els.btnDelete.disabled = !path;
-  if (path) fileTree.setActive(path);
-  else fileTree.clearActive();
-}
-
-/**
- * Shows the empty-state card when no file is open and hides the editor chrome
- * (toolbar, find bar, draft banner, editor body) in one place; does the inverse
- * when a file IS open.
- *
- * The tab bar hides itself via renderTabs() when there are 0 tabs, so it is not
- * touched here. The find bar and draft banner are on-demand panels — they are
- * only ever force-HIDDEN while the empty state is up, never force-shown, so a
- * stray Find bar or a pending-draft banner cannot be resurrected next to the
- * card. openFile() shows the draft banner itself when there is a draft to offer.
- */
-function renderEmptyState() {
-  if (!els.emptyState) return;
-  const hasFile = !!state.currentPath;
-  els.emptyState.classList.toggle('hidden', hasFile);
-
-  // Always-on chrome: visible with a file, hidden without.
-  for (const sel of ['.editor-toolbar', '.editor-body']) {
-    const node = document.querySelector(sel);
-    if (node) node.classList.toggle('hidden', !hasFile);
-  }
-
-  // On-demand chrome: only force-hide while empty; leave their own state intact
-  // when a file is open.
-  if (!hasFile) {
-    for (const id of ['find-bar', 'draft-banner']) {
-      const node = document.getElementById(id);
-      if (node) node.classList.add('hidden');
-    }
-  }
-}
-
-/** Shows a tab's document. swapDoc fires no 'change', but guard anyway. */
-function showDocInEditor(doc) {
-  suppressEditorChange = true;
-  try {
-    editorHandle.showDoc(doc);
-  } finally {
-    suppressEditorChange = false;
-  }
-}
-
-/** Tabs are restored once per session, from the first tree that loads. */
-function restoreTabsOnce(files) {
-  if (tabsRestored) return;
-  tabsRestored = true;
-  let saved = null;
-  try {
-    saved = JSON.parse(sessionStorage.getItem(tabsKey()) || 'null');
-  } catch (_) { /* corrupt entry: start with no tabs */ }
-  const known = new Set(files.map((f) => f.path));
-  const restored = TabsModel.fromJSON(saved, (path) => known.has(path));
-  if (restored.size === 0) return;
-
-  // Anything the user opened while the tree was still loading is kept, in front.
-  for (const path of restored.paths) tabs.open(path);
-  persistTabs();
-  renderTabs();
-  // Only one tab is fetched now; the others load when first clicked. When the file
-  // that was active has since disappeared, the first remaining tab takes its place
-  // rather than leaving tabs on screen next to an empty editor.
-  const toOpen = restored.active || restored.paths[0];
-  if (!state.currentPath && toOpen) openFile(toOpen);
-}
-
-
-/** If IndexedDB still has a dirty draft for path and the banner is hidden, show it. */
-async function resurfaceDraftBanner(path) {
-  if (!path || !draftStore || !els.draftBanner) return;
-  if (!els.draftBanner.classList.contains('hidden')) return;
-  try {
-    await draftStoreReady;
-    const draft = await draftStore.get({
-      owner: state.client.owner,
-      repo: state.client.repo,
-      branch: state.branch,
-      path,
-    });
-    if (!draft || draft.dirty === false) return;
-    const remoteSha = state.currentSha;
-    const remoteText = editorHandle ? editorHandle.easyMDE.value() : '';
-    const stillDiffers = draft.baseSha !== remoteSha || draft.text !== remoteText;
-    if (!stillDiffers) return;
-    pendingDraft = draft.text;
-    showDraftBanner(
-      `You have unsaved local changes from ${formatAge(Date.now() - (draft.savedAt || Date.now()))}.`,
-      'draft'
-    );
-  } catch (_) { /* ignore */ }
-}
-
-// ====================== OPEN / SAVE ======================
-/**
- * Opens a file in its tab (creating the tab if needed) and makes it active.
- *
- * Switching away commits what is pending in the old tab exactly as it always did
- * (draft written at once, commit in the background). A tab that was clean when
- * left comes back instantly from its cached document; one that was not is reloaded
- * from GitHub and the draft banner offers the local text, because only GitHub plus
- * the draft store know what the truth is after a background commit.
- *
- * `reload: true` is for callers that know the cached copy is wrong (rename, move,
- * links rewritten) and for the active file, which is otherwise not re-opened.
- */
-async function openFile(path, { reload = false } = {}) {
-  // Clicking the file or tab that is already on screen must not throw away its
-  // undo history and cursor by re-fetching it.
-  if (!reload && state.currentPath === path && tabDocs.has(path)) {
-    editorHandle.easyMDE.codemirror.focus();
-    // Tabs restore / second click must still surface a pending local draft
-    void resurfaceDraftBanner(path);
-    if (isMobileShell()) setMobileSidebarOpen(false);
-    return;
-  }
-
-  const seq = ++openSeq;
-  const leaving = state.currentPath;
-  const switching = !!leaving && leaving !== path;
-  const leavingTab = switching ? tabDocs.get(leaving) : null;
-
-  if (switching && autosave) {
-    if (leavingTab) leavingTab.commitSeen = false;
-    await autosave.flushCurrentFile();
-    if (seq !== openSeq) return;
-  }
-
-  const cached = tabDocs.get(path);
-  // Unsaved tabs MUST use the cached doc (hybrid autosave). Refetching would
-  // replace in-memory edits with the remote blob and look like data loss.
-  const useCache = !reload && !!cached && !!cached.doc && !cached.stale;
-
-  els.btnSave.disabled = true;
-  els.btnExportPdf.disabled = true;
-  els.btnDelete.disabled = true;
-  els.currentFileLabel.textContent = path;
-  fileTree.setActive(path);
-  if (!useCache) setSaveStatus('Loading...', false);
-
-  try {
-    let remoteText;
-    let sha;
-    if (useCache) {
-      remoteText = cached.doc.getValue();
-      sha = cached.sha;
-    } else {
-      const fetched = await state.client.getFileB64(path);
-      if (seq !== openSeq) return; // a newer open won the race
-      sha = fetched.sha;
-      try {
-        remoteText = b64ToUtf8(fetched.b64);
-      } catch (_) {
-        // b64ToUtf8 THROWS on content that is not valid UTF-8, by design — a
-        // binary blob wearing a .md extension. Refuse it instead of opening
-        // replacement characters the user might then commit back to GitHub.
-        setSaveStatus(`Cannot open ${path}: the file is not valid UTF-8`, true);
-        restoreChrome();
-        return;
-      }
-    }
-
-    // The old tab stays editable while the new file loads. Whatever was typed in
-    // it in the meantime has to be committed too, and only now do we know whether
-    // GitHub already has everything.
-    if (switching) {
-      const leavingUnsaved = activeFileUnsaved || (autosave ? autosave.hasUnsavedDraft() : false);
-      if (autosave && autosave.hasUnsavedDraft()) {
-        if (leavingTab) leavingTab.commitSeen = false;
-        await autosave.flushCurrentFile();
-        if (seq !== openSeq) return;
-      }
-      if (leavingTab) leavingTab.unsaved = leavingUnsaved && !leavingTab.commitSeen;
-    }
-
-    hideDraftBanner();
-    setAutosaveStatus(null);
-    state.currentPath = path;
-    if (isMobileShell()) setMobileSidebarOpen(false);
-    state.currentSha = sha;
-    // A file is now open: hide the empty-state card and show the editor chrome.
-    // Both success paths (opening from cache, opening fresh) converge here.
-    renderEmptyState();
-    ensureAutosave();
-    try { await draftStoreReady; } catch (_) { /* degraded store */ }
-    const opened = await ensureAutosave().onOpen(path, remoteText, sha);
-    if (seq !== openSeq) return; // another open won the race
-
-    // Returning to a dirty cached tab: onOpen treated the in-memory text as
-    // "remote" and left state CLEAN. Re-arm dirty so Save / Commit still work.
-    if (useCache && cached && cached.unsaved && autosave && !opened.hasDraft) {
-      autosave.onChange(remoteText);
-    }
-
-    let doc;
-    if (useCache) {
-      doc = cached.doc;
-      cached.sha = sha;
-      // Keep cached.unsaved — hybrid model leaves dirty tabs dirty until Save/Commit.
-      cached.commitSeen = false;
-    } else {
-      doc = editorHandle.createDoc(opened.text);
-      // A reload keeps the reader where they were (CodeMirror clips the cursor
-      // if the text got shorter).
-      const previous = cached && cached.doc;
-      if (previous) {
-        doc.setCursor(previous.getCursor());
-        doc.scrollTop = previous.scrollTop;
-        doc.scrollLeft = previous.scrollLeft;
-      }
-      tabDocs.set(path, { doc, sha, unsaved: false, stale: false, commitSeen: false });
-    }
-    showDocInEditor(doc);
-
-    tabs.open(path);
-    tabs.activate(path);
-    persistTabs();
-    renderTabs();
-
-    els.btnSave.disabled = false;
-    const kind = kindFromPath(path);
-    els.btnExportPdf.disabled = !(kind.kind === 'markdown' || kind.kind === 'html');
-    els.btnDelete.disabled = false;
-    updateLangBadge(kind);
-    if (editorHandle && typeof editorHandle.setLanguage === 'function') {
-      editorHandle.setLanguage(kind.mode);
-    }
-    if (editorHandle && typeof editorHandle.setToolbarForKind === 'function') {
-      editorHandle.setToolbarForKind(kind);
-    }
-    // Do NOT call applyLayoutMode here — it would toggle away EasyMDE's toolbar
-    // Preview / side-by-side that the user (or e2e) turned on. showDoc already
-    // re-renders the active preview pane for the new document.
-    if (editorHandle && typeof editorHandle.renderActivePreview === 'function') {
-      editorHandle.renderActivePreview();
-    }
-    if (els.docOutline && !els.docOutline.classList.contains('hidden')) {
-      renderDocOutline();
-    }
-    if (els.minimapWrap && !els.minimapWrap.classList.contains('hidden')) {
-      ensureMinimap();
-    }
-    setSaveStatus('Ready', false);
-
-    if (opened.hasDraft) {
-      // No automatic merge — the user picks which version is the real one.
-      pendingDraft = opened.draftText;
-      showDraftBanner(
-        `You have unsaved local changes from ${formatAge(Date.now() - opened.draftSavedAt)}.`,
-        'draft'
-      );
-    }
-  } catch (e) {
-    setSaveStatus('Error: ' + e.message, true);
-    restoreChrome();
-  }
-}
-
-/** Closes a tab. The active one hands over to its neighbour, or leaves an empty editor. */
-async function closeTab(path) {
-  if (!tabs.has(path)) return;
-  const wasActive = state.currentPath === path;
-  // Same promise as switching away: the text is on disk before the tab goes, and
-  // the commit continues in the background. Nothing is ever lost by closing.
-  if (wasActive && autosave) await autosave.flushCurrentFile();
-
-  const { next } = tabs.close(path);
-  tabDocs.delete(path);
-  persistTabs();
-  renderTabs();
-  if (!wasActive) return;
-
-  if (next) await openFile(next);
-  else closeCurrentFile({ flush: false });
-}
-
-/**
- * These files no longer exist (deleted here). Their tabs go too; when the active
- * one is among them the editor shows the neighbouring tab, or nothing.
- * No flush: committing to a path that was just deleted is pointless.
- */
-async function dropTabs(paths) {
-  const activeGone = state.currentPath !== null && paths.includes(state.currentPath);
-  for (const path of paths) {
-    tabs.close(path);
-    tabDocs.delete(path);
-  }
-  persistTabs();
-  renderTabs();
-  if (!activeGone) {
-    renderEmptyState();
-    return;
-  }
-  closeCurrentFile({ flush: false });
-  if (tabs.active) await openFile(tabs.active);
-  renderEmptyState();
-}
-
-/** A tab's cached document no longer matches GitHub; it is re-fetched next time it is shown. */
-function markStale(paths) {
-  for (const path of paths) {
-    const tab = tabDocs.get(path);
-    if (tab) tab.stale = true;
-  }
-}
-
-/** Re-keys a tab's cached state after its file was renamed or moved (it is stale by definition). */
-function moveTabDoc(oldPath, newPath) {
-  const tab = tabDocs.get(oldPath);
-  tabDocs.delete(oldPath);
-  if (tab) {
-    tab.stale = true;
-    tabDocs.set(newPath, tab);
-  } else {
-    tabDocs.delete(newPath);
-  }
-}
+// (tab session logic lives in js/tabs-session.js — shims above)
 
 async function onSaveFile() {
   // Explicit Save: commit right now, ignore the timers. Same escape hatch as
