@@ -16,7 +16,7 @@ import { b64ToUtf8, utf8ToB64 } from './github-client.js';
 
 /** "Finished the current word" — writing IDB per keystroke causes jank. */
 export const LOCAL_WRITE_DEBOUNCE_MS = 400;
-/** No keystrokes for this long means commit. Reset by every onChange. */
+/** No keystrokes for this long means finish the local draft. Reset by every onChange. */
 export const IDLE_MS = 10_000;
 /**
  * @deprecated kept for test compat — the hybrid model never auto-pushes on a max
@@ -28,17 +28,17 @@ export const MAX_MS = 5 * 60 * 1000;
 /**
  * The states. Transitions (pinned by test/autosave.test.js):
  *
- *   clean      --onChange-->            dirtyLocal   ● Unsaved
- *   dirtyLocal --400ms draft write-->   dirtyIdle    ○ Draft saved locally
- *   dirtyIdle  --onChange-->            dirtyLocal   (idle timer restarts)
- *   dirtyLocal --10s idle / local draft--> dirtyIdle  ○ Local only (not on GitHub)
- *   dirtyLocal --saveNow() / Commit----> pushing      ⟳ Saving to GitHub…
- *   dirtyIdle  --saveNow()-------------> pushing
- *   pushing    --putFile resolves-->    clean        ✓ Saved to GitHub
- *   pushing    --409 twice in a row-->   error        ⚠ reload or overwrite
- *   pushing    --any other error-->     dirtyLocal   ⚠ Save failed — use Save again
- *   error      --reload-->              clean        (fresh from GitHub)
- *   error      --overwrite-->           pushing      (push with the fresh sha)
+ *   clean      --onChange-->              dirtyLocal   ● Unsaved
+ *   dirtyLocal --400ms draft write-->     dirtyIdle    ○ Local only (not on GitHub)
+ *   dirtyIdle  --onChange-->              dirtyLocal   (idle timer restarts)
+ *   dirtyLocal --10s idle / local draft-->dirtyIdle    ○ Local only (not on GitHub)
+ *   dirtyLocal --saveNow() / Commit-->    pushing      ⟳ Saving to GitHub…
+ *   dirtyIdle  --saveNow()-->             pushing
+ *   pushing    --putFile resolves-->      clean        ✓ Saved to GitHub
+ *   pushing    --409 twice in a row-->    error        ⚠ reload or overwrite
+ *   pushing    --any other error-->       dirtyLocal   ⚠ Save failed — use Save again
+ *   error      --reload-->                clean        (fresh from GitHub)
+ *   error      --overwrite-->             pushing      (push with the fresh sha)
  */
 export const STATE = {
   CLEAN: 'clean',
@@ -61,6 +61,7 @@ export const STATUS = {
   error: (reason) => ({ key: 'error', text: `⚠ Save failed: ${reason}`, variant: 'err', fade: false }),
   conflict: (reason) => ({ key: 'conflict', text: `⚠ ${reason}`, variant: 'err', fade: false }),
 };
+
 export class Autosave {
   /**
    * @param {object} deps
@@ -80,12 +81,11 @@ export class Autosave {
    *   the user picked "reload": put this text in the editor
    * @param {number} [deps.debounceMs]
    * @param {number} [deps.idleMs]
-   * @param {number} [deps.maxMs]
    */
   constructor({
     client, store, owner, repo, branch, getText,
     onStatus, onRemoteCommit, onConflict, onReloadRemote,
-    debounceMs = LOCAL_WRITE_DEBOUNCE_MS, idleMs = IDLE_MS, maxMs = MAX_MS,
+    debounceMs = LOCAL_WRITE_DEBOUNCE_MS, idleMs = IDLE_MS,
   }) {
     this.client = client;
     this.store = store;
@@ -99,7 +99,6 @@ export class Autosave {
     this.onReloadRemote = onReloadRemote || (() => {});
     this.debounceMs = debounceMs;
     this.idleMs = idleMs;
-    this.maxMs = maxMs;
 
     this.state = STATE.CLEAN;
     this.path = null;
@@ -109,7 +108,6 @@ export class Autosave {
     this._text = '';
     this._draftTimer = null;
     this._idleTimer = null;
-    this._maxTimer = null;
     this._pending = null;              // the push in flight for the CURRENT file
     this._backgroundErrors = new Map(); // path -> reason, surfaced on reopen
   }
@@ -123,7 +121,6 @@ export class Autosave {
   _clearTimers() {
     this._cancel(this._draftTimer); this._draftTimer = null;
     this._cancel(this._idleTimer); this._idleTimer = null;
-    this._cancel(this._maxTimer); this._maxTimer = null;
   }
 
   _draftRef(path) {
@@ -186,7 +183,7 @@ export class Autosave {
   }
 
   /** "Keep local": the draft becomes the edited text and is committed on the
-   *  next window, on top of the sha we just loaded. */
+   *  next Save/Commit, on top of the sha we just loaded. */
   resumeDraft(path, text) {
     if (this.destroyed || this.path !== path) return;
     this._text = text;
@@ -200,13 +197,14 @@ export class Autosave {
     if (this.path !== path) return;
     // The timers MUST go too. resumeDraft()/onChange() armed them for the text
     // the user just threw away, and an idle timer still ticking here would
-    // commit the discarded draft a few seconds later — the exact opposite of
+    // re-write the discarded draft a few seconds later — the opposite of
     // what "Discard" means.
     this._clearTimers();
     this._text = this.getText();
     this.state = STATE.CLEAN;
     this._setStatus(null);
   }
+
   // ===== typing =====
   /**
    * Called from the editor's change handler on EVERY keystroke. Deliberately
@@ -257,7 +255,7 @@ export class Autosave {
   async _onIdleLocal() {
     if (this.destroyed || !this.path) return;
     if (this.state === STATE.PUSHING || this.state === STATE.CLEAN) return;
-    // Ensure draft is on disk; paint "local only" status.
+    // Ensure draft is on disk; _writeDraft paints the "local only" status.
     this._cancel(this._draftTimer);
     this._draftTimer = null;
     await this._writeDraft();
@@ -278,13 +276,14 @@ export class Autosave {
     });
     if (this.destroyed || this.path !== path) return written;
     // The debounced write IS the "local layer is done" boundary: before it the
-    // label says Unsaved, after it "Draft saved locally" — still not on GitHub.
+    // label says Unsaved, after it "Local only" — still not on GitHub.
     if (this.state === STATE.DIRTY_LOCAL) {
       this.state = STATE.DIRTY_IDLE;
       this._setStatus(STATUS.drafted);
     }
     return written;
   }
+
   // ===== committing to GitHub =====
   /**
    * Commits the current file. `reason` is only for readability and for telling
@@ -354,11 +353,11 @@ export class Autosave {
   /**
    * ONE silent retry on the FIRST sha conflict.
    *
-   * With a 5-minute max timer a second tab editing the same file hits 409
-   * constantly, and almost every one of those is just "the other tab committed
-   * first" — a race we can settle ourselves by re-reading the sha and putting
-   * again. Only a SECOND 409 in a row means both tabs keep committing on top of
-   * each other, and that is the user's call, not ours.
+   * A second tab editing the same file (or any out-of-band push) hits 409, and
+   * almost every one of those is just "the other tab committed first" — a race
+   * we can settle ourselves by re-reading the sha and putting again. Only a
+   * SECOND 409 in a row means both tabs keep committing on top of each other,
+   * and that is the user's call, not ours.
    */
   async _putWithRetry(task) {
     try {
@@ -410,8 +409,6 @@ export class Autosave {
     this._armIdle();
   }
 
-  /** The Save button: immediate commit, both timers cancelled. They stay
-   *  cancelled afterwards — the next keystroke arms fresh ones. */
   /**
    * Cancel the 400ms debounce and write the draft now (fire-and-forget).
    * Used on pagehide so a reload milliseconds after the last keystroke still
@@ -430,20 +427,15 @@ export class Autosave {
     this._writeDraft();
   }
 
+  /** The Save button: immediate commit. Timers are cancelled and stay cancelled
+   *  until the next keystroke arms fresh ones. */
   async saveNow() {
     if (this.destroyed || !this.path) return null;
     if (this.state === STATE.PUSHING) return this._pending;
     if (!this.hasUnsavedDraft() && this.state !== STATE.ERROR) return null;
     return this._push('manual');
   }
-  /**
-   * Called when the editor is about to show a different file (or none).
-   *
-   * Writes the draft and kicks the commit, and resolves as soon as the draft is
-   * on disk — the commit continues in the background on purpose. Switching files
-   * must feel instant, and the failure of a background commit is stored per-path
-   * so it surfaces on THAT file, never on the one the user just opened.
-   */
+
   /**
    * Leaving a file: persist the local draft only (no GitHub push).
    * Remote is Save on this file or Commit for the whole working tree.
@@ -512,8 +504,6 @@ export class Autosave {
     return this._push('overwrite');
   }
 
-  /** Clears every timer and stops accepting input. Idempotent, never throws —
-   *  teardown code should never be the thing that breaks. */
   /**
    * Lets go of the current file WITHOUT stopping the instance (closing a tab,
    * deleting the open file). Timers are cancelled and typing is ignored from here
@@ -533,6 +523,8 @@ export class Autosave {
     this._setStatus(null);
   }
 
+  /** Clears every timer and stops accepting input. Idempotent, never throws —
+   *  teardown code should never be the thing that breaks. */
   destroy() {
     this._clearTimers();
     this.destroyed = true;
