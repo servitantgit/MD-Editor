@@ -36,12 +36,40 @@ export function createFileOps(deps) {
   async function onMoveFile(oldPath, targetFolder) {
     deps.setSaveStatus(`Moving ${oldPath}...`, false);
     try {
+      const wasCurrent = deps.getState().currentPath === oldPath;
+
+      async function afterPhysicalMove({ newPath }) {
+        // Tabs + tree must update as soon as put+delete land — not after
+        // updateReferencesEverywhere finishes (that can be hundreds of GETs).
+        deps.getTabs().rename(oldPath, newPath);
+        deps.moveTabDoc(oldPath, newPath);
+        if (wasCurrent) {
+          deps.getState().currentPath = newPath;
+          if (els.currentFileLabel) els.currentFileLabel.textContent = newPath;
+        }
+        deps.persistTabs();
+        deps.renderTabs();
+        deps.getImageResolver().invalidate(oldPath);
+        await deps.loadTree({
+          rewritePath: { from: oldPath, to: newPath },
+          expandFolder: dirnameOf(newPath),
+        });
+        if (deps.getState().currentPath && (wasCurrent || deps.getState().currentPath === newPath)) {
+          try {
+            await deps.openFile(deps.getState().currentPath, { reload: true });
+          } catch (e) {
+            console.warn('openFile after move', e);
+          }
+        }
+        deps.setSaveStatus(`Moved: ${oldPath} → ${newPath} (updating links…)`, false);
+      }
+
       let result;
       try {
-        result = await moveFile(deps.getState().client, deps.getState().allFiles, oldPath, targetFolder);
+        result = await moveFile(deps.getState().client, deps.getState().allFiles, oldPath, targetFolder, {
+          onMoved: afterPhysicalMove,
+        });
       } catch (e) {
-        // A file with the same name is already in the target folder — replacing it is
-        // destructive, so ask first instead of failing with a raw GitHub API error.
         if (e.code !== 'target-exists') throw e;
         const confirmed = confirm(
           `"${e.targetPath}" already exists.\n\nReplace it with "${oldPath}"? This cannot be undone.`
@@ -50,7 +78,10 @@ export function createFileOps(deps) {
           deps.setSaveStatus('Move cancelled', false);
           return;
         }
-        result = await moveFile(deps.getState().client, deps.getState().allFiles, oldPath, targetFolder, { overwrite: true });
+        result = await moveFile(deps.getState().client, deps.getState().allFiles, oldPath, targetFolder, {
+          overwrite: true,
+          onMoved: afterPhysicalMove,
+        });
       }
 
       const { newPath, updatedFiles, skipped, overwritten } = result;
@@ -59,29 +90,11 @@ export function createFileOps(deps) {
         return;
       }
 
-      const wasCurrent = deps.getState().currentPath === oldPath;
-      deps.getTabs().rename(oldPath, newPath);
-      deps.moveTabDoc(oldPath, newPath);
-      deps.markStale(updatedFiles); // links were rewritten in these files
-
-      // Same path as create/delete: loadTree drives setFiles. rewritePath forces
-      // old→new even when GitHub's recursive tree still lags behind the Contents write.
-      if (wasCurrent) {
-        deps.getState().currentPath = newPath;
-        if (els.currentFileLabel) els.currentFileLabel.textContent = newPath;
+      // Link rewrites finished — mark those tabs stale so next open gets fresh text
+      if (updatedFiles && updatedFiles.length) {
+        deps.markStale(updatedFiles);
       }
-      deps.persistTabs();
-      deps.renderTabs();
-      deps.getImageResolver().invalidate(oldPath);
 
-      await deps.loadTree({
-        rewritePath: { from: oldPath, to: newPath },
-        expandFolder: dirnameOf(newPath),
-      });
-
-      if (deps.getState().currentPath && (wasCurrent || updatedFiles.includes(deps.getState().currentPath))) {
-        await deps.openFile(deps.getState().currentPath, { reload: true });
-      }
       deps.setSaveStatus(
         `Moved: ${oldPath} → ${newPath}` +
           (overwritten ? ' (replaced the existing file)' : '') +
@@ -94,8 +107,6 @@ export function createFileOps(deps) {
   }
 
 
-  // Deleting the active file. The GitHub API requires the sha of that same blob, so
-  // we take deps.getState().currentSha (it always matches the last known version of the file).
   async function onDeleteFile() {
     const path = deps.getState().currentPath;
     if (!path) return;
@@ -304,30 +315,42 @@ export function createFileOps(deps) {
 
     try {
       deps.setSaveStatus(`Renaming ${path}...`, false);
-      const { newPath, updatedFiles, skipped } = await renameFile(deps.getState().client, deps.getState().allFiles, path, trimmed);
+      const wasCurrent = deps.getState().currentPath === path;
+
+      async function afterPhysicalMove({ newPath }) {
+        deps.getTabs().rename(path, newPath);
+        deps.moveTabDoc(path, newPath);
+        if (wasCurrent) {
+          deps.getState().currentPath = newPath;
+          if (els.currentFileLabel) els.currentFileLabel.textContent = newPath;
+        }
+        deps.persistTabs();
+        deps.renderTabs();
+        deps.getImageResolver().invalidate(path);
+        await deps.loadTree({
+          rewritePath: { from: path, to: newPath },
+          expandFolder: dirnameOf(newPath),
+        });
+        if (deps.getState().currentPath && (wasCurrent || deps.getState().currentPath === newPath)) {
+          try {
+            await deps.openFile(deps.getState().currentPath, { reload: true });
+          } catch (e) {
+            console.warn('openFile after rename', e);
+          }
+        }
+        deps.setSaveStatus(`Renamed: ${path} → ${newPath} (updating links…)`, false);
+      }
+
+      const result = await renameFile(deps.getState().client, deps.getState().allFiles, path, trimmed, {
+        onMoved: afterPhysicalMove,
+      });
+      const { newPath, updatedFiles, skipped } = result;
       if (skipped) return;
 
-      const wasCurrent = deps.getState().currentPath === path;
-      deps.getTabs().rename(path, newPath);
-      deps.moveTabDoc(path, newPath);
-      deps.markStale(updatedFiles);
-
-      if (wasCurrent) {
-        deps.getState().currentPath = newPath;
-        if (els.currentFileLabel) els.currentFileLabel.textContent = newPath;
+      if (updatedFiles && updatedFiles.length) {
+        deps.markStale(updatedFiles);
       }
-      deps.persistTabs();
-      deps.renderTabs();
-      deps.getImageResolver().invalidate(path);
 
-      await deps.loadTree({
-        rewritePath: { from: path, to: newPath },
-        expandFolder: dirnameOf(newPath),
-      });
-
-      if (deps.getState().currentPath && (wasCurrent || updatedFiles.includes(deps.getState().currentPath))) {
-        await deps.openFile(deps.getState().currentPath, { reload: true });
-      }
       deps.setSaveStatus(
         `Renamed: ${path} → ${newPath}` +
           (updatedFiles.length ? ` (updated links in ${updatedFiles.length} file(s))` : ''),
@@ -339,7 +362,6 @@ export function createFileOps(deps) {
   }
 
 
-  /** Deletes a file from the tree context menu (works for any file, not just the open one). */
   async function onDeleteFileAt(path) {
     const confirmed = confirm(
       `Are you sure you want to delete this file?\n\n${path}\n\nThe file will be removed from the repository; this cannot be undone.`

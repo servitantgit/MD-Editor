@@ -16,7 +16,8 @@ import { rewriteOwnRelativeLinks, updateReferencesInFile } from './reference-rew
  * @param {{path:string, sha:string}[]} allFiles  current snapshot of the file tree
  * @param {string} oldPath
  * @param {string} targetFolder
- * @param {{overwrite?: boolean}} [options] overwrite = true allows replacing a file
+ * @param {{overwrite?: boolean, onMoved?: (info: {oldPath: string, newPath: string}) => void|Promise<void>}} [options]
+ *   overwrite = true allows replacing a file
  *   that already exists at the destination (GitHub requires its `sha` for updates,
  *   and answers 422 "sha" wasn't supplied" without it).
  * @returns {Promise<{newPath: string, updatedFiles: string[], skipped: boolean, overwritten: boolean}>}
@@ -42,7 +43,8 @@ function validateName(name) {
  * @param {{path:string, sha:string}[]} allFiles  current snapshot of the file tree
  * @param {string} oldPath
  * @param {string} newPath
- * @param {{overwrite?: boolean}} [options] overwrite = true allows replacing a file
+ * @param {{overwrite?: boolean, onMoved?: (info: {oldPath: string, newPath: string}) => void|Promise<void>}} [options]
+ *   overwrite = true allows replacing a file
  *   that already exists at the destination (GitHub requires its `sha` for updates,
  *   and answers 422 "sha" wasn't supplied" without it).
  * @returns {Promise<{newPath: string, updatedFiles: string[], skipped: boolean, overwritten: boolean}>}
@@ -81,6 +83,17 @@ export async function moveToPath(client, allFiles, oldPath, newPath, options = {
     await client.putFile(newPath, finalB64, `Move ${oldPath} to ${newPath}`, fresh.sha);
   }
   await client.deleteFile(oldPath, sha, `Remove ${oldPath} (moved to ${newPath})`);
+
+  // Let the UI refresh immediately. Link rewriting walks every .md in the repo
+  // (one GET+maybe PUT each) and can take minutes on large knowledge bases —
+  // blocking the tree update on that made moves look like a no-op until reload.
+  if (typeof options.onMoved === 'function') {
+    try {
+      await options.onMoved({ newPath, oldPath });
+    } catch (e) {
+      console.warn('onMoved callback failed', e);
+    }
+  }
 
   const updatedFiles = await updateReferencesEverywhere(client, allFiles, oldPath, newPath);
 
