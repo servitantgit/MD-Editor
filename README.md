@@ -30,8 +30,8 @@ export.
 </p>
 
 
-<p align="center">
-  <img width="1920" height="1199" alt="landpage" src="https://github.com/user-attachments/assets/251bab67-a94c-416a-a20c-05f9596088a7" /><br>
+<p align="center">  
+  <img width="1920" height="1200" alt="hero" src="https://github.com/user-attachments/assets/96478f61-4aea-4923-ae18-10bd4d7ba48c" /><br>
   <sub>File tree, tabs, live preview and toolbar side by side while editing a note.</sub>
 </p>
 
