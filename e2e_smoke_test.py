@@ -615,6 +615,9 @@ with sync_playwright() as p:
     print(f"✓ toolbar create file in selected folder works (PUT to {create_write[0]['url']})")
 
     # --- B. Create folder in selected folder (via toolbar) ---
+    # Pre-seed the mock tree so the post-PUT tree reload shows the new folder
+    # row (the mock tree is static and otherwise wouldn't include it).
+    EXTRA_TREE.append({"path": "Notes/new-folder-in-notes/.gitkeep", "type": "blob", "sha": "sha-gitkeep"})
     CONTENT_WRITES.clear()
     page.click("#btn-add-menu")
     page.click("#btn-new-folder")
@@ -624,6 +627,12 @@ with sync_playwright() as p:
     assert len(folder_write) == 1, f"expected one PUT for new folder in Notes, got {CONTENT_WRITES}"
     assert "Notes/new-folder-in-notes/.gitkeep" in folder_write[0]["url"], f"folder not created in Notes: {folder_write[0]['url']}"
     print(f"✓ toolbar create folder in selected folder works (PUT to {folder_write[0]['url']})")
+
+    # The new folder row is visible in the tree, and no .gitkeep row appears.
+    page.wait_for_selector(".file-item.folder:has-text('new-folder-in-notes')", timeout=5000)
+    assert page.locator(".file-item:has-text('.gitkeep')").count() == 0, \
+        f".gitkeep row leaked into the tree"
+    print("✓ new folder row visible in tree, .gitkeep hidden from UI")
 
     # --- C. Delete: the confirm decides. Dismissed -> nothing is sent; accepted -> one DELETE with the sha ---
     def deletes():

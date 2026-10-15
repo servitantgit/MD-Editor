@@ -146,3 +146,101 @@ test('collapsedFolders keeps entries for folders that still exist', () => {
     restore();
   }
 });
+
+test('.gitkeep-only folder renders the folder row, hides .gitkeep, shows (empty)', () => {
+  const { container, tree, restore } = mountTree([{ path: 'Docs/.gitkeep' }]);
+  try {
+    // Folder row exists at root level.
+    const docsRow = container.querySelector('.file-item.folder[data-path="Docs"]');
+    assert.ok(docsRow, 'Docs folder row should render');
+
+    // Expand Docs.
+    click(docsRow.querySelector('.folder-toggle'));
+    const toggle = container.querySelector('.file-item.folder[data-path="Docs"] .folder-toggle');
+    assert.equal(toggle.textContent, '▾');
+
+    // No .gitkeep row in the tree.
+    assert.equal(
+      container.querySelector('.file-item[data-path="Docs/.gitkeep"]'),
+      null,
+      '.gitkeep must not render as a file row'
+    );
+
+    // (empty) row is present at child indent level.
+    const emptyRow = container.querySelector('.tree-empty');
+    assert.ok(emptyRow, '(empty) row should appear for a gitkeep-only folder');
+    assert.equal(emptyRow.textContent, '(empty)');
+  } finally {
+    restore();
+  }
+});
+
+test('.gitkeep alongside a real file: real file shows, no (empty)', () => {
+  const { container, tree, restore } = mountTree([
+    { path: 'Docs/.gitkeep' },
+    { path: 'Docs/a.md' },
+  ]);
+  try {
+    const docsRow = container.querySelector('.file-item.folder[data-path="Docs"]');
+    assert.ok(docsRow);
+
+    click(docsRow.querySelector('.folder-toggle'));
+
+    assert.ok(container.querySelector('.file-item.folder[data-path="Docs"]'), 'Docs row still present after re-render');
+    assert.ok(container.querySelector('.file-item[data-path="Docs/a.md"]'), 'a.md should render');
+    assert.equal(
+      container.querySelector('.file-item[data-path="Docs/.gitkeep"]'),
+      null,
+      '.gitkeep must not render'
+    );
+    assert.equal(
+      container.querySelector('.tree-empty'),
+      null,
+      'no (empty) row when a real file exists'
+    );
+  } finally {
+    restore();
+  }
+});
+
+test('.gitkeep with a subfolder: subfolder row shows, no (empty)', () => {
+  const { container, tree, restore } = mountTree([
+    { path: 'Docs/.gitkeep' },
+    { path: 'Docs/Sub/b.md' },
+  ]);
+  try {
+    const docsRow = container.querySelector('.file-item.folder[data-path="Docs"]');
+    assert.ok(docsRow);
+
+    click(docsRow.querySelector('.folder-toggle'));
+
+    assert.ok(container.querySelector('.file-item.folder[data-path="Docs"]'), 'Docs row still present after re-render');
+    assert.ok(container.querySelector('.file-item.folder[data-path="Docs/Sub"]'), 'Docs/Sub folder row should render');
+    assert.equal(
+      container.querySelector('.file-item[data-path="Docs/.gitkeep"]'),
+      null,
+      '.gitkeep must not render'
+    );
+    assert.equal(
+      container.querySelector('.tree-empty'),
+      null,
+      'no (empty) row when a subfolder exists'
+    );
+  } finally {
+    restore();
+  }
+});
+
+test('setActiveFolder survives setFiles when folder has only .gitkeep', () => {
+  const { container, tree, restore } = mountTree([{ path: 'Docs/.gitkeep' }]);
+  try {
+    tree.setActiveFolder('Docs');
+    assert.equal(tree.getActiveFolder(), 'Docs');
+
+    // Reloading with the same gitkeep-only file must NOT reset activeFolder.
+    tree.setFiles([{ path: 'Docs/.gitkeep' }]);
+    assert.equal(tree.getActiveFolder(), 'Docs', 'gitkeep-only folder must remain the active target');
+  } finally {
+    restore();
+  }
+});

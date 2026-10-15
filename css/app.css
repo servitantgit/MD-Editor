@@ -308,6 +308,7 @@ button.secondary:hover { background: #21262d; }
 }
 .tree-loading, .tree-error { padding: 12px; color: var(--muted); }
 .tree-error { color: #f85149; }
+.tree-empty { padding: 5px 12px; color: var(--muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 .file-item {
   padding: 5px 12px;

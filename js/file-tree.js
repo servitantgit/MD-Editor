@@ -217,7 +217,9 @@ export class FileTree {
       if (!collapsed) this._renderLevel(folder, container, depth + 1);
     });
 
+    let visibleFileCount = 0;
     fileNames.forEach((name) => {
+      if (basenameOf(name) === '.gitkeep') return;
       const file = node.children[name];
       const isMd = extOf(file.path) === 'md';
       const isImg = isImagePath(file.path);
@@ -264,7 +266,20 @@ export class FileTree {
       if (this.handlers.getActivePath() === file.path) el.classList.add('active');
 
       container.appendChild(el);
+      visibleFileCount++;
     });
+
+    // An expanded folder with no visible children (no subfolders, and no files
+    // other than .gitkeep) shows a muted "(empty)" row. The folder row itself
+    // stays the drop target, so dragging into an empty folder still works.
+    // Root (depth 0) never gets this row — it is not a folder in the UI sense.
+    if (depth > 0 && folderNames.length === 0 && visibleFileCount === 0) {
+      const emptyRow = document.createElement('div');
+      emptyRow.className = 'tree-empty';
+      emptyRow.textContent = '(empty)';
+      emptyRow.style.paddingLeft = `${12 + (depth + 1) * 14}px`;
+      container.appendChild(emptyRow);
+    }
   }
 
   _wireDropTarget(el, folderPath) {
