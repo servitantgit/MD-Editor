@@ -8,13 +8,20 @@ import { guessMime } from './paths.js';
  * @param {HTMLElement} dropZoneEl
  * @param {HTMLElement} overlayEl
  * @param {{
- *   client: import('./github-client.js').GitHubClient,
+ *   getClient: () => import('./github-client.js').GitHubClient,
  *   getAllFiles: () => {path:string}[],
  *   onStatus: (msg: string, isError: boolean) => void,
  *   onUploaded: () => void,
  * }} deps
+ *
+ * `getClient` is a getter, and the binding is idempotent, for the same reason
+ * as in upload.js: showApp() re-runs on an in-app repo switch, and a second set
+ * of listeners on this stable node would upload every file of the dropped
+ * folder into BOTH the old and the new repository.
  */
 export function setupFolderDropzone(dropZoneEl, overlayEl, deps) {
+  if (dropZoneEl.dataset.folderDropzoneBound) return;
+  dropZoneEl.dataset.folderDropzoneBound = '1';
   let dragCounter = 0;
 
   const hasItems = (e) => e.dataTransfer && e.dataTransfer.items && e.dataTransfer.items.length > 0;
@@ -73,7 +80,7 @@ export function setupFolderDropzone(dropZoneEl, overlayEl, deps) {
       for (const { path, file } of allFiles) {
         try {
           const b64 = await fileToBase64(file);
-          await deps.client.putFile(path, b64, `Add ${path}`);
+          await deps.getClient().putFile(path, b64, `Add ${path}`);
           uploaded++;
           deps.onStatus(`Uploaded ${uploaded}/${allFiles.length}...`, false);
         } catch (err) {

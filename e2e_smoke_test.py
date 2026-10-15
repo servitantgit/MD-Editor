@@ -36,6 +36,28 @@ FETCH_LOG = []
 EXTRA_TREE = []
 SECOND_MD = "# Second note\n\nSECOND_NOTE_BODY\n"
 
+# The repo-switch scenario opens a SECOND repository through the in-app switcher.
+# Its tree/info are served from these so both repos are addressable at once and
+# the switch is observable in the request URLs (see REPO_SWITCH_* logs).
+SECOND_REPO = "second-owner/second-repo"
+SECOND_TREE = [
+    {"path": "Asset/pic.jpg", "type": "blob", "sha": "sha-pic-2"},
+    {"path": "Notes/Test note.md", "type": "blob", "sha": "sha-note-2"},
+]
+
+# Full URLs of every contents-API PUT, recorded from the moment the scenario
+# starts, so "exactly ONE PUT and it went to repo X" is checkable.
+PUT_URLS = []
+
+# Repositories the switcher lists. Includes the one already open, because the
+# real UI marks it "· current" and clicking it is a no-op by design.
+USER_REPOS = [
+    {"full_name": "test-owner/test-repo", "name": "test-repo",
+     "owner": {"login": "test-owner"}, "private": False, "description": "first", "pushed_at": ""},
+    {"full_name": SECOND_REPO, "name": "second-repo",
+     "owner": {"login": "second-owner"}, "private": False, "description": "second", "pushed_at": ""},
+]
+
 CDN_MOCKS = {
     "https://cdn.jsdelivr.net/npm/easymde/dist/easymde.min.css": BASE / "node_modules/easymde/dist/easymde.min.css",
     "https://cdn.jsdelivr.net/npm/easymde/dist/easymde.min.js": BASE / "node_modules/easymde/dist/easymde.min.js",
@@ -133,6 +155,10 @@ def handle_github_api(route, request):
             "text": text,
             "status": status,
         })
+        if request.method == "PUT":
+            # Lets the repo-switch scenario prove WHICH repository a write landed
+            # in — that is the whole regression (see the scenario near the end).
+            PUT_URLS.append(url)
         if status == 409:
             route.fulfill(status=409, content_type="application/json", body=json.dumps(
                 {"message": "sha does not match (mock)"}))
@@ -145,11 +171,17 @@ def handle_github_api(route, request):
         return
     if "/contents/" in url:
         FETCH_LOG.append(url)
+    # The in-app repo switcher lists the user's repositories.
+    if "/user/repos" in url:
+        route.fulfill(status=200, content_type="application/json", body=json.dumps(USER_REPOS))
+        return
     if re.search(r"/repos/[^/]+/[^/]+$", url) and "/git/" not in url and "/contents/" not in url:
         route.fulfill(status=200, content_type="application/json", body=json.dumps({"default_branch": "main"}))
     elif "/git/trees/" in url:
-        route.fulfill(status=200, content_type="application/json",
-                      body=json.dumps({"tree": FAKE_TREE["tree"] + EXTRA_TREE}))
+        # Repository-aware: the recursive tree must describe the repo actually
+        # being opened, otherwise the switch is invisible to the app.
+        tree = SECOND_TREE if SECOND_REPO in url else FAKE_TREE["tree"] + EXTRA_TREE
+        route.fulfill(status=200, content_type="application/json", body=json.dumps({"tree": tree}))
     elif "/contents/Notes/Test%20note.md" in url:
         b64 = base64.b64encode(MD_CONTENT.encode("utf-8")).decode()
         route.fulfill(status=200, content_type="application/json", body=json.dumps({"content": b64, "sha": "sha-note"}))
@@ -1193,6 +1225,163 @@ with sync_playwright() as p:
     assert pos["line"] <= 4, f"Space near image jumped caret far down: {pos}"
     assert "X" in pos["text"], f"typed character missing after Space near image: {pos}"
     print(f"✓ Space near inline image keeps caret local (line={pos['line']}, ch={pos['ch']})")
+
+    # --- H. Switching repository IN-APP must not leak the previous session's
+    # listeners. showApp() runs again on a switch with NO page reload, and the
+    # upload/mobile listeners used to be re-attached every time while keeping the
+    # PREVIOUS session's GitHubClient: a toolbar upload committed the image into
+    # the repo the user had just LEFT (and still said "Image added ✓"), a drop
+    # wrote it into BOTH, and the phone files/format buttons toggled twice per
+    # click so they did nothing at all.
+    #
+    # Last scenario on purpose: it changes the open repository and the viewport,
+    # which earlier checks would have to compensate for.
+    print("\n--- H. in-app repo switch: one upload, one repo, working phone buttons ---")
+
+    # Back to the first repo and a known-open file before switching.
+    page.click(".file-item:not(.folder):has-text('Test note.md')")
+    page.wait_for_function("document.getElementById('btn-save').disabled === false", timeout=8000)
+    assert page.inner_text("#repo-label") == "test-owner/test-repo", "not back on the first repo"
+
+    # Switch to the second repository through the real switcher UI.
+    page.click("#btn-switch-repo")
+    page.wait_for_selector("#repo-switch-overlay:not(.hidden)", timeout=8000)
+    # The list is populated asynchronously from /user/repos.
+    page.wait_for_selector(".repo-list-item", timeout=8000)
+    listed = page.eval_on_selector_all(".repo-list-item", "els => els.map(e => e.textContent.trim())")
+    assert any(SECOND_REPO in t for t in listed), f"switcher did not list the second repo: {listed}"
+    page.click(f".repo-list-item:has-text('{SECOND_REPO}')")
+    # The app is rebuilt without a reload: the label changes, the URL does not.
+    page.wait_for_function(
+        "() => document.getElementById('repo-label').textContent.includes('second-owner')",
+        timeout=15000,
+    )
+    page.wait_for_selector(".file-item", timeout=8000)
+    assert "/second-owner" not in page.url, "switching repo must not navigate"
+    print(f"✓ switched to {SECOND_REPO} without a reload")
+
+    # Open a file there: uploads are refused with "Open an .md file first" unless
+    # one is open, and the inserted link is relative to the current path.
+    page.click(".file-item.folder:has-text('Notes')")
+    page.click(".file-item:not(.folder):has-text('Test note.md')")
+    page.wait_for_function("document.getElementById('btn-save').disabled === false", timeout=8000)
+
+    # H1 — toolbar upload: exactly ONE PUT, into the NEW repository.
+    # Without the fix this wrote into test-owner/test-repo while reporting success.
+    PUT_URLS.clear()
+    page.set_input_files("#image-file-input", {
+        "name": "switched.png",
+        "mimeType": "image/png",
+        "buffer": base64.b64decode(TINY_PNG_B64),
+    })
+    wait_until(lambda: len(PUT_URLS) >= 1, seconds=15, what="the upload to reach the contents API")
+    page.wait_for_timeout(1500)  # a leaked second listener would land here too
+    assert len(PUT_URLS) == 1, (
+        f"expected exactly ONE PUT for one image upload, got {len(PUT_URLS)}: {PUT_URLS}"
+    )
+    assert SECOND_REPO in PUT_URLS[0], (
+        f"the image was committed to the WRONG repository (the previous session's): {PUT_URLS[0]}"
+    )
+    print(f"✓ toolbar upload after a switch: exactly one PUT, into {SECOND_REPO}")
+
+    # H2 — drag&drop upload: also exactly ONE PUT, and the link inserted ONCE.
+    # Without the fix a drop hit every listener and wrote to BOTH repositories.
+    PUT_URLS.clear()
+    page.evaluate("""(b64) => {
+        const bin = atob(b64);
+        const bytes = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+        const file = new File([bytes], 'dropped.png', {type: 'image/png'});
+        const dt = new DataTransfer();
+        dt.items.add(file);
+        document.getElementById('editor-container').dispatchEvent(
+            new DragEvent('drop', {dataTransfer: dt, bubbles: true, cancelable: true})
+        );
+    }""", TINY_PNG_B64)
+    wait_until(lambda: len(PUT_URLS) >= 1, seconds=15, what="the drop to reach the contents API")
+    page.wait_for_timeout(1500)
+    assert len(PUT_URLS) == 1, (
+        f"expected exactly ONE PUT for one dropped image, got {len(PUT_URLS)}: {PUT_URLS}"
+    )
+    assert SECOND_REPO in PUT_URLS[0], (
+        f"the dropped image was committed to the WRONG repository: {PUT_URLS[0]}"
+    )
+    links = page.evaluate(
+        "() => (document.querySelector('.CodeMirror').CodeMirror.getValue()"
+        ".match(/!\\[dropped\\.png\\]/g) || []).length"
+    )
+    assert links == 1, f"the dropped image link was inserted {links} times, expected once"
+    print(f"✓ drop after a switch: exactly one PUT, one inserted link, into {SECOND_REPO}")
+
+    # H3 — phone viewport: the files button must OPEN then CLOSE on successive
+    # clicks. With two listeners one click toggled twice and cancelled itself out,
+    # so after a repo switch both phone buttons did nothing at all.
+    page.set_viewport_size({"width": 420, "height": 780})
+    page.wait_for_timeout(400)  # let the ≤768px media query apply
+    files_btn = page.locator("#btn-mobile-files")
+    assert files_btn.is_visible(), "the phone files button is not visible at 420px"
+    assert not page.evaluate("() => document.body.classList.contains('mobile-sidebar-open')"), \
+        "the files drawer should start closed"
+    files_btn.click()
+    page.wait_for_function(
+        "() => document.body.classList.contains('mobile-sidebar-open') === true",
+        timeout=5000,
+    )
+    print("✓ phone files button opens the drawer after a repo switch")
+    files_btn.click()
+    page.wait_for_function(
+        "() => document.body.classList.contains('mobile-sidebar-open') === false",
+        timeout=5000,
+    )
+    print("✓ phone files button closes the drawer on a second click")
+
+    # The formatting strip — the other button that was toggling twice.
+    fmt_btn = page.locator("#btn-mobile-fmt")
+    assert fmt_btn.is_visible(), "the phone formatting button is not visible at 420px"
+    fmt_btn.click()
+    page.wait_for_function(
+        "() => document.body.classList.contains('mobile-fmt-open') === true",
+        timeout=5000,
+    )
+    print("✓ phone formatting button opens the strip after a repo switch")
+    fmt_btn.click()
+    page.wait_for_function(
+        "() => document.body.classList.contains('mobile-fmt-open') === false",
+        timeout=5000,
+    )
+    print("✓ phone formatting button closes the strip on a second click")
+
+    # H4 — the outline scroll-spy must follow the NEW editor instance. It used to
+    # stay subscribed to the CodeMirror showApp() had just destroyed, so the
+    # highlight froze on the first heading however far the cursor moved.
+    page.set_viewport_size({"width": 1400, "height": 900})
+    page.wait_for_timeout(300)
+    page.evaluate("""() => {
+        const cm = document.querySelector('.CodeMirror').CodeMirror;
+        cm.setValue('# Alpha\\n\\ntext\\n\\n## Beta\\n\\ntext\\n\\n### Gamma\\n\\ntext\\n\\n## Delta\\n\\ntext\\n');
+        const btn = document.getElementById('btn-outline');
+        if (btn) btn.click();
+    }""")
+    page.wait_for_function(
+        "() => document.querySelectorAll('#doc-outline .outline-item').length >= 4",
+        timeout=8000,
+    )
+    spy = page.evaluate("""() => {
+        const cm = document.querySelector('.CodeMirror').CodeMirror;
+        const active = () => {
+            const a = document.querySelector('#doc-outline .outline-item.active');
+            return a ? a.textContent : null;
+        };
+        cm.setCursor({line: 10, ch: 0});   // "text" under "### Gamma" (line 8)
+        cm.operation(() => {});
+        const onGamma = active();
+        cm.setCursor({line: 12, ch: 0});   // "## Delta" itself (line 12)
+        const onDelta = active();
+        return {onGamma, onDelta};
+    }""")
+    assert spy["onGamma"] == "Gamma", f"outline scroll-spy did not follow the cursor: {spy}"
+    assert spy["onDelta"] == "Delta", f"outline scroll-spy did not follow the cursor: {spy}"
+    print("✓ outline scroll-spy follows the cursor on the rebuilt editor")
 
     assert not page_errors, f"unhandled page errors: {page_errors}"
     browser.close()

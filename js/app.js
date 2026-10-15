@@ -164,6 +164,12 @@ let searchSync = null;
 let backlinkIndex = createBacklinkIndex();
 let backlinksRefreshTimer = 0;
 let searchUI = null;
+// Kept so setupSearch() can close the PREVIOUS session's IndexedDB connection.
+// showApp() destroys searchSync/searchUI but SearchSync.destroy() only sets a
+// flag, so without this every in-app repo switch leaked one open
+// `md-editor-search` connection. Mirrors createAutosave closing the old DraftStore.
+/** @type {import('./search-store.js').SearchStore|null} */
+let searchStore = null;
 let draftStore = null;
 let autosave = null;
 // Set while the editor is being loaded programmatically. EasyMDE fires
@@ -282,6 +288,10 @@ const loginUI = createLoginUI({
 
   // Callbacks for the shell
   onSignedIn: (owner, repo, token, branch) => {
+    // A real sign-in is never the demo. startDemo() sets this and never clears
+    // it, so without the reset a demo → real-repo transition would keep the
+    // "demo / sandbox" banner and the History/Switch buttons startDemo disabled.
+    state.demo = false;
     state.client = new GitHubClient({ token, owner, repo });
     state.branch = branch;
     showApp(owner, repo);
@@ -669,8 +679,11 @@ function showApp(owner, repo) {
       } catch (_) { /* ignore */ }
     },
     onImagePaste: (file) => uploadImage(file, {
-      client: state.client,
-      imageResolver,
+      // Same getter shape uploadImage now expects. This path is safe by
+      // construction — createEditor() is rebuilt with a fresh closure on every
+      // showApp() — but it must match the deps uploadImage reads.
+      getClient: () => state.client,
+      getImageResolver: () => imageResolver,
       getCurrentPath: () => state.currentPath,
       getAllFiles: () => state.allFiles,
       insertText: insertMarkdownAtCursor,
@@ -714,8 +727,12 @@ function showApp(owner, repo) {
   requestAnimationFrame(() => editorHandle.refreshLayout());
 
   setupImageDropzone(els.editorContainer, els.dropOverlay, {
-    client: state.client,
-    imageResolver,
+    // Getters, not values: showApp() runs again on an in-app repo switch, and
+    // the drop listeners below are bound only ONCE (guarded in upload.js), so
+    // they must resolve the client/resolver at use time or they would keep
+    // committing into the repository the user had just left.
+    getClient: () => state.client,
+    getImageResolver: () => imageResolver,
     getCurrentPath: () => state.currentPath,
     getAllFiles: () => state.allFiles,
     insertText: insertMarkdownAtCursor,
@@ -724,8 +741,8 @@ function showApp(owner, repo) {
   });
 
   pickImageFiles(els.imageFileInput, {
-    client: state.client,
-    imageResolver,
+    getClient: () => state.client,
+    getImageResolver: () => imageResolver,
     getCurrentPath: () => state.currentPath,
     getAllFiles: () => state.allFiles,
     insertText: insertMarkdownAtCursor,
@@ -734,7 +751,7 @@ function showApp(owner, repo) {
   });
 
   setupFolderDropzone(els.folderDropzone, els.folderDropOverlay, {
-    client: state.client,
+    getClient: () => state.client,
     getAllFiles: () => state.allFiles,
     onStatus: setSaveStatus,
     onUploaded: () => loadTree(),
@@ -880,9 +897,14 @@ function setupSearch(owner, repo) {
     return;
   }
 
+  // Close the previous session's connection before opening a new one (same
+  // pattern as createAutosave → draftStore.close()). setupSearch runs once per
+  // showApp(), i.e. again on every in-app repo switch.
+  if (searchStore) searchStore.close();
   const store = new SearchStore({
     onDegrade: () => setSearchStatus(null, true),
   });
+  searchStore = store;
 
   backlinkIndex = createBacklinkIndex();
   searchSync = new SearchSync({
@@ -1362,7 +1384,28 @@ function setupFindBar() {
 
 
 let outlineRefreshTimer = 0;
-let outlineCursorBound = false;
+// The editor instance the outline scroll-spy is currently subscribed to — NOT a
+// "have I ever bound" flag. showApp() destroys and rebuilds the editor (createEditor
+// → easyMDE.toTextArea() → a new CodeMirror), and destroy() detaches only 'change',
+// never 'cursorActivity'. With a plain boolean the subscription stayed on the FIRST
+// CodeMirror and the outline highlight froze on the destroyed one after a repo switch.
+let outlineCursorBoundTo = null;
+
+/**
+ * Subscribes the outline scroll-spy to the CURRENT editor instance.
+ *
+ * Called from setupDocOutline() (which returns early on its own dataset guard,
+ * hence the separate call before that) and again from showApp(). Rebinding is
+ * keyed on the handle identity, so a fresh editor gets a fresh subscription and
+ * an unchanged one is not subscribed twice.
+ */
+function bindOutlineScrollSpy() {
+  if (!editorHandle || outlineCursorBoundTo === editorHandle) return;
+  outlineCursorBoundTo = editorHandle;
+  try {
+    editorHandle.easyMDE.codemirror.on('cursorActivity', () => syncActiveOutlineItem());
+  } catch (_) { /* ignore */ }
+}
 
 function getPreviewScroller() {
   const root = document.querySelector('.editor-area .EasyMDEContainer')
@@ -1569,39 +1612,30 @@ function setupMobilePreviewTap() {
   }, true);
 }
 
+/**
+ * Phone shell: files drawer + close after open. Desktop unchanged.
+ *
+ * showApp() runs again on an in-app repo switch, and this used to re-attach
+ * every listener each time. Both toggle handlers read the CURRENT body class
+ * and flip it, so with two listeners one click toggled twice and cancelled
+ * itself out — after one repo switch the ☰ and Aa buttons were simply dead
+ * (measured: body class identical before and after a click). The registrations
+ * are therefore guarded, like setupFindBar / setupMinimap / setupMoreFileMenu.
+ *
+ * syncViewport() is deliberately OUTSIDE the guard: it reads the module-level
+ * `editorHandle`/`minimapHandle` at call time, and showApp() builds a brand-new
+ * editor and minimap each time — a fresh CodeMirror needs its layout
+ * recalculated once the container has its real size, and --app-height must be
+ * re-applied for the new shell.
+ */
 function setupMobileShell() {
-  if (els.btnMobileFiles) {
-    els.btnMobileFiles.addEventListener('click', () => {
-      setMobileSidebarOpen(!document.body.classList.contains('mobile-sidebar-open'));
-    });
-  }
-  if (els.sidebarBackdrop) {
-    els.sidebarBackdrop.addEventListener('click', () => setMobileSidebarOpen(false));
-  }
-  if (els.btnMobileFmt) {
-    els.btnMobileFmt.addEventListener('click', () => {
-      const open = !document.body.classList.contains('mobile-fmt-open');
-      document.body.classList.toggle('mobile-fmt-open', open);
-      els.btnMobileFmt.setAttribute('aria-expanded', open ? 'true' : 'false');
-      els.btnMobileFmt.title = open ? 'Hide formatting tools' : 'Show formatting tools';
-    });
-  }
-  // Escape closes the files drawer (and the fmt strip if open)
-  document.addEventListener('keydown', (e) => {
-    if (e.key !== 'Escape') return;
-    if (document.body.classList.contains('mobile-sidebar-open')) {
-      setMobileSidebarOpen(false);
-    }
-    if (document.body.classList.contains('mobile-fmt-open')) {
-      document.body.classList.remove('mobile-fmt-open');
-      if (els.btnMobileFmt) {
-        els.btnMobileFmt.setAttribute('aria-expanded', 'false');
-        els.btnMobileFmt.title = 'Show formatting tools';
-      }
-    }
-  });
+  const bind = !els.btnMobileFiles || !els.btnMobileFiles.dataset.mobileShellBound;
+  if (els.btnMobileFiles) els.btnMobileFiles.dataset.mobileShellBound = '1';
 
   // After rotate, 100vh / CodeMirror metrics are often stale → no vertical scroll.
+  // Defined outside the guard below, and CALLED unconditionally, because it
+  // resolves editorHandle/minimapHandle at call time and showApp() has just
+  // built new ones.
   let viewportTimer = null;
   const syncViewport = () => {
     clearTimeout(viewportTimer);
@@ -1624,11 +1658,47 @@ function setupMobileShell() {
       } catch (_) { /* no minimap */ }
     }, 120);
   };
-  window.addEventListener('orientationchange', syncViewport);
-  window.addEventListener('resize', syncViewport);
-  if (window.visualViewport) {
-    window.visualViewport.addEventListener('resize', syncViewport);
+
+  if (bind) {
+    if (els.btnMobileFiles) {
+      els.btnMobileFiles.addEventListener('click', () => {
+        setMobileSidebarOpen(!document.body.classList.contains('mobile-sidebar-open'));
+      });
+    }
+    if (els.sidebarBackdrop) {
+      els.sidebarBackdrop.addEventListener('click', () => setMobileSidebarOpen(false));
+    }
+    if (els.btnMobileFmt) {
+      els.btnMobileFmt.addEventListener('click', () => {
+        const open = !document.body.classList.contains('mobile-fmt-open');
+        document.body.classList.toggle('mobile-fmt-open', open);
+        els.btnMobileFmt.setAttribute('aria-expanded', open ? 'true' : 'false');
+        els.btnMobileFmt.title = open ? 'Hide formatting tools' : 'Show formatting tools';
+      });
+    }
+    // Escape closes the files drawer (and the fmt strip if open)
+    document.addEventListener('keydown', (e) => {
+      if (e.key !== 'Escape') return;
+      if (document.body.classList.contains('mobile-sidebar-open')) {
+        setMobileSidebarOpen(false);
+      }
+      if (document.body.classList.contains('mobile-fmt-open')) {
+        document.body.classList.remove('mobile-fmt-open');
+        if (els.btnMobileFmt) {
+          els.btnMobileFmt.setAttribute('aria-expanded', 'false');
+          els.btnMobileFmt.title = 'Show formatting tools';
+        }
+      }
+    });
+
+    window.addEventListener('orientationchange', syncViewport);
+    window.addEventListener('resize', syncViewport);
+    if (window.visualViewport) {
+      window.visualViewport.addEventListener('resize', syncViewport);
+    }
   }
+
+  // Outside the guard on purpose — runs on EVERY showApp() (see the note above).
   syncViewport();
   setupMobilePreviewTap();
   if (els.autosaveStatus && !els.autosaveStatus.dataset.forceSaveBound) {
@@ -1739,6 +1809,12 @@ function setupBacklinks() {
 }
 
 function setupDocOutline() {
+  // BEFORE the dataset guard below: the panel's click handlers are bound once,
+  // but the scroll-spy subscription must follow the editor instance, and
+  // showApp() rebuilds that on every in-app repo switch. Harmless when the
+  // handle is unchanged (bindOutlineScrollSpy() is identity-guarded).
+  bindOutlineScrollSpy();
+
   if (!els.btnOutline || els.btnOutline.dataset.bound) return;
   els.btnOutline.dataset.bound = '1';
   els.btnOutline.addEventListener('click', () => {
@@ -1747,14 +1823,6 @@ function setupDocOutline() {
     els.btnOutline.classList.toggle('active-panel', open);
     if (open) renderDocOutline();
   });
-  // Scroll-spy: highlight the heading above the cursor. Bound once — the
-  // CodeMirror instance is stable for the session (tabs swap Docs, not editors).
-  if (!outlineCursorBound && editorHandle) {
-    outlineCursorBound = true;
-    try {
-      editorHandle.easyMDE.codemirror.on('cursorActivity', () => syncActiveOutlineItem());
-    } catch (_) { /* ignore */ }
-  }
 }
 
 
