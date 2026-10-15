@@ -75,6 +75,7 @@ js/
   diff-util.js             unified diff helpers for the History panel
   tabs.js                  tab model: ordered paths + active + persistence
   tabs-ui.js               tab strip rendering and click handling
+  tabs-session.js          tab session state: tab docs, open/close/switch (extracted from app.js)
   autosave.js              hybrid autosave: local draft on idle; GitHub on Save/Commit
   draft-store.js           per-repo/branch IndexedDB store for local drafts
   idb-backend.js           generic IndexedDB wrapper (open/degrade/quota/sweep)
@@ -83,13 +84,15 @@ js/
   search-sync.js           background sync: diff tree, fetch bodies, update index
   search-ui.js             search box + results list DOM helpers
   file-kind.js             extension → language / preview strategy
+  file-ops.js              file/folder CRUD orchestration (create/rename/move/delete/copy link, extracted from app.js)
   html-preview.js          HTML iframe srcdoc + relative assets + link bridge
+  login-ui.js              Sign-in + OAuth flow (consumeOAuthRedirect, readSession, finishLogin; extracted from app.js)
   minimap.js               canvas document minimap
   commit-ui.js             Commit + History drawers
+  commit-history-ui.js     Commit panel / History drawer orchestration (extracted from app.js)
   working-tree.js          multi-file dirty set for Commit
   diff-util.js             unified diff helpers
-  app.js                   assembly point: login (incl. the OAuth redirect),
-                            state, wiring up the modules
+  app.js                   assembly point: state, wiring up the modules (login flow now in login-ui.js)
 test/                      unit tests (node:test) for the pure logic
 e2e_smoke_test.py          end-to-end browser test (Playwright)
 serve.mjs                  minimal local server for development/testing

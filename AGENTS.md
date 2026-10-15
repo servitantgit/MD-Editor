@@ -37,7 +37,7 @@ lives on a different product.
   `/auth/callback` exchanges `code` for `access_token` (Client Secret
   is used only here, on the server) → the token is handed to the client via
   `#gh_token=...` in the URL fragment — a fragment never reaches the server/logs —
-  → `js/app.js` (`consumeOAuthRedirect()`) picks it up from `location.hash` and
+  → `js/login-ui.js` (`consumeOAuthRedirect()`) picks it up from `location.hash` and
   stores it in `sessionStorage`, just like the manually pasted PAT used to be stored there.
 - **No refresh token.** The GitHub OAuth App has an "Expire user access
   tokens" checkbox — it must stay **unchecked**, otherwise the token dies after ~8h
@@ -48,11 +48,11 @@ lives on a different product.
 - Owner/Repository don't travel through the OAuth round-trip to GitHub itself (GitHub
   doesn't know about them at all) — they are put into `sessionStorage`
   (`gh_pending_owner`/`gh_pending_repo`) right before the redirect and picked back
-  up after `/auth/callback` in that same `consumeOAuthRedirect()`. If you
+  up after `/auth/callback` in `consumeOAuthRedirect()` (`js/login-ui.js`). If you
   ever rework the login form — don't forget that this key pair must survive
   the full trip to github.com and back (same tab, sessionStorage
   persists).
-- `readSession()` in `js/app.js` expects exactly four sessionStorage keys:
+- `readSession()` in `js/login-ui.js` expects exactly four sessionStorage keys:
   `gh_token`, `gh_owner`, `gh_repo`, `gh_branch`. This is the same contract the
   e2e test uses (see below) — change one, sync the other.
 - Redirect URI/callback in the GitHub OAuth App must match character-for-character:
@@ -140,7 +140,7 @@ locally, so cover such rules with a plain unit test instead.
 The test can't go through real GitHub OAuth — there are no live credentials in
 CI, and even locally `node serve.mjs` doesn't serve `/functions`. So the test
 immediately puts a fake token/owner/repo directly into `sessionStorage` (the same
-four keys from `readSession()`, see above) and reloads the page — this
+four keys from `readSession()` (`js/login-ui.js`), see above) and reloads the page — this
 simulates the "already signed in" state, not the login process itself. `/auth/login` and
 `/auth/callback` are not covered by this test at all. If you ever need to
 really verify the OAuth round-trip itself — that's a separate scenario with `wrangler
@@ -296,9 +296,7 @@ fire on `undefined`), and the app asked GitHub for
 `contents/%5Bobject%20PointerEvent%5D/name.md`. The user saw the prompt say
 `created in "[object PointerEvent]"`.
 
-Only `onCreateNewFile` / `onCreateNewFolder` take an argument — every other
-`onclick` assignment in `js/app.js` points at a zero-arg handler, which is why
-only these two broke. Two rules follow from it:
+Only `onCreateNewFile` / `onCreateNewFolder` (now in `js/file-ops.js`) take an argument — every other `onclick` assignment in `js/app.js` points at a zero-arg handler, which is why only these two broke. Two rules follow from it:
 
 1. Wrap such handlers in `() => fn()`.
 2. Make the function itself defensive, and fall back to the **active folder**,
@@ -403,7 +401,7 @@ Related: `js/file-mover.js` (`onMoved`), `js/file-ops.js` (`onMoveFile` /
 `FileTree.activeFolder` is the "create here" target, and it outlives the folder it
 names. Deleting or renaming that folder reloads the tree, but `setFiles()` used
 to only assign `files` and re-render — nothing noticed the stored path was gone.
-The next `onCreateNewFile()` then PUT into it and silently resurrected a folder
+The next `onCreateNewFile()` (in `js/file-ops.js`) then PUT into it and silently resurrected a folder
 the user had just deleted.
 
 `setFiles()` now drops the target to the repository root when the folder is no
@@ -529,21 +527,21 @@ the UI in place; that would be the only way to create the leak.
 The path that *did* build the app twice is `init()` racing itself:
 
 ```js
-consumeOAuthRedirect();      // NOT awaited — finishLogin() awaits the network
-const saved = readSession(); // runs while the token check is still in flight
+consumeOAuthRedirect();      // NOT awaited — finishLogin() awaits the network (both in js/login-ui.js)
+const saved = readSession(); // runs while the token check is still in flight (js/login-ui.js)
 if (saved) showApp(...);     // path A
 ```
 
-`finishLogin()` calls `showApp()` itself. So when an OAuth callback landed on a
+`finishLogin()` (`js/login-ui.js`) calls `showApp()` itself. So when an OAuth callback landed on a
 tab that still had a session (re-entering `/auth/login`, say), path A built the
 app, the network call resolved, and `showApp()` ran a second time — two editors,
 two observers, two paste handlers, with the first unreachable. `init()` is now
-`async`, awaits `consumeOAuthRedirect()`, and returns early when it reports that
+`async`, awaits `consumeOAuthRedirect()` (`js/login-ui.js`), and returns early when it reports that
 it completed the login.
 
 Two caveats worth keeping in mind:
 
-- `consumeOAuthRedirect()` returns `false` (so `init()` falls through to the
+- `consumeOAuthRedirect()` (`js/login-ui.js`) returns `false` (so `init()` falls through to the
   normal session path) both when there is no `#gh_token` at all **and** when the
   `owner`/`repo` pair is missing. The second case used to leave the user on the
   login screen; now it also renders that message underneath the app when a stale
@@ -556,11 +554,19 @@ Two caveats worth keeping in mind:
 
 **`e2e_smoke_test.py` does not cover either of these paths.** It fakes a session
 by writing the four `sessionStorage` keys and reloading — so it exercises the
-`readSession()` branch with no hash, and can never reach `consumeOAuthRedirect()`,
-`finishLogin()` or `showApp()`-twice. The `destroy()` contract is covered by
+`readSession()` (`js/login-ui.js`) branch with no hash, and can never reach `consumeOAuthRedirect()` / `finishLogin()` (both `js/login-ui.js`) or `showApp()`-twice. The `destroy()` contract is covered by
 `test/editor.test.js` (verified to fail if the observer is not disconnected); the
 `init()` race is **not** covered by any test, and per the OAuth notes above it
 cannot be verified locally without `wrangler pages dev` and a test OAuth app.
+
+## showApp() is re-entrant
+
+`showApp()` runs again when the user switches repositories in-app (no page reload). Every `setup*` function it calls must therefore be idempotent:
+
+- **Dataset guard on the element.** Setup functions bind listeners to stable DOM nodes from `index.html`. A second `showApp()` would stack a second set of listeners, so each setup function guards with `if (el.dataset.<name>Bound) return;` then sets `el.dataset.<name>Bound = '1'` (see `setupMobileShell`, `setupImageDropzone`, `pickImageFiles`, `setupFolderDropzone`).
+- **Read session-dependent values through getters at use time.** `state.client`, `imageResolver`, the editor instance, etc. must never be captured by value at bind time — a captured client belongs to the previous session and writes would go to the wrong repository. Use `getClient: () => state.client` etc. and read them inside the handler (see `upload.js`, `folder-upload.js`).
+- **Subscriptions bound to an OBJECT need an identity check.** CodeMirror `cursorActivity` (outline scroll-spy) is bound to the editor handle, which is recreated on every `showApp()`. A DOM dataset guard is wrong here — the element is the same, the object is not. Use identity-keyed rebinding (`bindOutlineScrollSpy` returns early if `outlineCursorBoundTo === editorHandle`) instead.
+- **e2e scenario H guards this.** The e2e smoke test otherwise always cold-starts (seeds `sessionStorage`, reloads). Scenario H switches repo in-app and asserts exactly one PUT into the new repository plus working mobile toggle buttons — it goes red if any of the above rules regress.
 
 ## Search index — IndexedDB quirks and the no-Cache-Control rule (again)
 
@@ -702,8 +708,7 @@ reload keeps an in-memory-only index.
 
 **Split of responsibilities.** `js/tabs.js` is a pure model (ordered paths + the
 active one + rename/delete bookkeeping + persistence); `js/tabs-ui.js` only draws
-the strip and reports clicks; everything heavy lives in `js/app.js`, in
-`tabDocs: Map<path, {doc, sha, unsaved, stale, commitSeen}>`. A path with no entry
+the strip and reports clicks; tab session state (`tabDocs: Map<path, {doc, sha, unsaved, stale, commitSeen}>`, open/close/switch) lives in `js/tabs-session.js`.
 is a restored tab that was never opened — it is fetched on first click, never at
 page load.
 
