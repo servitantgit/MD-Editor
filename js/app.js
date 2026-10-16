@@ -1567,10 +1567,12 @@ function ensureMinimap() {
   if (!editorHandle || !els.minimapCanvas) return;
   destroyMinimap();
   minimapHandle = createMinimap(editorHandle.easyMDE.codemirror, els.minimapCanvas, {
-    // Visible preview pane (Source/Live keep following CodeMirror instead).
+    // Visible preview pane: in Live (split) and Preview modes the preview pane
+    // is the dominant scroller, so the minimap follows it. In Source mode only
+    // CodeMirror is visible, so the minimap follows CodeMirror instead.
     getPreviewEl: () => document.querySelector('.editor-area .EasyMDEContainer .editor-preview-side')
       || document.querySelector('.editor-preview-side'),
-    isPreviewActive: () => layoutMode === 'preview',
+    isPreviewActive: () => layoutMode !== 'source',
   });
 }
 
