@@ -40,11 +40,6 @@ export function createEditor(textareaEl, deps) {
     // Keep side-by-side inside .editor-area so the file tree stays clickable
     // (EasyMDE default is fullscreen fixed overlay that steals all pointer events).
     sideBySideFullscreen: false,
-    // Disable EasyMDE's built-in side-by-side preview scroll sync: it fights
-    // our minimap / refreshLayout-driven cm.refresh() and causes the preview
-    // pane scroll to oscillate between start and end when the minimap is on
-    // in Live mode (scrollTop ping-pong via easymde.min.js syncSideBySidePreviewScroll).
-    syncSideBySidePreviewScroll: false,
     placeholder: 'Start writing…',
     // Layout (Source / Live / Preview) is owned by the app header — do NOT put
     // EasyMDE's preview / side-by-side here: they fight our modes and only work
@@ -622,12 +617,6 @@ export function createEditor(textareaEl, deps) {
     return [];
   }
 
-  // Track last rendered text per pane to avoid resetting scrollTop on re-renders
-  // of unchanged content. EasyMDE's sideBySideRenderingFunction (subscribed to
-  // CodeMirror's `update`) also calls previewRender + innerHTML, which resets
-  // scrollTop — we must not compound it here on every renderActivePreview call.
-  const lastRenderedText = new WeakMap();
-
   function renderActivePreview() {
     // Trust EasyMDE flags only. The unit test keeps class "editor-preview-active"
     // on the node while isPreviewActive() is false — class must not override the flag.
@@ -649,13 +638,7 @@ export function createEditor(textareaEl, deps) {
         continue;
       }
       if (html !== null && html !== undefined) preview.innerHTML = html;
-      // Only reset scrollTop when the rendered text actually changed (e.g. new
-      // document, not just a re-render of the same content). Setting innerHTML
-      // resets scrollTop to 0, which fights the user's scroll position.
-      if (lastRenderedText.get(preview) !== plain) {
-        lastRenderedText.set(preview, plain);
-        preview.scrollTop = 0;
-      }
+      preview.scrollTop = 0;
     }
   }
 
