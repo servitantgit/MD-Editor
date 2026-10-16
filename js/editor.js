@@ -40,6 +40,11 @@ export function createEditor(textareaEl, deps) {
     // Keep side-by-side inside .editor-area so the file tree stays clickable
     // (EasyMDE default is fullscreen fixed overlay that steals all pointer events).
     sideBySideFullscreen: false,
+    // Disable EasyMDE's built-in side-by-side preview scroll sync: it fights
+    // our minimap / refreshLayout-driven cm.refresh() and causes the preview
+    // pane scroll to oscillate between start and end when the minimap is on
+    // in Live mode (scrollTop ping-pong via easymde.min.js syncSideBySidePreviewScroll).
+    syncSideBySidePreviewScroll: false,
     placeholder: 'Start writing…',
     // Layout (Source / Live / Preview) is owned by the app header — do NOT put
     // EasyMDE's preview / side-by-side here: they fight our modes and only work
