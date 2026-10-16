@@ -30,7 +30,13 @@ export function createMinimap(cm, canvasEl, opts = {}) {
   let raf = 0;
   let paintTimer = 0;
   let boundPreview = null;
-  let syncing = false;
+  // Separate flags per direction: a programmatic scroll of one pane must not
+  // echo back into the other. A single shared flag is reset too early — the
+  // browser can still fire a scroll event on the target pane after it, and
+  // that event would re-enter the opposite handler and throw the pane to the
+  // end of the document.
+  let syncingCmToPv = false;
+  let syncingPvToCm = false;
   let cmScrollHandler = null;
   let pvScrollHandler = null;
   const ro = typeof ResizeObserver !== 'undefined'
@@ -71,13 +77,13 @@ export function createMinimap(cm, canvasEl, opts = {}) {
   // Keep CodeMirror and the visible preview pane scrolled to the same relative
   // position. EasyMDE's built-in sync is disabled (it divides by scrollHeight
   // minus clientHeight with no zero guard → Infinity during relayout), so the
-  // minimap owns scroll sync instead. A single `syncing` flag prevents the
+  // minimap owns scroll sync instead. Separate per-direction flags prevent the
   // programmatic scroll of one pane from echoing back into the other.
   function syncCmToPreview() {
-    if (syncing) return;
+    if (syncingCmToPv) return;
     const pv = previewEl();
     if (!pv) return;
-    syncing = true;
+    syncingCmToPv = true;
     try {
       const info = cm.getScrollInfo();
       const max = info.height - info.clientHeight;
@@ -85,16 +91,16 @@ export function createMinimap(cm, canvasEl, opts = {}) {
       const pvMax = Math.max(0, pv.scrollHeight - pv.clientHeight);
       pv.scrollTop = Math.min(Math.max(0, ratio * pvMax), pvMax);
     } finally {
-      syncing = false;
+      syncingCmToPv = false;
     }
     schedulePaint();
   }
 
   function syncPreviewToCm() {
-    if (syncing) return;
+    if (syncingPvToCm) return;
     const pv = previewEl();
     if (!pv) return;
-    syncing = true;
+    syncingPvToCm = true;
     try {
       const pvMax = Math.max(0, pv.scrollHeight - pv.clientHeight);
       const ratio = pvMax <= 0 ? 0 : pv.scrollTop / pvMax;
@@ -102,7 +108,7 @@ export function createMinimap(cm, canvasEl, opts = {}) {
       const cmMax = Math.max(0, info.height - info.clientHeight);
       cm.scrollTo(null, Math.min(Math.max(0, ratio * cmMax), cmMax));
     } finally {
-      syncing = false;
+      syncingPvToCm = false;
     }
     schedulePaint();
   }
@@ -251,11 +257,11 @@ export function createMinimap(cm, canvasEl, opts = {}) {
       const pv = previewEl();
       if (pv) {
         const max = Math.max(0, pv.scrollHeight - pv.clientHeight);
-        syncing = true;
+        syncingPvToCm = true;
         pv.scrollTop = ratioY * max;
-        syncing = false;
+        syncingPvToCm = false;
       }
-      syncing = true;
+      syncingCmToPv = true;
       try {
         const lineCount = Math.max(1, cm.lineCount());
         const line = Math.min(lineCount - 1, Math.floor(ratioY * lineCount));
@@ -264,7 +270,7 @@ export function createMinimap(cm, canvasEl, opts = {}) {
         const target = lineTop - scroll.clientHeight / 3;
         cm.scrollTo(null, Math.max(0, target));
       } catch (_) { /* hidden editor — preview scroll is what matters */ }
-      syncing = false;
+      syncingCmToPv = false;
       schedulePaint();
       return;
     }
@@ -358,3 +364,4 @@ export function createMinimap(cm, canvasEl, opts = {}) {
     },
   };
 }
+
