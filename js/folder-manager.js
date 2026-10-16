@@ -2,9 +2,10 @@
 // Folder operations: create (via .gitkeep), rename, delete.
 // Git has no folders without files — we work through file manipulations.
 
-import { dirnameOf, basenameOf } from './paths.js';
-import { utf8ToB64 } from './github-client.js';
+import { dirnameOf, basenameOf, extOf } from './paths.js';
+import { utf8ToB64, b64ToUtf8 } from './github-client.js';
 import { moveFile } from './file-mover.js';
+import { updateReferencesInFile } from './reference-rewriter.js';
 
 /**
  * Creates a folder by adding a .gitkeep file.
@@ -47,7 +48,7 @@ export async function renameFolder(client, allFiles, oldFolderPath, newFolderPat
   }
 
   const moved = [];
-  const allUpdated = [];
+  const mapping = new Map(); // oldPath -> newPath for every moved file
 
   // `moveFile` only READS allFiles, so the snapshot the caller handed us goes
   // stale after the very first move: its entries still name files under oldClean
@@ -63,14 +64,47 @@ export async function renameFolder(client, allFiles, oldFolderPath, newFolderPat
   for (const file of filesInFolder) {
     const relPath = file.path.slice(oldClean.length + 1);
     const newPath = `${newClean}/${relPath}`;
-    const result = await moveFile(client, snapshot, file.path, dirnameOf(newPath));
+    const result = await moveFile(client, snapshot, file.path, dirnameOf(newPath), { skipReferenceRewrite: true });
     const entry = snapshot.find((f) => f.path === file.path);
     if (entry) entry.path = newPath;
-    // `sha` is deliberately left stale: updateReferencesEverywhere() re-fetches
-    // it per file, and a clash sha is only read under { overwrite: true }, which
+    // `sha` is deliberately left stale: the reference pass below re-fetches it
+    // per file, and a clash sha is only read under { overwrite: true }, which
     // a folder rename never passes.
     moved.push(result.newPath);
-    allUpdated.push(...result.updatedFiles);
+    mapping.set(file.path, newPath);
+  }
+
+  // Phase 2: ONE reference-rewrite pass over the whole repo.
+  // Build all old→new mappings, then read each .md once, apply every mapping
+  // in memory, and PUT only if the text changed. ≈ M GETs + ≤ M PUTs total
+  // instead of N×M. Moved files are scanned under their NEW paths — root-absolute
+  // links they still carry to old paths get fixed here too.
+  const allUpdated = [];
+  const mdFiles = snapshot.filter((f) => extOf(f.path) === 'md');
+
+  for (const f of mdFiles) {
+    try {
+      const { b64, sha } = await client.getFileB64(f.path);
+      const text = b64ToUtf8(b64);
+      const fileDir = dirnameOf(f.path);
+      let currentText = text;
+      let changed = false;
+
+      for (const [oldPath, newPath] of mapping) {
+        const { changed: c, text: newText } = updateReferencesInFile(currentText, fileDir, oldPath, newPath);
+        if (c) {
+          changed = true;
+          currentText = newText;
+        }
+      }
+
+      if (changed) {
+        await client.putFile(f.path, utf8ToB64(currentText), `Update links after renaming folder ${oldClean} to ${newClean}`, sha);
+        allUpdated.push(f.path);
+      }
+    } catch (e) {
+      console.warn('Failed to update links in', f.path, e);
+    }
   }
 
   return { moved, updatedFiles: [...new Set(allUpdated)] };

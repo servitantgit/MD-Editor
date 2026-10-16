@@ -47,6 +47,9 @@ function validateName(name) {
  *   overwrite = true allows replacing a file
  *   that already exists at the destination (GitHub requires its `sha` for updates,
  *   and answers 422 "sha" wasn't supplied" without it).
+ *   skipReferenceRewrite = true skips the repo-wide reference scan after the move.
+ *   Used by renameFolder() so all files are moved first and references are
+ *   rewritten in a single pass instead of one N×M pass per moved file.
  * @returns {Promise<{newPath: string, updatedFiles: string[], skipped: boolean, overwritten: boolean}>}
  */
 export async function moveToPath(client, allFiles, oldPath, newPath, options = {}) {
@@ -95,7 +98,9 @@ export async function moveToPath(client, allFiles, oldPath, newPath, options = {
     }
   }
 
-  const updatedFiles = await updateReferencesEverywhere(client, allFiles, oldPath, newPath);
+  const updatedFiles = options.skipReferenceRewrite
+    ? []
+    : await updateReferencesEverywhere(client, allFiles, oldPath, newPath);
 
   return { newPath, updatedFiles, skipped: false, overwritten: Boolean(clash) };
 }
