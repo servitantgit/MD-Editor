@@ -109,7 +109,9 @@ test('in Preview mode a click scrolls the preview pane', async () => {
   canvas.dispatchEvent(new dom.window.MouseEvent('pointerdown', { bubbles: true, clientY: 200 }));
   // Click at the very bottom → max scroll of the preview pane.
   assert.equal(pv.scrollTop, 1500, 'preview pane should scroll to the clicked fraction');
-  assert.equal(cm.scrollToCalls.length, 1, 'hidden editor still gets a best-effort sync');
+  // Only the visible preview pane is scrolled; hidden CodeMirror is not touched
+  // to avoid scroll feedback loops between the two panes.
+  assert.equal(cm.scrollToCalls.length, 0, 'hidden editor is not scrolled in Preview mode');
 });
 
 test('in Source mode a click still scrolls CodeMirror, not the preview pane', async () => {

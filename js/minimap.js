@@ -30,6 +30,9 @@ export function createMinimap(cm, canvasEl, opts = {}) {
   let raf = 0;
   let paintTimer = 0;
   let boundPreview = null;
+  // Programmatic scroll guard: prevents scroll listeners from fighting a
+  // programmatic scroll we just issued (scroll-to on minimap click/drag).
+  let programmaticScroll = false;
   const ro = typeof ResizeObserver !== 'undefined'
     ? new ResizeObserver(() => schedulePaint())
     : null;
@@ -41,6 +44,10 @@ export function createMinimap(cm, canvasEl, opts = {}) {
   // that pane for viewport + click-to-scroll instead of the hidden editor.
   const getPreviewEl = typeof opts.getPreviewEl === 'function' ? opts.getPreviewEl : () => null;
   const isPreviewActive = typeof opts.isPreviewActive === 'function' ? opts.isPreviewActive : () => false;
+  function scrollListener() {
+    if (programmaticScroll) return;
+    schedulePaint();
+  }
   function previewEl() {
     try {
       const el = getPreviewEl();
@@ -60,7 +67,7 @@ export function createMinimap(cm, canvasEl, opts = {}) {
     }
     boundPreview = el;
     if (boundPreview) {
-      boundPreview.addEventListener('scroll', schedulePaint, { passive: true });
+      boundPreview.addEventListener('scroll', scrollListener, { passive: true });
       try { if (ro) ro.observe(boundPreview); } catch (_) {}
     }
   }
@@ -185,39 +192,33 @@ export function createMinimap(cm, canvasEl, opts = {}) {
     const y = clientY - rect.top;
     const cssH = Math.max(1, rect.height);
     const ratioY = Math.max(0, Math.min(1, y / cssH));
-    // In Preview the visible pane wins; CodeMirror is hidden and cm.scrollTo
-    // would move nothing on screen. Scroll both: the preview for display and
-    // the editor (best effort) so Source/Live land where the user pointed.
-    if (inPreviewMode()) {
-      const pv = previewEl();
-      if (pv) {
-        const max = Math.max(0, pv.scrollHeight - pv.clientHeight);
-        pv.scrollTop = ratioY * max;
-      }
-      try {
+    // Scroll only the pane that is actually visible. Scrolling both panes at
+    // once creates a feedback loop: each pane's scroll event would fight the
+    // other, and the document can get stuck at the end.
+    programmaticScroll = true;
+    try {
+      if (inPreviewMode()) {
+        const pv = previewEl();
+        if (pv) {
+          const max = Math.max(0, pv.scrollHeight - pv.clientHeight);
+          pv.scrollTop = ratioY * max;
+        }
+      } else {
         const lineCount = Math.max(1, cm.lineCount());
         const line = Math.min(lineCount - 1, Math.floor(ratioY * lineCount));
         const scroll = cm.getScrollInfo();
         const lineTop = cm.heightAtLine(line, 'local');
         const target = lineTop - scroll.clientHeight / 3;
         cm.scrollTo(null, Math.max(0, target));
-      } catch (_) { /* hidden editor — preview scroll is what matters */ }
-      schedulePaint();
-      return;
-    }
-    const lineCount = Math.max(1, cm.lineCount());
-    const line = Math.min(lineCount - 1, Math.floor(ratioY * lineCount));
-
-    try {
-      const scroll = cm.getScrollInfo();
-      const lineTop = cm.heightAtLine(line, 'local');
-      const target = lineTop - scroll.clientHeight / 3;
-      cm.scrollTo(null, Math.max(0, target));
+      }
     } catch (_) {
+      const fallbackLine = Math.min(Math.max(1, cm.lineCount()) - 1, Math.floor(ratioY * cm.lineCount()));
       try {
-        cm.setCursor({ line, ch: 0 });
-        cm.scrollIntoView({ line, ch: 0 }, 80);
-      } catch (__) {}
+        cm.setCursor({ line: fallbackLine, ch: 0 });
+        cm.scrollIntoView({ line: fallbackLine, ch: 0 }, 80);
+      } catch (__) { /* ignore */ }
+    } finally {
+      programmaticScroll = false;
     }
     schedulePaint();
   }
@@ -242,7 +243,7 @@ export function createMinimap(cm, canvasEl, opts = {}) {
   canvasEl.addEventListener('pointerup', onPointerUp);
   canvasEl.addEventListener('pointercancel', onPointerUp);
 
-  cm.on('scroll', schedulePaint);
+  cm.on('scroll', scrollListener);
   cm.on('viewportChange', schedulePaint);
   cm.on('change', schedulePaintDebounced);
   cm.on('cursorActivity', schedulePaintDebounced);
@@ -273,13 +274,13 @@ export function createMinimap(cm, canvasEl, opts = {}) {
       canvasEl.removeEventListener('pointermove', onPointerMove);
       canvasEl.removeEventListener('pointerup', onPointerUp);
       canvasEl.removeEventListener('pointercancel', onPointerUp);
-      try { cm.off('scroll', schedulePaint); } catch (_) {}
+      try { cm.off('scroll', scrollListener); } catch (_) {}
       try { cm.off('viewportChange', schedulePaint); } catch (_) {}
       try { cm.off('change', schedulePaintDebounced); } catch (_) {}
       try { cm.off('cursorActivity', schedulePaintDebounced); } catch (_) {}
       try { window.removeEventListener('message', onFrameHeightMessage); } catch (_) {}
       if (boundPreview) {
-        try { boundPreview.removeEventListener('scroll', schedulePaint); } catch (_) {}
+        try { boundPreview.removeEventListener('scroll', scrollListener); } catch (_) {}
         try { if (ro) ro.unobserve(boundPreview); } catch (_) {}
         boundPreview = null;
       }
