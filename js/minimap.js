@@ -39,65 +39,8 @@ export function createMinimap(cm, canvasEl, opts = {}) {
   // In Preview layout CodeMirror is display:none (all its heights/scroll read
   // 0) while .editor-preview-side is the visible scroller. The map then follows
   // that pane for viewport + click-to-scroll instead of the hidden editor.
-  //
-  // In Live (split) both panes are visible and must scroll together. EasyMDE's
-  // OWN sync is disabled (see editor.js: it divides by zero during relayout),
-  // so the minimap owns pane-to-pane sync here. Zero-guarded by design:
-  // skip the write when either pane's scroll range is 0, and skip when the
-  // follower is already within 2px — this stops rounding ping-pong between
-  // different content heights. Guard releases async (rAF+timeout) because
-  // scroll events arrive a tick AFTER the write, not synchronously.
   const getPreviewEl = typeof opts.getPreviewEl === 'function' ? opts.getPreviewEl : () => null;
   const isPreviewActive = typeof opts.isPreviewActive === 'function' ? opts.isPreviewActive : () => false;
-  const isSplitActive = typeof opts.isSplit === 'function' ? opts.isSplit : () => false;
-  let syncing = 0;
-  function releaseAsync() {
-    const release = () => { syncing = Math.max(0, syncing - 1); };
-    if (typeof requestAnimationFrame === 'function') requestAnimationFrame(() => setTimeout(release, 0));
-    else setTimeout(release, 0);
-  }
-  function onCMScroll() {
-    if (syncing) return;
-    if (isSplitActive()) {
-      try {
-        const pv = previewEl();
-        if (pv) {
-          const s = cm.getScrollInfo();
-          const cmMax = s.height - s.clientHeight;
-          const pvMax = pv.scrollHeight - pv.clientHeight;
-          if (cmMax > 0 && pvMax > 0) {
-            const target = (s.top / cmMax) * pvMax;
-            if (Math.abs(pv.scrollTop - target) >= 2) {
-              syncing++;
-              try { pv.scrollTop = target; } finally { releaseAsync(); }
-            }
-          }
-        }
-      } catch (_) { /* ignore */ }
-    }
-    schedulePaint();
-  }
-  function onPreviewScroll() {
-    if (syncing) return;
-    if (isSplitActive()) {
-      try {
-        const pv = previewEl();
-        if (pv) {
-          const s = cm.getScrollInfo();
-          const cmMax = s.height - s.clientHeight;
-          const pvMax = pv.scrollHeight - pv.clientHeight;
-          if (cmMax > 0 && pvMax > 0) {
-            const target = (pv.scrollTop / pvMax) * cmMax;
-            if (Math.abs(s.top - target) >= 2) {
-              syncing++;
-              try { cm.scrollTo(null, target); } finally { releaseAsync(); }
-            }
-          }
-        }
-      } catch (_) { /* ignore */ }
-    }
-    schedulePaint();
-  }
   function previewEl() {
     try {
       const el = getPreviewEl();
@@ -112,12 +55,12 @@ export function createMinimap(cm, canvasEl, opts = {}) {
     const el = previewEl();
     if (el === boundPreview) return;
     if (boundPreview) {
-      try { boundPreview.removeEventListener('scroll', onPreviewScroll); } catch (_) {}
+      try { boundPreview.removeEventListener('scroll', schedulePaint); } catch (_) {}
       try { if (ro) ro.unobserve(boundPreview); } catch (_) {}
     }
     boundPreview = el;
     if (boundPreview) {
-      boundPreview.addEventListener('scroll', onPreviewScroll, { passive: true });
+      boundPreview.addEventListener('scroll', schedulePaint, { passive: true });
       try { if (ro) ro.observe(boundPreview); } catch (_) {}
     }
   }
@@ -299,7 +242,7 @@ export function createMinimap(cm, canvasEl, opts = {}) {
   canvasEl.addEventListener('pointerup', onPointerUp);
   canvasEl.addEventListener('pointercancel', onPointerUp);
 
-  cm.on('scroll', onCMScroll);
+  cm.on('scroll', schedulePaint);
   cm.on('viewportChange', schedulePaint);
   cm.on('change', schedulePaintDebounced);
   cm.on('cursorActivity', schedulePaintDebounced);
@@ -330,13 +273,13 @@ export function createMinimap(cm, canvasEl, opts = {}) {
       canvasEl.removeEventListener('pointermove', onPointerMove);
       canvasEl.removeEventListener('pointerup', onPointerUp);
       canvasEl.removeEventListener('pointercancel', onPointerUp);
-      try { cm.off('scroll', onCMScroll); } catch (_) {}
+      try { cm.off('scroll', schedulePaint); } catch (_) {}
       try { cm.off('viewportChange', schedulePaint); } catch (_) {}
       try { cm.off('change', schedulePaintDebounced); } catch (_) {}
       try { cm.off('cursorActivity', schedulePaintDebounced); } catch (_) {}
       try { window.removeEventListener('message', onFrameHeightMessage); } catch (_) {}
       if (boundPreview) {
-        try { boundPreview.removeEventListener('scroll', onPreviewScroll); } catch (_) {}
+        try { boundPreview.removeEventListener('scroll', schedulePaint); } catch (_) {}
         try { if (ro) ro.unobserve(boundPreview); } catch (_) {}
         boundPreview = null;
       }
