@@ -445,7 +445,11 @@ test('a successful onMoveFolder renames tabs and working-tree entries to the new
   assert.deepEqual(tabMoves, [['Notes/a.md', 'Docs/Notes/a.md']], 'tab document moved to the new path');
   assert.equal(workingTree.isDirty('Notes/a.md'), false, 'old working-tree entry gone');
   assert.equal(workingTree.isDirty('Docs/Notes/a.md'), true, 'working-tree entry followed the file');
-  assert.deepEqual(loadOpts[0], { expandFolder: 'Docs/Notes' }, 'tree reloads with the destination expanded');
+  assert.deepEqual(
+    loadOpts[0],
+    { expandFolder: 'Docs/Notes', rewritePrefix: { from: 'Notes', to: 'Docs/Notes' } },
+    'tree reloads with destination expanded and lag-safe prefix rewrite'
+  );
   assert.equal(status().isError, false, 'move reported as success');
   assert.match(status().msg, /Moved: Notes → Docs\/Notes/);
 });
