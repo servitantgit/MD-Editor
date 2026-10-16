@@ -1,7 +1,7 @@
 // minimap.test.js
 // Preview layout hides CodeMirror (display:none), so the minimap must follow
 // the visible preview pane there — viewport rectangle + click-to-scroll — while
-// Source/Live keep following CodeMirror.
+// Source follows CodeMirror; Live follows whichever pane the user scrolls.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
@@ -144,7 +144,7 @@ test('in Live (split) mode CM scroll syncs preview pane to same fraction', async
 });
 
 
-test('in Live mode, scrolling Preview upward does not bounce back after the editor scroll event', async () => {
+test('Live mode keeps Preview as the source while delayed CodeMirror scroll events arrive', async () => {
   const { dom, rafQueue } = installDom();
   const { createMinimap } = await import('../js/minimap.js');
   const cm = makeCm();
@@ -152,9 +152,8 @@ test('in Live mode, scrolling Preview upward does not bounce back after the edit
   cm.getScrollInfo = () => ({ top: cmTop, height: 1400, clientHeight: 400 });
   cm.scrollTo = (_left, top) => {
     cmTop = Math.max(0, Math.min(1000, top));
-    // CodeMirror can emit its scroll signal after the originating Preview
-    // scroll handler has returned. This delayed echo must not sync back.
-    setTimeout(() => (cm.handlers.scroll || []).forEach((fn) => fn()), 20);
+    // CodeMirror's scroll event may arrive after the Preview handler returns.
+    setTimeout(() => (cm.handlers.scroll || []).forEach((fn) => fn()), 15);
   };
 
   const canvas = dom.window.document.getElementById('map');
@@ -162,8 +161,11 @@ test('in Live mode, scrolling Preview upward does not bounce back after the edit
   Object.defineProperty(pv, 'scrollHeight', { value: 2000, configurable: true });
   Object.defineProperty(pv, 'clientHeight', { value: 500, configurable: true });
   Object.defineProperty(canvas.parentElement, 'clientHeight', { value: 200, configurable: true });
-  pv.scrollTop = 1200; // 80% down the Preview pane.
   stubContext(canvas);
+
+  const cmScroll = dom.window.document.createElement('div');
+  cmScroll.className = 'CodeMirror-scroll';
+  dom.window.document.body.appendChild(cmScroll);
 
   const map = createMinimap(cm, canvas, {
     getPreviewEl: () => pv,
@@ -172,20 +174,38 @@ test('in Live mode, scrolling Preview upward does not bounce back after the edit
   });
   rafQueue.forEach((fn) => fn());
 
-  // The user scrolls upward on Preview. The editor follows to the same fraction.
-  pv.scrollTop = 300; // 20% down the Preview pane.
+  // Scroll near the end, then quickly scroll upward. Late CM events from the
+  // first movement must not overwrite the newer Preview destination.
+  pv.scrollTop = 1200;
   pv.dispatchEvent(new dom.window.Event('scroll'));
-  assert.equal(cmTop, 200, 'CodeMirror should follow the Preview scroll position');
+  assert.equal(cmTop, 800, 'CodeMirror should follow the first Preview position');
+
+  pv.scrollTop = 300;
+  pv.dispatchEvent(new dom.window.Event('scroll'));
+  assert.equal(cmTop, 200, 'CodeMirror should follow the newer upward Preview position');
 
   await new Promise((resolve) => setTimeout(resolve, 40));
-  assert.equal(pv.scrollTop, 300, 'the delayed CodeMirror scroll event must not push Preview back down');
-  assert.equal(cmTop, 200, 'CodeMirror should remain at the matching fraction');
+  assert.equal(pv.scrollTop, 300, 'delayed CodeMirror events must not push Preview back down');
+  assert.equal(cmTop, 200, 'the editor should retain the latest Preview position');
+
+  // Even if an intermediate CodeMirror notification reports another position,
+  // Preview remains authoritative and CodeMirror is corrected toward it.
+  cmTop = 560;
+  cm.handlers.scroll.forEach((fn) => fn());
+  assert.equal(cmTop, 200, 'an out-of-date editor position should be corrected from Preview');
+  assert.equal(pv.scrollTop, 300, 'the authoritative Preview position must not change');
+
+  // A direct user interaction in CodeMirror switches the source to the editor.
+  cmScroll.dispatchEvent(new dom.window.MouseEvent('pointerdown', { bubbles: true }));
+  cmTop = 700;
+  cm.handlers.scroll.forEach((fn) => fn());
+  assert.equal(pv.scrollTop, 1050, 'Preview should follow a new CodeMirror-originated scroll');
 
   map.destroy();
   dom.window.close();
 });
 
-test('in Live mode, minimap click scrolls both panes without throwing through a fallback', async () => {
+test('Live mode minimap click scrolls both panes without an undefined async release', async () => {
   const { dom, rafQueue } = installDom();
   const { createMinimap } = await import('../js/minimap.js');
   const cm = makeCm();
