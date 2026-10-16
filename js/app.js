@@ -400,12 +400,22 @@ async function init() {
 const STATUS_CLEAR_MS = 4000;
 let statusClearTimer = null;
 
-function setSaveStatus(msg, isError) {
+/**
+ * Status line under the toolbar.
+ * @param {string} msg
+ * @param {boolean} [isError]
+ * @param {{ sticky?: boolean }} [opts]  sticky: true = do not auto-clear (long jobs).
+ *   Final success messages omit sticky so the usual 4s clear still runs.
+ *   Errors never auto-clear.
+ */
+function setSaveStatus(msg, isError, opts = {}) {
   els.saveStatus.textContent = msg;
   els.saveStatus.className = 'status ' + (isError ? 'err' : 'ok');
+  if (opts.sticky) els.saveStatus.classList.add('status-busy');
+  else els.saveStatus.classList.remove('status-busy');
 
   clearTimeout(statusClearTimer);
-  if (!isError) {
+  if (!isError && !opts.sticky) {
     statusClearTimer = setTimeout(() => {
       // Guard: a newer status may have arrived in the meantime — never wipe it.
       if (els.saveStatus.textContent !== msg) return;
@@ -1019,11 +1029,9 @@ function insertMarkdownAtCursor(text) {
 // ====================== FILE TREE ======================
 /**
  * Reload the file tree from GitHub.
- * @param {{ rewritePath?: { from: string, to: string }, expandFolder?: string }} [opts]
- *   rewritePath — after a move/rename the recursive tree API often still lists
- *   `from` and not `to` for a few seconds. Apply the local rename before
- *   setFiles so the UI matches what we just wrote (create/delete don't need
- *   this: a single put/delete shows up in the tree more reliably).
+ * @param {{ rewritePath?: { from: string, to: string }, rewritePrefix?: { from: string, to: string }, expandFolder?: string }} [opts]
+ *   rewritePath — single-file move/rename (see AGENTS.md).
+ *   rewritePrefix — folder move/rename: remap every path under from/ → to/.
  *   expandFolder — folder path to expand (and all ancestors) after render.
  */
 async function loadTree(opts = {}) {
@@ -1039,6 +1047,26 @@ async function loadTree(opts = {}) {
       if (prev) files.push({ ...prev, path: to });
       else files.push({ path: to, sha: 'local' });
       files = files.slice().sort((a, b) => a.path.localeCompare(b.path));
+    }
+
+    // Folder move/rename: map every path under `from/` (and `from` itself if present)
+    // so a lagging recursive tree cannot resurrect the old folder for a few seconds.
+    if (opts.rewritePrefix && opts.rewritePrefix.from && opts.rewritePrefix.to
+        && opts.rewritePrefix.from !== opts.rewritePrefix.to) {
+      const { from, to } = opts.rewritePrefix;
+      const prefix = from + '/';
+      const seen = new Set();
+      const next = [];
+      for (const f of files) {
+        let p = f.path;
+        if (p === from || p.startsWith(prefix)) {
+          p = to + p.slice(from.length);
+        }
+        if (seen.has(p)) continue;
+        seen.add(p);
+        next.push(p === f.path ? f : { ...f, path: p });
+      }
+      files = next.sort((a, b) => a.path.localeCompare(b.path));
     }
 
     state.allFiles = files;

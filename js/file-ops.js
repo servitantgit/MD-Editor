@@ -111,7 +111,7 @@ export function createFileOps(deps) {
       deps.setSaveStatus(`Move blocked: "${oldPath}" has unsaved changes`, true);
       return;
     }
-    deps.setSaveStatus(`Moving ${oldPath}...`, false);
+    deps.setSaveStatus(`Moving ${oldPath}…`, false, { sticky: true });
     try {
       const wasCurrent = deps.getState().currentPath === oldPath;
 
@@ -145,7 +145,7 @@ export function createFileOps(deps) {
             console.warn('openFile after move', e);
           }
         }
-        deps.setSaveStatus(`Moved: ${oldPath} → ${newPath} (updating links…)`, false);
+        deps.setSaveStatus(`Moved: ${oldPath} → ${newPath} (updating links…)`, false, { sticky: true });
       }
 
       let result;
@@ -571,7 +571,7 @@ export function createFileOps(deps) {
             console.warn('openFile after rename', e);
           }
         }
-        deps.setSaveStatus(`Renamed: ${path} → ${newPath} (updating links…)`, false);
+        deps.setSaveStatus(`Renamed: ${path} → ${newPath} (updating links…)`, false, { sticky: true });
       }
 
       const result = await renameFile(deps.getState().client, deps.getState().allFiles, path, trimmed, {
@@ -695,10 +695,40 @@ export function createFileOps(deps) {
     }
 
     try {
-      deps.setSaveStatus(`Renaming ${folderPath}...`, false);
-      const { moved, updatedFiles } = await renameFolder(deps.getState().client, deps.getState().allFiles, folderPath, newPath);
-      await afterFolderMoved({ folderPath, newPath, updatedFiles });
-      deps.setSaveStatus(`Renamed: ${folderPath} → ${newPath} (files: ${moved.length})`, false);
+      deps.setSaveStatus(`Renaming ${folderPath}…`, false, { sticky: true });
+      let phase1UiDone = false;
+      const { moved, updatedFiles } = await renameFolder(
+        deps.getState().client,
+        deps.getState().allFiles,
+        folderPath,
+        newPath,
+        {
+          onProgress: ({ phase, done, total }) => {
+            if (phase === 'move') {
+              deps.setSaveStatus(`Renaming ${folderPath}… ${done}/${total} files`, false, { sticky: true });
+            } else if (phase === 'links') {
+              deps.setSaveStatus(
+                `Renamed ${folderPath} → ${newPath} (updating links… ${done}/${total})`,
+                false,
+                { sticky: true }
+              );
+            }
+          },
+          onPhase1Done: async () => {
+            await afterFolderMoved({ folderPath, newPath, updatedFiles: [] });
+            phase1UiDone = true;
+            deps.setSaveStatus(`Renamed ${folderPath} → ${newPath} (updating links…)`, false, { sticky: true });
+          },
+        }
+      );
+      if (!phase1UiDone) await afterFolderMoved({ folderPath, newPath, updatedFiles: [] });
+      if (updatedFiles && updatedFiles.length) deps.markStale(updatedFiles);
+      deps.setSaveStatus(
+        `Renamed: ${folderPath} → ${newPath} (files: ${moved.length}` +
+          (updatedFiles.length ? `, links in ${updatedFiles.length}` : '') +
+          ')',
+        false
+      );
     } catch (e) {
       deps.setSaveStatus('Error: ' + e.message, true);
     }
@@ -763,10 +793,40 @@ export function createFileOps(deps) {
     }
 
     try {
-      deps.setSaveStatus(`Moving ${oldPath} → ${newPath}...`, false);
-      const { moved, updatedFiles } = await renameFolder(deps.getState().client, deps.getState().allFiles, oldPath, newPath);
-      await afterFolderMoved({ folderPath: oldPath, newPath, updatedFiles });
-      deps.setSaveStatus(`Moved: ${oldPath} → ${newPath} (files: ${moved.length})`, false);
+      deps.setSaveStatus(`Moving ${oldPath} → ${newPath}…`, false, { sticky: true });
+      let phase1UiDone = false;
+      const { moved, updatedFiles } = await renameFolder(
+        deps.getState().client,
+        deps.getState().allFiles,
+        oldPath,
+        newPath,
+        {
+          onProgress: ({ phase, done, total }) => {
+            if (phase === 'move') {
+              deps.setSaveStatus(`Moving ${oldPath}… ${done}/${total} files`, false, { sticky: true });
+            } else if (phase === 'links') {
+              deps.setSaveStatus(
+                `Moved ${oldPath} → ${newPath} (updating links… ${done}/${total})`,
+                false,
+                { sticky: true }
+              );
+            }
+          },
+          onPhase1Done: async () => {
+            await afterFolderMoved({ folderPath: oldPath, newPath, updatedFiles: [] });
+            phase1UiDone = true;
+            deps.setSaveStatus(`Moved ${oldPath} → ${newPath} (updating links…)`, false, { sticky: true });
+          },
+        }
+      );
+      if (!phase1UiDone) await afterFolderMoved({ folderPath: oldPath, newPath, updatedFiles: [] });
+      if (updatedFiles && updatedFiles.length) deps.markStale(updatedFiles);
+      deps.setSaveStatus(
+        `Moved: ${oldPath} → ${newPath} (files: ${moved.length}` +
+          (updatedFiles.length ? `, links in ${updatedFiles.length}` : '') +
+          ')',
+        false
+      );
     } catch (e) {
       deps.setSaveStatus('Move error: ' + e.message, true);
     }
@@ -834,7 +894,10 @@ export function createFileOps(deps) {
     // Reload with the destination expanded so the user sees where the folder
     // landed; rebase the "create here" target when it pointed at the moved
     // folder or anywhere inside it.
-    await deps.loadTree({ expandFolder: newPath });
+    await deps.loadTree({
+      expandFolder: newPath,
+      rewritePrefix: { from: folderPath, to: newPath },
+    });
     if (wasActive === folderPath || wasActive.startsWith(folderPath + '/')) {
       const targetActive = newPath + wasActive.slice(folderPath.length);
       if (typeof fileTree.expandFolderChain === 'function') fileTree.expandFolderChain(targetActive);

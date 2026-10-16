@@ -600,9 +600,6 @@ button.secondary:hover { background: #21262d; }
 }
 .cm-s-material-darker .CodeMirror-linenumber {
   color: var(--muted) !important;
-  min-width: 2.5em;
-  padding: 0 8px 0 4px;
-  text-align: right;
 }
 .cm-s-material-darker .CodeMirror-cursor {
   border-left: 2px solid var(--text) !important;
@@ -2979,4 +2976,14 @@ body.md-layout-source .editor-preview-active-side {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
+}
+
+/* Sticky status while a long job runs (folder move, link rewrite, …) */
+.status.status-busy {
+  color: var(--text);
+  opacity: 1;
+  font-weight: 500;
+}
+.status.status-busy::before {
+  content: '⏳ ';
 }

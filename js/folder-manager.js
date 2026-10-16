@@ -29,7 +29,10 @@ export async function createFolder(client, folderPath) {
  * @param {string} newFolderPath
  * @returns {Promise<{moved: string[], updatedFiles: string[]}>}
  */
-export async function renameFolder(client, allFiles, oldFolderPath, newFolderPath) {
+export async function renameFolder(client, allFiles, oldFolderPath, newFolderPath, options = {}) {
+  // options.onPhase1Done({ moved, mapping, oldClean, newClean }) — after all put+delete
+  // options.onProgress({ phase, done, total, path }) — optional status ticks
+
   const oldClean = oldFolderPath.replace(/^\/+|\/+$/g, '');
   const newClean = newFolderPath.replace(/^\/+|\/+$/g, '');
   if (!oldClean || !newClean) throw new Error('Paths cannot be empty');
@@ -61,6 +64,8 @@ export async function renameFolder(client, allFiles, oldFolderPath, newFolderPat
   // and filesInFolder below must keep yielding the original paths as we iterate.
   const snapshot = allFiles.map((f) => ({ ...f }));
 
+  const total = filesInFolder.length;
+  let done = 0;
   for (const file of filesInFolder) {
     const relPath = file.path.slice(oldClean.length + 1);
     const newPath = `${newClean}/${relPath}`;
@@ -72,6 +77,20 @@ export async function renameFolder(client, allFiles, oldFolderPath, newFolderPat
     // a folder rename never passes.
     moved.push(result.newPath);
     mapping.set(file.path, newPath);
+    done += 1;
+    if (typeof options.onProgress === 'function') {
+      try { await options.onProgress({ phase: 'move', done, total, path: file.path }); } catch (_) {}
+    }
+  }
+
+  // UI can refresh as soon as blobs live under the new prefix — do not wait for
+  // the link pass (same idea as onMoved for a single-file move).
+  if (typeof options.onPhase1Done === 'function') {
+    try {
+      await options.onPhase1Done({ moved: moved.slice(), mapping, oldClean, newClean });
+    } catch (e) {
+      console.warn('onPhase1Done failed', e);
+    }
   }
 
   // Phase 2: ONE reference-rewrite pass over the whole repo.
@@ -82,8 +101,13 @@ export async function renameFolder(client, allFiles, oldFolderPath, newFolderPat
   const allUpdated = [];
   const mdFiles = snapshot.filter((f) => extOf(f.path) === 'md');
 
+  let linkDone = 0;
+  const linkTotal = mdFiles.length;
   for (const f of mdFiles) {
     try {
+      if (typeof options.onProgress === 'function') {
+        try { await options.onProgress({ phase: 'links', done: linkDone, total: linkTotal, path: f.path }); } catch (_) {}
+      }
       const { b64, sha } = await client.getFileB64(f.path);
       const text = b64ToUtf8(b64);
       const fileDir = dirnameOf(f.path);
@@ -105,6 +129,7 @@ export async function renameFolder(client, allFiles, oldFolderPath, newFolderPat
     } catch (e) {
       console.warn('Failed to update links in', f.path, e);
     }
+    linkDone += 1;
   }
 
   return { moved, updatedFiles: [...new Set(allUpdated)] };
