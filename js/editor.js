@@ -617,6 +617,12 @@ export function createEditor(textareaEl, deps) {
     return [];
   }
 
+  // Track last rendered text per pane to avoid resetting scrollTop on re-renders
+  // of unchanged content. EasyMDE's sideBySideRenderingFunction (subscribed to
+  // CodeMirror's `update`) also calls previewRender + innerHTML, which resets
+  // scrollTop — we must not compound it here on every renderActivePreview call.
+  const lastRenderedText = new WeakMap();
+
   function renderActivePreview() {
     // Trust EasyMDE flags only. The unit test keeps class "editor-preview-active"
     // on the node while isPreviewActive() is false — class must not override the flag.
@@ -638,7 +644,13 @@ export function createEditor(textareaEl, deps) {
         continue;
       }
       if (html !== null && html !== undefined) preview.innerHTML = html;
-      preview.scrollTop = 0;
+      // Only reset scrollTop when the rendered text actually changed (e.g. new
+      // document, not just a re-render of the same content). Setting innerHTML
+      // resets scrollTop to 0, which fights the user's scroll position.
+      if (lastRenderedText.get(preview) !== plain) {
+        lastRenderedText.set(preview, plain);
+        preview.scrollTop = 0;
+      }
     }
   }
 
