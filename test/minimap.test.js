@@ -114,6 +114,35 @@ test('in Preview mode a click scrolls the preview pane', async () => {
   assert.equal(cm.scrollToCalls.length, 0, 'hidden editor is not scrolled in Preview mode');
 });
 
+test('in Live (split) mode CM scroll syncs preview pane to same fraction', async () => {
+  const dom = new JSDOM('<!doctype html><body><div id="wrap"><canvas id="map"></canvas></div><div id="pv"></div></body>').window.document;
+  globalThis.window = dom.defaultView || globalThis.window;
+  globalThis.document = dom;
+  const rafQueue = [];
+  globalThis.requestAnimationFrame = (fn) => { rafQueue.push(fn); return rafQueue.length; };
+  globalThis.cancelAnimationFrame = () => { rafQueue.length = 0; };
+  const { createMinimap } = await import('../js/minimap.js');
+  const cm = makeCm();
+  // CM scrolled to 50%: top=500 of max=1000.
+  cm.getScrollInfo = () => ({ top: 500, height: 1400, clientHeight: 400 });
+  const canvas = dom.getElementById('map');
+  const pv = dom.getElementById('pv');
+  Object.defineProperty(pv, 'scrollHeight', { value: 2000, configurable: true });
+  Object.defineProperty(pv, 'clientHeight', { value: 500, configurable: true });
+  Object.defineProperty(canvas.parentElement, 'clientHeight', { value: 200, configurable: true });
+  pv.scrollTop = 0;
+  stubContext(canvas);
+  createMinimap(cm, canvas, {
+    getPreviewEl: () => pv,
+    isPreviewActive: () => true,
+    isSplit: () => true,
+  });
+  rafQueue.forEach((fn) => fn());
+  // Fire a CM scroll event → preview must follow to ~50% (750 of max 1500).
+  cm.handlers.scroll.forEach((fn) => fn());
+  assert.ok(Math.abs(pv.scrollTop - 750) < 5, `preview should follow CM fraction, got ${pv.scrollTop}`);
+});
+
 test('in Source mode a click still scrolls CodeMirror, not the preview pane', async () => {
   const { dom, rafQueue } = installDom();
   const { createMinimap } = await import('../js/minimap.js');

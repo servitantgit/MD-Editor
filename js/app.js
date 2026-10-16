@@ -1573,6 +1573,8 @@ function ensureMinimap() {
     getPreviewEl: () => document.querySelector('.editor-area .EasyMDEContainer .editor-preview-side')
       || document.querySelector('.editor-preview-side'),
     isPreviewActive: () => layoutMode !== 'source',
+    // Live (split): both panes visible, minimap syncs them together.
+    isSplit: () => layoutMode === 'split',
   });
 }
 

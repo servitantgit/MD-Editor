@@ -32,7 +32,7 @@ export function createMinimap(cm, canvasEl, opts = {}) {
   let boundPreview = null;
   // Programmatic scroll guard: prevents scroll listeners from fighting a
   // programmatic scroll we just issued (scroll-to on minimap click/drag).
-  let programmaticScroll = false;
+  let programmaticScroll = 0;
   const ro = typeof ResizeObserver !== 'undefined'
     ? new ResizeObserver(() => schedulePaint())
     : null;
@@ -44,9 +44,68 @@ export function createMinimap(cm, canvasEl, opts = {}) {
   // that pane for viewport + click-to-scroll instead of the hidden editor.
   const getPreviewEl = typeof opts.getPreviewEl === 'function' ? opts.getPreviewEl : () => null;
   const isPreviewActive = typeof opts.isPreviewActive === 'function' ? opts.isPreviewActive : () => false;
-  function scrollListener() {
-    if (programmaticScroll) return;
+  const isSplitActive = typeof opts.isSplit === 'function' ? opts.isSplit : () => false;
+  // Scroll-sync guard with async release: cm.scrollTo() / pv.scrollTop fire
+  // their scroll events ASYNC (next tick / rAF). Clearing the guard in a
+  // finally{} releases it BEFORE those events arrive, so the follower's event
+  // is mistaken for a user scroll and writes back with rounding error —
+  // the pair then ping-pongs and converges to the bottom ("throws down").
+  // Guard is released on rAF/timeout instead, after both events land.
+  let syncingScroll = 0;
+  function guardSync(fn) {
+    syncingScroll++;
+    try { fn(); } finally {
+      const release = () => { syncingScroll = Math.max(0, syncingScroll - 1); };
+      if (typeof requestAnimationFrame === 'function') {
+        requestAnimationFrame(() => setTimeout(release, 0));
+      } else {
+        setTimeout(release, 0);
+      }
+    }
+  }
+  function onCMScroll() {
+    if (programmaticScroll || syncingScroll) { return; }
+    if (isSplitActive()) {
+      try { syncFromCM(); } catch (_) { /* ignore */ }
+    }
     schedulePaint();
+  }
+  function onPreviewScroll() {
+    if (programmaticScroll || syncingScroll) { return; }
+    if (isSplitActive()) {
+      try { syncFromPreview(); } catch (_) { /* ignore */ }
+    }
+    schedulePaint();
+  }
+  function cmRatio() {
+    const s = cm.getScrollInfo();
+    const max = Math.max(1, s.height - s.clientHeight);
+    return Math.min(1, Math.max(0, s.top / max));
+  }
+  function pvRatio(pv) {
+    const max = Math.max(1, pv.scrollHeight - pv.clientHeight);
+    return Math.min(1, Math.max(0, pv.scrollTop / max));
+  }
+  // Epsilon: skip the write when the follower is already there, so rounding
+  // between different content heights cannot start a ping-pong.
+  function syncFromCM() {
+    const pv = previewEl();
+    if (!pv) return;
+    const max = Math.max(0, pv.scrollHeight - pv.clientHeight);
+    if (max <= 0) return;
+    const target = cmRatio() * max;
+    if (Math.abs(pv.scrollTop - target) < 2) return;
+    guardSync(() => { pv.scrollTop = target; });
+  }
+  function syncFromPreview() {
+    const pv = previewEl();
+    if (!pv) return;
+    const ratio = pvRatio(pv);
+    const s = cm.getScrollInfo();
+    const max = Math.max(1, s.height - s.clientHeight);
+    const target = ratio * max;
+    if (Math.abs(s.top - target) < 2) return;
+    guardSync(() => { cm.scrollTo(null, target); });
   }
   function previewEl() {
     try {
@@ -62,12 +121,12 @@ export function createMinimap(cm, canvasEl, opts = {}) {
     const el = previewEl();
     if (el === boundPreview) return;
     if (boundPreview) {
-      try { boundPreview.removeEventListener('scroll', scrollListener); } catch (_) {}
+      try { boundPreview.removeEventListener('scroll', onPreviewScroll); } catch (_) {}
       try { if (ro) ro.unobserve(boundPreview); } catch (_) {}
     }
     boundPreview = el;
     if (boundPreview) {
-      boundPreview.addEventListener('scroll', scrollListener, { passive: true });
+      boundPreview.addEventListener('scroll', onPreviewScroll, { passive: true });
       try { if (ro) ro.observe(boundPreview); } catch (_) {}
     }
   }
@@ -192,12 +251,25 @@ export function createMinimap(cm, canvasEl, opts = {}) {
     const y = clientY - rect.top;
     const cssH = Math.max(1, rect.height);
     const ratioY = Math.max(0, Math.min(1, y / cssH));
-    // Scroll only the pane that is actually visible. Scrolling both panes at
-    // once creates a feedback loop: each pane's scroll event would fight the
-    // other, and the document can get stuck at the end.
-    programmaticScroll = true;
+    // Click/drag scrolls the visible scroller(s). In Live (split) BOTH panes
+    // move together to the same fraction; writes go through guardSync() and
+    // the guard releases ASYNC (scroll events arrive a tick later), so the
+    // follower's event cannot bounce back with rounding error ("throws down").
+    programmaticScroll++;
     try {
-      if (inPreviewMode()) {
+      if (isSplitActive()) {
+        const pv = previewEl();
+        if (pv) {
+          const max = Math.max(0, pv.scrollHeight - pv.clientHeight);
+          if (max > 0) { syncingScroll++; try { pv.scrollTop = ratioY * max; } finally { asyncRelease(); } }
+        }
+        const lineCount = Math.max(1, cm.lineCount());
+        const line = Math.min(lineCount - 1, Math.floor(ratioY * lineCount));
+        const scroll = cm.getScrollInfo();
+        const lineTop = cm.heightAtLine(line, 'local');
+        const target = lineTop - scroll.clientHeight / 3;
+        syncingScroll++; try { cm.scrollTo(null, Math.max(0, target)); } finally { asyncRelease(); }
+      } else if (inPreviewMode()) {
         const pv = previewEl();
         if (pv) {
           const max = Math.max(0, pv.scrollHeight - pv.clientHeight);
@@ -218,7 +290,11 @@ export function createMinimap(cm, canvasEl, opts = {}) {
         cm.scrollIntoView({ line: fallbackLine, ch: 0 }, 80);
       } catch (__) { /* ignore */ }
     } finally {
-      programmaticScroll = false;
+      if (typeof requestAnimationFrame === 'function') {
+        requestAnimationFrame(() => setTimeout(() => { programmaticScroll = Math.max(0, programmaticScroll - 1); }, 0));
+      } else {
+        setTimeout(() => { programmaticScroll = Math.max(0, programmaticScroll - 1); }, 0);
+      }
     }
     schedulePaint();
   }
@@ -243,7 +319,7 @@ export function createMinimap(cm, canvasEl, opts = {}) {
   canvasEl.addEventListener('pointerup', onPointerUp);
   canvasEl.addEventListener('pointercancel', onPointerUp);
 
-  cm.on('scroll', scrollListener);
+  cm.on('scroll', onCMScroll);
   cm.on('viewportChange', schedulePaint);
   cm.on('change', schedulePaintDebounced);
   cm.on('cursorActivity', schedulePaintDebounced);
@@ -274,13 +350,13 @@ export function createMinimap(cm, canvasEl, opts = {}) {
       canvasEl.removeEventListener('pointermove', onPointerMove);
       canvasEl.removeEventListener('pointerup', onPointerUp);
       canvasEl.removeEventListener('pointercancel', onPointerUp);
-      try { cm.off('scroll', scrollListener); } catch (_) {}
+      try { cm.off('scroll', onCMScroll); } catch (_) {}
       try { cm.off('viewportChange', schedulePaint); } catch (_) {}
       try { cm.off('change', schedulePaintDebounced); } catch (_) {}
       try { cm.off('cursorActivity', schedulePaintDebounced); } catch (_) {}
       try { window.removeEventListener('message', onFrameHeightMessage); } catch (_) {}
       if (boundPreview) {
-        try { boundPreview.removeEventListener('scroll', scrollListener); } catch (_) {}
+        try { boundPreview.removeEventListener('scroll', onPreviewScroll); } catch (_) {}
         try { if (ro) ro.unobserve(boundPreview); } catch (_) {}
         boundPreview = null;
       }
