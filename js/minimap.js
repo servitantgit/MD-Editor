@@ -30,6 +30,9 @@ export function createMinimap(cm, canvasEl, opts = {}) {
   let raf = 0;
   let paintTimer = 0;
   let boundPreview = null;
+  let syncing = false;
+  let cmScrollHandler = null;
+  let pvScrollHandler = null;
   const ro = typeof ResizeObserver !== 'undefined'
     ? new ResizeObserver(() => schedulePaint())
     : null;
@@ -62,6 +65,62 @@ export function createMinimap(cm, canvasEl, opts = {}) {
     if (boundPreview) {
       boundPreview.addEventListener('scroll', schedulePaint, { passive: true });
       try { if (ro) ro.observe(boundPreview); } catch (_) {}
+    }
+  }
+
+  // Keep CodeMirror and the visible preview pane scrolled to the same relative
+  // position. EasyMDE's built-in sync is disabled (it divides by scrollHeight
+  // minus clientHeight with no zero guard → Infinity during relayout), so the
+  // minimap owns scroll sync instead. A single `syncing` flag prevents the
+  // programmatic scroll of one pane from echoing back into the other.
+  function syncCmToPreview() {
+    if (syncing) return;
+    const pv = previewEl();
+    if (!pv) return;
+    syncing = true;
+    try {
+      const info = cm.getScrollInfo();
+      const max = info.height - info.clientHeight;
+      const ratio = max <= 0 ? 0 : info.top / max;
+      const pvMax = Math.max(0, pv.scrollHeight - pv.clientHeight);
+      pv.scrollTop = Math.min(Math.max(0, ratio * pvMax), pvMax);
+    } finally {
+      syncing = false;
+    }
+    schedulePaint();
+  }
+
+  function syncPreviewToCm() {
+    if (syncing) return;
+    const pv = previewEl();
+    if (!pv) return;
+    syncing = true;
+    try {
+      const pvMax = Math.max(0, pv.scrollHeight - pv.clientHeight);
+      const ratio = pvMax <= 0 ? 0 : pv.scrollTop / pvMax;
+      const info = cm.getScrollInfo();
+      const cmMax = Math.max(0, info.height - info.clientHeight);
+      cm.scrollTo(null, Math.min(Math.max(0, ratio * cmMax), cmMax));
+    } finally {
+      syncing = false;
+    }
+    schedulePaint();
+  }
+
+  function bindScrollSync() {
+    // Re-bind on every refresh() so a mode switch that swaps the preview pane
+    // does not leave stale listeners on the old element, and so we never add
+    // the same listener twice.
+    if (cmScrollHandler) { try { cm.off('scroll', cmScrollHandler); } catch (_) {} cmScrollHandler = null; }
+    if (pvScrollHandler && boundPreview) { try { boundPreview.removeEventListener('scroll', pvScrollHandler); } catch (_) {} pvScrollHandler = null; }
+
+    cmScrollHandler = syncCmToPreview;
+    cm.on('scroll', cmScrollHandler);
+
+    const pv = previewEl();
+    if (pv) {
+      pvScrollHandler = syncPreviewToCm;
+      pv.addEventListener('scroll', pvScrollHandler, { passive: true });
     }
   }
 
@@ -192,8 +251,11 @@ export function createMinimap(cm, canvasEl, opts = {}) {
       const pv = previewEl();
       if (pv) {
         const max = Math.max(0, pv.scrollHeight - pv.clientHeight);
+        syncing = true;
         pv.scrollTop = ratioY * max;
+        syncing = false;
       }
+      syncing = true;
       try {
         const lineCount = Math.max(1, cm.lineCount());
         const line = Math.min(lineCount - 1, Math.floor(ratioY * lineCount));
@@ -202,6 +264,7 @@ export function createMinimap(cm, canvasEl, opts = {}) {
         const target = lineTop - scroll.clientHeight / 3;
         cm.scrollTo(null, Math.max(0, target));
       } catch (_) { /* hidden editor — preview scroll is what matters */ }
+      syncing = false;
       schedulePaint();
       return;
     }
@@ -257,12 +320,14 @@ export function createMinimap(cm, canvasEl, opts = {}) {
 
   if (ro && canvasEl.parentElement) ro.observe(canvasEl.parentElement);
   bindPreview();
+  bindScrollSync();
 
   schedulePaint();
 
   return {
     refresh() {
       bindPreview();
+      bindScrollSync();
       schedulePaint();
     },
     destroy() {
@@ -283,6 +348,12 @@ export function createMinimap(cm, canvasEl, opts = {}) {
         try { if (ro) ro.unobserve(boundPreview); } catch (_) {}
         boundPreview = null;
       }
+      if (cmScrollHandler) { try { cm.off('scroll', cmScrollHandler); } catch (_) {} cmScrollHandler = null; }
+      const curPv = previewEl();
+      if (curPv && pvScrollHandler) {
+        try { curPv.removeEventListener('scroll', pvScrollHandler); } catch (_) {}
+      }
+      pvScrollHandler = null;
       if (ro) ro.disconnect();
     },
   };
