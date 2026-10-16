@@ -1573,7 +1573,6 @@ function ensureMinimap() {
     getPreviewEl: () => document.querySelector('.editor-area .EasyMDEContainer .editor-preview-side')
       || document.querySelector('.editor-preview-side'),
     isPreviewActive: () => layoutMode !== 'source',
-    isSideBySide: () => layoutMode === 'split',
   });
 }
 
