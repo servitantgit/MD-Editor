@@ -144,7 +144,7 @@ test('in Live (split) mode CM scroll syncs preview pane to same fraction', async
 });
 
 
-test('Live mode keeps Preview as the source while delayed CodeMirror scroll events arrive', async () => {
+test('Live mode keeps both panes synchronized across delayed events and new CodeMirror scrolling', async () => {
   const { dom, rafQueue } = installDom();
   const { createMinimap } = await import('../js/minimap.js');
   const cm = makeCm();
@@ -188,15 +188,16 @@ test('Live mode keeps Preview as the source while delayed CodeMirror scroll even
   assert.equal(pv.scrollTop, 300, 'delayed CodeMirror events must not push Preview back down');
   assert.equal(cmTop, 200, 'the editor should retain the latest Preview position');
 
-  // Even if an intermediate CodeMirror notification reports another position,
-  // Preview remains authoritative and CodeMirror is corrected toward it.
+  // A new, genuine CodeMirror scroll must become the source of truth again.
+  // This is the regression the previous implementation missed: after Preview
+  // had been the source, the editor could no longer move the other two panels.
   cmTop = 560;
   cm.handlers.scroll.forEach((fn) => fn());
-  assert.equal(cmTop, 200, 'an out-of-date editor position should be corrected from Preview');
-  assert.equal(pv.scrollTop, 300, 'the authoritative Preview position must not change');
+  assert.equal(cmTop, 560, 'a genuine editor scroll must not be forced back');
+  assert.equal(pv.scrollTop, 840, 'Preview should follow the editor at the same fraction');
 
-  // A direct user interaction in CodeMirror switches the source to the editor.
-  cmScroll.dispatchEvent(new dom.window.MouseEvent('pointerdown', { bubbles: true }));
+  // Further CodeMirror movement keeps Preview (and therefore the Live minimap
+  // viewport) following the editor, even after Preview initiated earlier scrolls.
   cmTop = 700;
   cm.handlers.scroll.forEach((fn) => fn());
   assert.equal(pv.scrollTop, 1050, 'Preview should follow a new CodeMirror-originated scroll');
@@ -205,7 +206,7 @@ test('Live mode keeps Preview as the source while delayed CodeMirror scroll even
   dom.window.close();
 });
 
-test('Live mode minimap click scrolls both panes without an undefined async release', async () => {
+test('Live mode minimap click scrolls both panes while suppressing scroll echoes', async () => {
   const { dom, rafQueue } = installDom();
   const { createMinimap } = await import('../js/minimap.js');
   const cm = makeCm();

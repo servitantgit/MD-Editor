@@ -43,67 +43,73 @@ export function createMinimap(cm, canvasEl, opts = {}) {
   const isPreviewActive = typeof opts.isPreviewActive === 'function' ? opts.isPreviewActive : () => false;
   const isSplitActive = typeof opts.isSplit === 'function' ? opts.isSplit : () => false;
 
-  // In Live mode only one pane may be the scroll source at a time. CodeMirror
-  // emits delayed scroll events for calls to cm.scrollTo(), so a timer or a
-  // single expected scrollTop is not a reliable way to identify an echo: an
-  // intermediate event can arrive after the latest destination has changed.
-  // Track the pane the user interacted with instead. Scroll events caused by
-  // synchronizing the other pane must never become a new source of truth.
-  // If a scroll is initiated programmatically with no recent user input, the
-  // first pane emitting the event claims ownership until another interaction.
-  let scrollOrigin = null; // 'cm' | 'preview' | 'minimap' | null
+  // Keep track of scroll positions written by synchronization. Native scroll
+  // events are dispatched asynchronously, so one shared boolean/timer can miss
+  // delayed events and either create a feedback loop or break pane-to-pane sync.
+  // A short queue lets us identify those echoes by the actual position reported.
+  const expectedScrolls = { cm: [], preview: [] };
+  const EXPECTED_SCROLL_TTL_MS = 1200;
+  const SCROLL_EPSILON = 3;
 
-  function sourceForTarget(target) {
-    if (!target || target.nodeType !== 1) return null;
-    if (canvasEl === target || canvasEl.contains(target)) return 'minimap';
-    const pv = previewEl();
-    if (pv && (pv === target || pv.contains(target))) return 'preview';
-    if (target.closest('.CodeMirror-scroll, .CodeMirror-vscrollbar, .CodeMirror-hscrollbar, .CodeMirror')) {
-      return 'cm';
-    }
-    return null;
-  }
-
-  function onScrollIntent(e) {
-    const source = sourceForTarget(e.target);
-    if (source) {
-      scrollOrigin = source;
-    } else if (e.type === 'wheel' || e.type === 'pointerdown' || e.type === 'touchstart') {
-      // Toolbar, file-tree, or other outside interaction: allow a later
-      // programmatic scroll (e.g. jump to heading) to establish its own source.
-      scrollOrigin = null;
+  function clearExpectedScrolls(source) {
+    if (source) expectedScrolls[source].length = 0;
+    else {
+      expectedScrolls.cm.length = 0;
+      expectedScrolls.preview.length = 0;
     }
   }
 
-  function onScrollKeydown(e) {
-    if (!['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' '].includes(e.key)) return;
-    const source = sourceForTarget(e.target) || sourceForTarget(document.activeElement);
-    scrollOrigin = source;
+  function rememberExpectedScroll(source, top) {
+    const now = performance.now();
+    const queue = expectedScrolls[source];
+    for (let i = queue.length - 1; i >= 0; i--) {
+      if (queue[i].expires < now) queue.splice(i, 1);
+    }
+    queue.push({ top: Number(top) || 0, expires: now + EXPECTED_SCROLL_TTL_MS });
+    // Scrolling quickly can enqueue several targets before the browser dispatches
+    // events. Bound memory while retaining enough history for those delayed events.
+    if (queue.length > 32) queue.splice(0, queue.length - 32);
   }
 
-  document.addEventListener('wheel', onScrollIntent, true);
-  document.addEventListener('pointerdown', onScrollIntent, true);
-  document.addEventListener('touchstart', onScrollIntent, { capture: true, passive: true });
-  document.addEventListener('keydown', onScrollKeydown, true);
+  function consumeExpectedScroll(source, actualTop) {
+    const queue = expectedScrolls[source];
+    const now = performance.now();
+    for (let i = queue.length - 1; i >= 0; i--) {
+      if (queue[i].expires < now) queue.splice(i, 1);
+    }
+
+    const actual = Number(actualTop) || 0;
+    const match = queue.findIndex((entry) => Math.abs(entry.top - actual) <= SCROLL_EPSILON);
+    if (match < 0) return false;
+
+    // Older positions have been superseded by this actual position. Keep any
+    // newer queued targets in case their own event has not been delivered yet.
+    queue.splice(0, match + 1);
+    return true;
+  }
 
   function onCMScroll() {
     if (isSplitActive()) {
-      if (!scrollOrigin) scrollOrigin = 'cm';
-      try {
-        if (scrollOrigin === 'cm') syncFromCM();
-        else if (scrollOrigin === 'preview') syncFromPreview();
-      } catch (_) { /* ignore */ }
+      const info = cm.getScrollInfo();
+      const isEcho = consumeExpectedScroll('cm', info.top);
+      if (!isEcho) {
+        // A real CodeMirror scroll is the source. Discard stale writes from the
+        // opposite direction, then update Preview; its resulting event is queued.
+        clearExpectedScrolls();
+        try { syncFromCM(); } catch (_) { /* ignore */ }
+      }
     }
     schedulePaint();
   }
 
   function onPreviewScroll() {
-    if (isSplitActive()) {
-      if (!scrollOrigin) scrollOrigin = 'preview';
-      try {
-        if (scrollOrigin === 'preview') syncFromPreview();
-        else if (scrollOrigin === 'cm') syncFromCM();
-      } catch (_) { /* ignore */ }
+    const pv = previewEl();
+    const isEcho = pv ? consumeExpectedScroll('preview', pv.scrollTop) : false;
+    if (isSplitActive() && pv && !isEcho) {
+      // A real Preview scroll is the source. Clear stale editor targets before
+      // moving CodeMirror, otherwise an old echo could reverse the direction.
+      clearExpectedScrolls();
+      try { syncFromPreview(); } catch (_) { /* ignore */ }
     }
     schedulePaint();
   }
@@ -124,8 +130,7 @@ export function createMinimap(cm, canvasEl, opts = {}) {
     const max = Math.max(0, pv.scrollHeight - pv.clientHeight);
     if (max <= 0) return;
     const target = cmRatio() * max;
-    if (Math.abs(pv.scrollTop - target) < 2) return;
-    guardSync(() => { pv.scrollTop = target; });
+    setPreviewScrollTop(target);
   }
   function syncFromPreview() {
     const pv = previewEl();
@@ -134,9 +139,27 @@ export function createMinimap(cm, canvasEl, opts = {}) {
     const s = cm.getScrollInfo();
     const max = Math.max(1, s.height - s.clientHeight);
     const target = ratio * max;
-    if (Math.abs(s.top - target) < 2) return;
-    guardSync(() => { cm.scrollTo(null, target); });
+    setCMScrollTop(target);
   }
+  function setPreviewScrollTop(target) {
+    const pv = previewEl();
+    if (!pv) return;
+    const max = Math.max(0, pv.scrollHeight - pv.clientHeight);
+    const nextTop = Math.max(0, Math.min(max, Number(target) || 0));
+    if (Math.abs(pv.scrollTop - nextTop) < 2) return;
+    rememberExpectedScroll('preview', nextTop);
+    pv.scrollTop = nextTop;
+  }
+
+  function setCMScrollTop(target) {
+    const info = cm.getScrollInfo();
+    const max = Math.max(0, info.height - info.clientHeight);
+    const nextTop = Math.max(0, Math.min(max, Number(target) || 0));
+    if (Math.abs(info.top - nextTop) < 2) return;
+    rememberExpectedScroll('cm', nextTop);
+    cm.scrollTo(null, nextTop);
+  }
+
   function previewEl() {
     try {
       const el = getPreviewEl();
@@ -150,9 +173,9 @@ export function createMinimap(cm, canvasEl, opts = {}) {
   function bindPreview() {
     const el = previewEl();
     if (el === boundPreview) return;
-    // Layout switches can replace the preview node. Do not carry a previous
-    // pane's scroll ownership into the new layout/element.
-    scrollOrigin = null;
+    // Layout switches can replace the preview node; pending expectations belong
+    // to the previous layout and must not affect the new one.
+    clearExpectedScrolls();
     if (boundPreview) {
       try { boundPreview.removeEventListener('scroll', onPreviewScroll); } catch (_) {}
       try { if (ro) ro.unobserve(boundPreview); } catch (_) {}
@@ -285,27 +308,26 @@ export function createMinimap(cm, canvasEl, opts = {}) {
     const cssH = Math.max(1, rect.height);
     const ratioY = Math.max(0, Math.min(1, y / cssH));
     // A minimap click/drag intentionally controls both visible panes in Live.
-    // Mark the minimap as the source so delayed scroll events from either pane
-    // cannot feed back into the other and overwrite the requested position.
-    scrollOrigin = 'minimap';
+    // Record each programmatic target so delayed scroll events are recognized
+    // as echoes rather than new user input.
     try {
       if (isSplitActive()) {
         const pv = previewEl();
         if (pv) {
           const max = Math.max(0, pv.scrollHeight - pv.clientHeight);
-          if (max > 0) pv.scrollTop = ratioY * max;
+          if (max > 0) setPreviewScrollTop(ratioY * max);
         }
         const lineCount = Math.max(1, cm.lineCount());
         const line = Math.min(lineCount - 1, Math.floor(ratioY * lineCount));
         const scroll = cm.getScrollInfo();
         const lineTop = cm.heightAtLine(line, 'local');
         const target = lineTop - scroll.clientHeight / 3;
-        cm.scrollTo(null, Math.max(0, target));
+        setCMScrollTop(Math.max(0, target));
       } else if (inPreviewMode()) {
         const pv = previewEl();
         if (pv) {
           const max = Math.max(0, pv.scrollHeight - pv.clientHeight);
-          pv.scrollTop = ratioY * max;
+          setPreviewScrollTop(ratioY * max);
         }
       } else {
         const lineCount = Math.max(1, cm.lineCount());
@@ -313,7 +335,7 @@ export function createMinimap(cm, canvasEl, opts = {}) {
         const scroll = cm.getScrollInfo();
         const lineTop = cm.heightAtLine(line, 'local');
         const target = lineTop - scroll.clientHeight / 3;
-        cm.scrollTo(null, Math.max(0, target));
+        setCMScrollTop(Math.max(0, target));
       }
     } catch (_) {
       const fallbackLine = Math.min(Math.max(1, cm.lineCount()) - 1, Math.floor(ratioY * cm.lineCount()));
@@ -365,7 +387,7 @@ export function createMinimap(cm, canvasEl, opts = {}) {
 
   return {
     refresh() {
-      scrollOrigin = null;
+      clearExpectedScrolls();
       bindPreview();
       schedulePaint();
     },
@@ -382,10 +404,6 @@ export function createMinimap(cm, canvasEl, opts = {}) {
       try { cm.off('change', schedulePaintDebounced); } catch (_) {}
       try { cm.off('cursorActivity', schedulePaintDebounced); } catch (_) {}
       try { window.removeEventListener('message', onFrameHeightMessage); } catch (_) {}
-      document.removeEventListener('wheel', onScrollIntent, true);
-      document.removeEventListener('pointerdown', onScrollIntent, true);
-      document.removeEventListener('touchstart', onScrollIntent, true);
-      document.removeEventListener('keydown', onScrollKeydown, true);
       if (boundPreview) {
         try { boundPreview.removeEventListener('scroll', onPreviewScroll); } catch (_) {}
         try { if (ro) ro.unobserve(boundPreview); } catch (_) {}
