@@ -796,6 +796,10 @@ function ensureFileOps() {
     renderTabs,
     insertMarkdownAtCursor: typeof insertMarkdownAtCursor === 'function' ? insertMarkdownAtCursor : undefined,
     getWorkingTree: () => workingTree,
+    // Getters only: showApp() is re-entrant and both instances are rebuilt
+    // per session — capturing the values at bind time would go stale.
+    getAutosave: () => autosave,
+    getDraftStore: () => draftStore,
     refreshCommitBadge: () => { try { ensureCommitHistoryUI().refreshBadge(); } catch (_) {} },
   });
   return fileOps;

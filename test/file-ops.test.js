@@ -1,7 +1,18 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { IDBFactory } from 'fake-indexeddb';
 import { createFileOps } from '../js/file-ops.js';
 import { WorkingTree } from '../js/working-tree.js';
+import { DraftStore } from '../js/draft-store.js';
+
+// Node has none of the browser globals createFileOps talks to. On a page
+// `window` IS the global object, so `window.prompt = …` here and the bare
+// `prompt(...)` inside file-ops.js are one and the same binding — mirror
+// that, or the prompt overrides below would never reach the handlers.
+globalThis.window = globalThis;
+globalThis.alert = () => {};
+globalThis.confirm = () => true;
+globalThis.prompt = () => null;
 
 /** Minimal fake client backed by an in-memory Map, recording every request. */
 class FakeClient {
@@ -27,7 +38,7 @@ class FakeClient {
 }
 
 /** Build a minimal deps object for createFileOps. */
-function makeDeps({ client, allFiles, currentPath = 'Notes/a.md', workingTree, currentSha = 'sha-Notes/a.md' } = {}) {
+function makeDeps({ client, allFiles, currentPath = 'Notes/a.md', workingTree, currentSha = 'sha-Notes/a.md', draftStore = null, autosave = null } = {}) {
   const state = {
     client,
     allFiles,
@@ -54,6 +65,8 @@ function makeDeps({ client, allFiles, currentPath = 'Notes/a.md', workingTree, c
     persistTabs: () => {},
     renderTabs: () => {},
     getWorkingTree: () => workingTree,
+    getAutosave: () => autosave,
+    getDraftStore: () => draftStore,
     refreshCommitBadge: () => {},
   };
   return { deps, status: () => ({ msg: statusMsg, isError: statusIsError }) };
@@ -181,4 +194,93 @@ test('onRenameFolder proceeds when no file inside is dirty', async () => {
   assert.equal(client.files.get('Docs/a.md').text, '# a');
   assert.equal(client.files.get('Docs/b.md').text, '# b');
   assert.equal(workingTree.getChangeCount(), 0, 'working tree stays clean');
+});
+
+test('onMoveFile blocks when the only trace of the edits is a stored draft (working tree empty)', async () => {
+  const client = new FakeClient({ 'Notes/a.md': '# a' });
+  const allFiles = [{ path: 'Notes/a.md', sha: 'sha-Notes/a.md' }];
+  // A page reload leaves the in-memory working tree EMPTY while the draft
+  // survives in IndexedDB — exactly the case the working-tree-only check missed.
+  const workingTree = new WorkingTree();
+  const draftStore = new DraftStore({ indexedDB: new IDBFactory() });
+  await draftStore.open();
+  await draftStore.put({ owner: 'o', repo: 'r', branch: 'main', path: 'Notes/a.md', text: '# local edits' });
+
+  const { deps, status } = makeDeps({ client, allFiles, workingTree, draftStore });
+  const { onMoveFile } = createFileOps(deps);
+
+  await onMoveFile('Notes/a.md', 'Docs');
+
+  assert.equal(client.puts.length, 0, 'zero puts');
+  assert.equal(client.deletes.length, 0, 'zero deletes');
+  assert.equal(workingTree.getChangeCount(), 0, 'working tree stays empty');
+  const { msg, isError } = status();
+  assert.match(msg, /unsaved changes/, 'status mentions unsaved changes');
+  assert.equal(isError, true, 'status is an error');
+});
+
+test('onRenameFolder blocks when one file inside has only a stored draft', async () => {
+  const client = new FakeClient({ 'Notes/a.md': '# a', 'Notes/b.md': '# b' });
+  const allFiles = [
+    { path: 'Notes/a.md', sha: 'sha-a' },
+    { path: 'Notes/b.md', sha: 'sha-b' },
+  ];
+  const workingTree = new WorkingTree(); // empty — post-reload state
+  const draftStore = new DraftStore({ indexedDB: new IDBFactory() });
+  await draftStore.open();
+  await draftStore.put({ owner: 'o', repo: 'r', branch: 'main', path: 'Notes/b.md', text: '# b, only locally' });
+
+  const { deps, status } = makeDeps({ client, allFiles, workingTree, draftStore });
+  const { onRenameFolder } = createFileOps(deps);
+
+  const originalPrompt = window.prompt;
+  window.prompt = () => 'Docs';
+  try {
+    await onRenameFolder('Notes');
+  } finally {
+    window.prompt = originalPrompt;
+  }
+
+  assert.equal(client.puts.length, 0, 'zero puts — folder rename blocked');
+  assert.equal(client.deletes.length, 0, 'zero deletes');
+  const { msg, isError } = status();
+  assert.match(msg, /unsaved changes/, 'status mentions unsaved changes');
+  assert.match(msg, /Notes\/b\.md/, 'lists the file whose draft is local-only');
+  assert.equal(isError, true, 'status is an error');
+});
+
+test('onMoveFile blocks when the open file has an unsaved autosave draft (working tree empty)', async () => {
+  const client = new FakeClient({ 'Notes/a.md': '# a' });
+  const allFiles = [{ path: 'Notes/a.md', sha: 'sha-Notes/a.md' }];
+  const workingTree = new WorkingTree();
+  // Typed but not flushed to IndexedDB yet: only the live Autosave knows.
+  const autosave = { path: 'Notes/a.md', hasUnsavedDraft: () => true };
+
+  const { deps, status } = makeDeps({ client, allFiles, workingTree, autosave });
+  const { onMoveFile } = createFileOps(deps);
+
+  await onMoveFile('Notes/a.md', 'Docs');
+
+  assert.equal(client.puts.length, 0, 'zero puts');
+  assert.equal(client.deletes.length, 0, 'zero deletes');
+  const { msg, isError } = status();
+  assert.match(msg, /unsaved changes/, 'status mentions unsaved changes');
+  assert.equal(isError, true, 'status is an error');
+});
+
+test('a draft belonging to ANOTHER repository does not block the move', async () => {
+  const client = new FakeClient({ 'Notes/a.md': '# a' });
+  const allFiles = [{ path: 'Notes/a.md', sha: 'sha-Notes/a.md' }];
+  const workingTree = new WorkingTree();
+  const draftStore = new DraftStore({ indexedDB: new IDBFactory() });
+  await draftStore.open();
+  await draftStore.put({ owner: 'someone-else', repo: 'other-repo', branch: 'main', path: 'Notes/a.md', text: 'their work' });
+
+  const { deps } = makeDeps({ client, allFiles, workingTree, draftStore });
+  const { onMoveFile } = createFileOps(deps);
+
+  await onMoveFile('Notes/a.md', 'Docs');
+
+  assert.equal(client.puts.length, 1, 'move proceeds — another repo\'s draft is not ours to protect');
+  assert.equal(client.deletes.length, 1, 'one delete for the move');
 });

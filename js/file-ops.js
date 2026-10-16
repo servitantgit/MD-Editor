@@ -27,6 +27,8 @@ import { kindFromPath, isEditableTextPath, isCreatableFilePath, hasFileExtension
  * @param {() => void} deps.renderTabs
  * @param {(text: string) => void} [deps.insertMarkdownAtCursor]
  * @param {() => import('./working-tree.js').WorkingTree} [deps.getWorkingTree] - the WorkingTree (dirty-file tracker)
+ * @param {() => any} [deps.getAutosave] - the session Autosave (the open file's live, not-yet-flushed draft)
+ * @param {() => import('./draft-store.js').DraftStore|null} [deps.getDraftStore] - IndexedDB draft store (drafts survive page reloads)
  * @param {() => void} [deps.refreshCommitBadge] - refresh the Commit badge after the working tree changes
  */
 export function createFileOps(deps) {
@@ -35,12 +37,76 @@ export function createFileOps(deps) {
 
 
 
+  /**
+   * True when `path` has local edits GitHub does not have yet — from ANY of
+   * the three places they can live:
+   *
+   *   1. the in-memory WorkingTree (edits waiting for Commit), and
+   *   2. the open file's Autosave (typed, not yet flushed to IndexedDB), and
+   *   3. a dirty draft in IndexedDB — the one that survives a page reload,
+   *      when the WorkingTree is empty again and "Keep local" restored a
+   *      draft without ever marking the tree dirty.
+   *
+   * All three are lost by a move: moveToPath() reads the committed GitHub
+   * blob (never the draft), and sweepStaleDrafts() on loadTree() deletes the
+   * draft stored under the OLD path. Always run this BEFORE any GitHub
+   * request — a blocked move makes zero requests. Async only because the
+   * draft store is IndexedDB; a missing/degraded store never blocks.
+   */
+  async function hasUnsavedEdits(path) {
+    if (deps.getWorkingTree && deps.getWorkingTree().isDirty(path)) return true;
+    const autosave = deps.getAutosave ? deps.getAutosave() : null;
+    // autosave.path (not state.currentPath) names the file this instance is
+    // bound to — that is the definition of "the open file" for the live draft.
+    if (autosave && autosave.path === path && autosave.hasUnsavedDraft()) return true;
+    const store = deps.getDraftStore ? deps.getDraftStore() : null;
+    if (store) {
+      try {
+        const state = deps.getState();
+        const draft = await store.get({
+          owner: state.owner ?? state.client?.owner,
+          repo: state.repo ?? state.client?.repo,
+          branch: state.branch,
+          path,
+        });
+        // Records are written dirty=true and a successful push DELETES them,
+        // so anything still stored is unsaved work. `!== false` lets only an
+        // explicitly clean record pass — the safe direction is to BLOCK.
+        if (draft && draft.dirty !== false) return true;
+      } catch (_) {
+        // A degraded/unavailable store must not lock clean files in place.
+      }
+    }
+    return false;
+  }
+
+  /** Every path under `folderPath` that has unsaved local edits (see above). */
+  async function findUnsavedInside(folderPath) {
+    const folderPrefix = folderPath + '/';
+    const state = deps.getState();
+    const candidates = new Set();
+    for (const f of state.allFiles || []) {
+      if (f.path.startsWith(folderPrefix)) candidates.add(f.path);
+    }
+    if (deps.getWorkingTree) {
+      for (const c of deps.getWorkingTree().listChanges()) {
+        if (c.path.startsWith(folderPrefix)) candidates.add(c.path);
+      }
+    }
+    const dirty = [];
+    for (const p of candidates) {
+      if (await hasUnsavedEdits(p)) dirty.push(p);
+    }
+    return dirty.sort();
+  }
+
   async function onMoveFile(oldPath, targetFolder) {
-    // Block the move if the file has unsaved local edits — moving would read
-    // the committed GitHub version (not the local draft), then sweepDrafts()
-    // on loadTree() would delete the IndexedDB draft under the old path.
-    // Data loss either way, so refuse to start.
-    if (deps.getWorkingTree && deps.getWorkingTree().isDirty(oldPath)) {
+    // Block the move if the file has unsaved local edits (working tree, live
+    // autosave draft, or a stored IndexedDB draft — see hasUnsavedEdits):
+    // moving would read the committed GitHub version (not the local text),
+    // then sweepDrafts() on loadTree() would delete the draft under the old
+    // path. Data loss either way, so refuse to start — zero GitHub requests.
+    if (await hasUnsavedEdits(oldPath)) {
       alert(`"${oldPath}" has unsaved changes — Save or Commit first.`);
       deps.setSaveStatus(`Move blocked: "${oldPath}" has unsaved changes`, true);
       return;
@@ -465,8 +531,9 @@ export function createFileOps(deps) {
       return;
     }
 
-    // Block the rename if the file has unsaved local edits.
-    if (deps.getWorkingTree && deps.getWorkingTree().isDirty(path)) {
+    // Block the rename if the file has unsaved local edits (working tree,
+    // live autosave draft, or a stored IndexedDB draft).
+    if (await hasUnsavedEdits(path)) {
       alert(`"${path}" has unsaved changes — Save or Commit first.`);
       deps.setSaveStatus(`Rename blocked: "${path}" has unsaved changes`, true);
       return;
@@ -614,18 +681,17 @@ export function createFileOps(deps) {
     const newPath = `${dirnameOf(folderPath)}/${newName.trim()}`.replace(/^\/+/, '');
     if (newPath === folderPath) return;
 
-    // Block the folder rename if any file inside has unsaved local edits.
-    if (deps.getWorkingTree) {
-      const folderPrefix = folderPath + '/';
-      const dirtyInside = deps.getWorkingTree()
-        .listChanges()
-        .filter((c) => c.path.startsWith(folderPrefix));
-      if (dirtyInside.length > 0) {
-        const listed = dirtyInside.map((c) => c.path).join(', ');
-        alert(`"${folderPath}" has unsaved changes in: ${listed}\nSave or Commit first.`);
-        deps.setSaveStatus(`Folder rename blocked: unsaved changes in ${dirtyInside.length} file(s)`, true);
-        return;
-      }
+    // Block the folder rename if any file inside has unsaved local edits
+    // (working tree, live autosave draft, or a stored IndexedDB draft).
+    const dirtyInside = await findUnsavedInside(folderPath);
+    if (dirtyInside.length > 0) {
+      const listed = dirtyInside.join(', ');
+      alert(`"${folderPath}" has unsaved changes in: ${listed}\nSave or Commit first.`);
+      // The alert vanishes on click — repeat the reason in the status line
+      // (capped, so a 100-file folder does not flood it).
+      const shown = dirtyInside.slice(0, 3).join(', ') + (dirtyInside.length > 3 ? ', …' : '');
+      deps.setSaveStatus(`Folder rename blocked: unsaved changes in ${dirtyInside.length} file(s): ${shown}`, true);
+      return;
     }
 
     try {
