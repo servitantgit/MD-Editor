@@ -795,6 +795,8 @@ function ensureFileOps() {
     persistTabs,
     renderTabs,
     insertMarkdownAtCursor: typeof insertMarkdownAtCursor === 'function' ? insertMarkdownAtCursor : undefined,
+    getWorkingTree: () => workingTree,
+    refreshCommitBadge: () => { try { ensureCommitHistoryUI().refreshBadge(); } catch (_) {} },
   });
   return fileOps;
 }

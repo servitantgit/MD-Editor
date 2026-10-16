@@ -26,6 +26,8 @@ import { kindFromPath, isEditableTextPath, isCreatableFilePath, hasFileExtension
  * @param {() => void} deps.persistTabs
  * @param {() => void} deps.renderTabs
  * @param {(text: string) => void} [deps.insertMarkdownAtCursor]
+ * @param {() => import('./working-tree.js').WorkingTree} [deps.getWorkingTree] - the WorkingTree (dirty-file tracker)
+ * @param {() => void} [deps.refreshCommitBadge] - refresh the Commit badge after the working tree changes
  */
 export function createFileOps(deps) {
   const els = deps.els;
@@ -34,6 +36,15 @@ export function createFileOps(deps) {
 
 
   async function onMoveFile(oldPath, targetFolder) {
+    // Block the move if the file has unsaved local edits — moving would read
+    // the committed GitHub version (not the local draft), then sweepDrafts()
+    // on loadTree() would delete the IndexedDB draft under the old path.
+    // Data loss either way, so refuse to start.
+    if (deps.getWorkingTree && deps.getWorkingTree().isDirty(oldPath)) {
+      alert(`"${oldPath}" has unsaved changes — Save or Commit first.`);
+      deps.setSaveStatus(`Move blocked: "${oldPath}" has unsaved changes`, true);
+      return;
+    }
     deps.setSaveStatus(`Moving ${oldPath}...`, false);
     try {
       const wasCurrent = deps.getState().currentPath === oldPath;
@@ -46,6 +57,13 @@ export function createFileOps(deps) {
         if (wasCurrent) {
           deps.getState().currentPath = newPath;
           if (els.currentFileLabel) els.currentFileLabel.textContent = newPath;
+        }
+        // Move the working-tree entry so the Commit panel follows the file to
+        // its new path instead of showing a stale entry for the old path.
+        if (deps.getWorkingTree) {
+          deps.getWorkingTree().rename(oldPath, newPath);
+          deps.refreshCommitBadge?.();
+          deps.getFileTree().setDirtyMap(deps.getWorkingTree().statusMap());
         }
         deps.persistTabs();
         deps.renderTabs();
@@ -447,6 +465,13 @@ export function createFileOps(deps) {
       return;
     }
 
+    // Block the rename if the file has unsaved local edits.
+    if (deps.getWorkingTree && deps.getWorkingTree().isDirty(path)) {
+      alert(`"${path}" has unsaved changes — Save or Commit first.`);
+      deps.setSaveStatus(`Rename blocked: "${path}" has unsaved changes`, true);
+      return;
+    }
+
     try {
       deps.setSaveStatus(`Renaming ${path}...`, false);
       const wasCurrent = deps.getState().currentPath === path;
@@ -457,6 +482,13 @@ export function createFileOps(deps) {
         if (wasCurrent) {
           deps.getState().currentPath = newPath;
           if (els.currentFileLabel) els.currentFileLabel.textContent = newPath;
+        }
+        // Move the working-tree entry so the Commit panel follows the file to
+        // its new path instead of showing a stale entry for the old path.
+        if (deps.getWorkingTree) {
+          deps.getWorkingTree().rename(path, newPath);
+          deps.refreshCommitBadge?.();
+          deps.getFileTree().setDirtyMap(deps.getWorkingTree().statusMap());
         }
         deps.persistTabs();
         deps.renderTabs();
@@ -582,10 +614,38 @@ export function createFileOps(deps) {
     const newPath = `${dirnameOf(folderPath)}/${newName.trim()}`.replace(/^\/+/, '');
     if (newPath === folderPath) return;
 
+    // Block the folder rename if any file inside has unsaved local edits.
+    if (deps.getWorkingTree) {
+      const folderPrefix = folderPath + '/';
+      const dirtyInside = deps.getWorkingTree()
+        .listChanges()
+        .filter((c) => c.path.startsWith(folderPrefix));
+      if (dirtyInside.length > 0) {
+        const listed = dirtyInside.map((c) => c.path).join(', ');
+        alert(`"${folderPath}" has unsaved changes in: ${listed}\nSave or Commit first.`);
+        deps.setSaveStatus(`Folder rename blocked: unsaved changes in ${dirtyInside.length} file(s)`, true);
+        return;
+      }
+    }
+
     try {
       deps.setSaveStatus(`Renaming ${folderPath}...`, false);
       const { moved, updatedFiles } = await renameFolder(deps.getState().client, deps.getState().allFiles, folderPath, newPath);
       for (const [from, to] of deps.getTabs().renameFolder(folderPath, newPath)) deps.moveTabDoc(from, to);
+      // Move every working-tree entry that lived under the old folder prefix
+      // so the Commit panel follows the files to their new paths.
+      if (deps.getWorkingTree) {
+        const folderPrefix = folderPath + '/';
+        const newFolderPrefix = newPath + '/';
+        const changes = deps.getWorkingTree().listChanges();
+        for (const { path } of changes) {
+          if (path.startsWith(folderPrefix)) {
+            deps.getWorkingTree().rename(path, newFolderPrefix + path.slice(folderPrefix.length));
+          }
+        }
+        deps.refreshCommitBadge?.();
+        deps.getFileTree().setDirtyMap(deps.getWorkingTree().statusMap());
+      }
       deps.markStale(updatedFiles);
 
       // Optimistic local update (see onMoveFile), but a folder rename moves MANY
