@@ -196,6 +196,10 @@ def handle_github_api(route, request):
         html_body = "<!DOCTYPE html><html><body><h1>HTML_PAGE_OK</h1><p>Hello HTML preview</p></body></html>"
         b64 = base64.b64encode(html_body.encode("utf-8")).decode()
         route.fulfill(status=200, content_type="application/json", body=json.dumps({"content": b64, "sha": "sha-html"}))
+    elif "/contents/DragSrc/move-me.txt" in url or "/contents/DragTarget/DragSrc/move-me.txt" in url:
+        # Scenario I: moveFile reads the source before PUTting it at the new path.
+        b64 = base64.b64encode(b"move me please\n").decode()
+        route.fulfill(status=200, content_type="application/json", body=json.dumps({"content": b64, "sha": "sha-mv1"}))
     elif re.search(r"/repos/[^/]+/[^/]+/commits(/[a-f0-9]+)?(\?|$)", url) and request.method == "GET":
         # History panel: list or single commit
         if url.rstrip("/").endswith("/commits") or "/commits?" in url:
@@ -1391,6 +1395,80 @@ with sync_playwright() as p:
     assert spy["onGamma"] == "Gamma", f"outline scroll-spy did not follow the cursor: {spy}"
     assert spy["onDelta"] == "Delta", f"outline scroll-spy did not follow the cursor: {spy}"
     print("✓ outline scroll-spy follows the cursor on the rebuilt editor")
+
+    # --- I. FOLDER DRAG & DROP: a folder row onto another folder row, then onto the root strip ---
+    print("\n--- I. folder drag & drop: onto a folder row, then onto the root strip ---")
+
+    def drag_folder_onto(page, src_path, target_selector):
+        # A REAL browser drag (Playwright's mouse path triggers the native
+        # HTML5 DnD). Synthetic DragEvents do NOT work for this: Chromium
+        # exposes the data store to real drag lifecycle events only — getData()
+        # inside a synthetic drop handler returns '' (verified with a probe;
+        # the same drag via drag_and_drop returns the payload).
+        page.drag_and_drop(f".file-item.folder[data-path='{src_path}']", target_selector)
+
+    def drop_writes(method, suffix):
+        return [w for w in CONTENT_WRITES if w["method"] == method and w["url"].endswith(suffix)]
+
+    # Fixtures: a source folder and an empty target container. The DESTINATION
+    # path must NOT be pre-seeded — onMoveFolder refuses to move onto an
+    # existing name (part of the feature), so the mock only learns the
+    # destination after the move, like a real tree reload would.
+    # Scenario H switched the app to the SECOND repo, so the fixtures belong
+    # in SECOND_TREE — EXTRA_TREE only feeds the first repo's mock.
+    SECOND_TREE.append({"path": "DragSrc/move-me.txt", "type": "blob", "sha": "sha-mv1"})
+    SECOND_TREE.append({"path": "DragTarget/.gitkeep", "type": "blob", "sha": "sha-gk-t"})
+    page.click("#btn-refresh")
+    page.wait_for_selector(".file-item.folder[data-path='DragSrc']", timeout=5000)
+    page.wait_for_selector(".file-item.folder[data-path='DragTarget']", timeout=5000)
+
+    def active_folder_text():
+        return page.locator("#active-folder-path").inner_text().strip()
+
+    # I1 — DragSrc onto the DragTarget folder ROW.
+    CONTENT_WRITES.clear()
+    seen_dialogs.clear()
+    drag_folder_onto(page, "DragSrc", ".file-item.folder[data-path='DragTarget']")
+    wait_until(lambda: drop_writes("PUT", "/contents/DragTarget/DragSrc/move-me.txt"),
+               seconds=15, what="the folder move to PUT the file under the target")
+    wait_until(lambda: drop_writes("DELETE", "/contents/DragSrc/move-me.txt"),
+               seconds=15, what="the folder move to DELETE the old path")
+    assert any('Move "DragSrc"' in d for d in seen_dialogs), \
+        f"folder drag did not ask for confirmation: {seen_dialogs}"
+    # The post-move tree reload expanded the destination: expandFolderChain
+    # rebased the "create here" target onto it, which the label reports —
+    # observable parent-side, no mock seeding needed.
+    wait_until(lambda: active_folder_text() == "DragTarget/DragSrc",
+               what="the destination folder to become the active target")
+    # GitHub now lists the file under its new path: a refresh shows the moved
+    # folder under the target, expanded (its file row is visible), while the
+    # old root-level row is gone.
+    SECOND_TREE[:] = [e for e in SECOND_TREE if e["path"] != "DragSrc/move-me.txt"]
+    SECOND_TREE.append({"path": "DragTarget/DragSrc/move-me.txt", "type": "blob", "sha": "sha-mv2"})
+    page.click("#btn-refresh")
+    page.wait_for_selector(".file-item.folder[data-path='DragTarget/DragSrc']", timeout=5000)
+    page.wait_for_selector(".file-item[data-path='DragTarget/DragSrc/move-me.txt']", timeout=5000)
+    page.wait_for_selector(".file-item.folder[data-path='DragSrc']", state="detached", timeout=5000)
+    print("✓ dragging a folder onto another folder moves it there, destination expanded")
+
+    # I2 — DragTarget/DragSrc onto the "move to repository root" strip.
+    SECOND_TREE[:] = [e for e in SECOND_TREE if e["path"] != "DragTarget/DragSrc/move-me.txt"]
+    CONTENT_WRITES.clear()
+    seen_dialogs.clear()
+    drag_folder_onto(page, "DragTarget/DragSrc", ".tree-root-drop-root")
+    wait_until(lambda: drop_writes("PUT", "/contents/DragSrc/move-me.txt"),
+               seconds=15, what="the root move to PUT the file at the root")
+    wait_until(lambda: drop_writes("DELETE", "/contents/DragTarget/DragSrc/move-me.txt"),
+               seconds=15, what="the root move to DELETE the nested path")
+    assert any('Move "DragSrc"' in d and 'repository root' in d for d in seen_dialogs), \
+        f"root-strip move did not confirm with the root as destination: {seen_dialogs}"
+    wait_until(lambda: active_folder_text() == "DragSrc",
+               what="the root-level folder to become the active target")
+    # It really landed at the root: a refresh shows the folder one level up.
+    SECOND_TREE.append({"path": "DragSrc/move-me.txt", "type": "blob", "sha": "sha-mv3"})
+    page.click("#btn-refresh")
+    page.wait_for_selector(".file-item.folder[data-path='DragSrc']", timeout=5000)
+    print("✓ dragging a folder onto the root strip moves it to the repository root")
 
     assert not page_errors, f"unhandled page errors: {page_errors}"
     browser.close()

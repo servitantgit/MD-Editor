@@ -48,6 +48,7 @@ export class FileTree {
    *   onOpenFile: (path: string) => void,
    *   onPreviewImage: (path: string) => void,
    *   onMoveFile: (oldPath: string, targetFolder: string) => Promise<void>,
+   *   onMoveFolder: (oldPath: string, targetParent: string) => Promise<void>,
    *   getActivePath: () => string|null,
    *   onRenameFolder: (path: string) => void,
    *   onDeleteFolder: (path: string) => void,
@@ -64,6 +65,10 @@ export class FileTree {
     this.activeFolder = '';
     /** @type {Record<string, 'M'|'A'>} */
     this.dirtyMap = {};
+    // The folder currently being dragged (set on dragstart, cleared on
+    // dragend). dataTransfer.getData is EMPTY during dragover, so drop
+    // targets need this to know what is flying and reject invalid ones.
+    this._draggedFolder = null;
   }
 
   /** Update dirty badges without changing the file list. */
@@ -211,6 +216,22 @@ export class FileTree {
         e.preventDefault();
         this._showFolderContextMenu(e.clientX, e.clientY, folder.path);
       });
+      // Folders drag like files do. Only STRING payloads are set — never
+      // Files/items — so the OS folder-upload and image dropzones keep
+      // ignoring internal drags. Click still toggles the folder: a drag only
+      // starts after the pointer actually moves.
+      el.draggable = true;
+      el.addEventListener('dragstart', (e) => {
+        e.dataTransfer.setData('application/x-md-folder', folder.path);
+        e.dataTransfer.setData('text/plain', folder.path); // compatibility
+        e.dataTransfer.effectAllowed = 'move';
+        this._draggedFolder = folder.path;
+        el.classList.add('dragging');
+      });
+      el.addEventListener('dragend', () => {
+        el.classList.remove('dragging');
+        this._draggedFolder = null;
+      });
       this._wireDropTarget(el, folder.path);
       container.appendChild(el);
 
@@ -282,9 +303,30 @@ export class FileTree {
     }
   }
 
+  /**
+   * True when a FOLDER drag must not be accepted on this target: the folder
+   * itself, any of its descendants (a folder cannot be its own child), or its
+   * current parent (dropping there is a no-op). Reads `this._draggedFolder`
+   * because dataTransfer.getData is empty during dragover in real browsers.
+   * File drags (and OS drags, which never fire our dragstart) are unaffected.
+   */
+  _isInvalidFolderDropTarget(folderPath) {
+    const src = this._draggedFolder;
+    if (!src) return false;
+    if (folderPath === src) return true; // itself
+    if (folderPath && folderPath.startsWith(src + '/')) return true; // a descendant
+    if (folderPath === dirnameOf(src)) return true; // current parent — no-op
+    return false;
+  }
+
   _wireDropTarget(el, folderPath) {
     el.addEventListener('dragover', (e) => {
       e.preventDefault();
+      if (this._isInvalidFolderDropTarget(folderPath)) {
+        e.dataTransfer.dropEffect = 'none';
+        el.classList.remove('drop-target');
+        return;
+      }
       e.dataTransfer.dropEffect = 'move';
       el.classList.add('drop-target');
     });
@@ -292,6 +334,14 @@ export class FileTree {
     el.addEventListener('drop', async (e) => {
       e.preventDefault();
       el.classList.remove('drop-target');
+      // Branch on the payload: folder drags carry a custom type; file drags
+      // (unchanged) are just a text/plain path.
+      const folderSrc = e.dataTransfer.getData('application/x-md-folder');
+      if (folderSrc) {
+        if (this._isInvalidFolderDropTarget(folderPath)) return;
+        if (this.handlers?.onMoveFolder) await this.handlers.onMoveFolder(folderSrc, folderPath);
+        return;
+      }
       const srcPath = e.dataTransfer.getData('text/plain');
       if (!srcPath) return;
       if (this.handlers?.onMoveFile) await this.handlers.onMoveFile(srcPath, folderPath);

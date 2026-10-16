@@ -51,9 +51,9 @@ function makeDeps({ client, allFiles, currentPath = 'Notes/a.md', workingTree, c
   let statusMsg = '';
   let statusIsError = false;
   const deps = {
-    els: {},
+    els: { currentFileLabel: { textContent: '' } },
     getState: () => state,
-    getFileTree: () => ({ setDirtyMap: () => {} }),
+    getFileTree: () => ({ setDirtyMap: () => {}, setFiles: () => {}, getActiveFolder: () => '', setActiveFolder: () => {} }),
     getTabs: () => ({ rename: () => {}, paths: [], renameFolder: () => [] }),
     getImageResolver: () => ({ invalidate: () => {} }),
     setSaveStatus: (msg, isError) => { statusMsg = msg; statusIsError = isError; },
@@ -283,4 +283,169 @@ test('a draft belonging to ANOTHER repository does not block the move', async ()
 
   assert.equal(client.puts.length, 1, 'move proceeds — another repo\'s draft is not ours to protect');
   assert.equal(client.deletes.length, 1, 'one delete for the move');
+});
+
+test('onMoveFolder refuses to move a folder into its own descendant (zero requests)', async () => {
+  const client = new FakeClient({ 'Notes/Sub/a.md': '# a' });
+  const allFiles = [{ path: 'Notes/Sub/a.md', sha: 'sha-a' }];
+  const { deps, status } = makeDeps({ client, allFiles, workingTree: new WorkingTree() });
+  const { onMoveFolder } = createFileOps(deps);
+
+  await onMoveFolder('Notes', 'Notes/Sub');
+
+  assert.equal(client.puts.length, 0, 'zero puts');
+  assert.equal(client.deletes.length, 0, 'zero deletes');
+  const { msg, isError } = status();
+  assert.match(msg, /into itself/, 'status explains a folder cannot contain itself');
+  assert.equal(isError, true, 'status is an error');
+});
+
+test('onMoveFolder refuses when that name exists in the target (zero requests)', async () => {
+  const client = new FakeClient({
+    'Notes/a.md': '# a',
+    'Docs/Notes/keep.txt': 'x',
+  });
+  const allFiles = [
+    { path: 'Notes/a.md', sha: 'sha-a' },
+    { path: 'Docs/Notes/keep.txt', sha: 'sha-k' },
+  ];
+  const { deps, status } = makeDeps({ client, allFiles, workingTree: new WorkingTree() });
+  const { onMoveFolder } = createFileOps(deps);
+
+  await onMoveFolder('Notes', 'Docs');
+
+  assert.equal(client.puts.length, 0, 'zero puts');
+  assert.equal(client.deletes.length, 0, 'zero deletes');
+  const { msg, isError } = status();
+  assert.match(msg, /already exists/, 'status names the collision');
+  assert.equal(isError, true, 'status is an error');
+});
+
+test('onMoveFolder is a no-op when the folder is already in the target (zero requests)', async () => {
+  const client = new FakeClient({ 'Notes/a.md': '# a', 'Notes/Sub/b.md': '# b' });
+  const allFiles = [
+    { path: 'Notes/a.md', sha: 'sha-a' },
+    { path: 'Notes/Sub/b.md', sha: 'sha-b' },
+  ];
+  const { deps, status } = makeDeps({ client, allFiles, workingTree: new WorkingTree() });
+  const { onMoveFolder } = createFileOps(deps);
+
+  // Root strip onto a folder that is already at the root.
+  await onMoveFolder('Notes', '');
+  assert.equal(client.puts.length, 0, 'zero puts');
+  assert.equal(client.deletes.length, 0, 'zero deletes');
+  assert.match(status().msg, /already in/, 'says the folder is already there');
+
+  // Its current parent.
+  await onMoveFolder('Notes/Sub', 'Notes');
+  assert.equal(client.puts.length, 0, 'still zero puts');
+  assert.match(status().msg, /already in/);
+});
+
+test('onMoveFolder sends nothing when the confirm is cancelled', async () => {
+  const client = new FakeClient({ 'Notes/a.md': '# a' });
+  const allFiles = [{ path: 'Notes/a.md', sha: 'sha-a' }];
+  const { deps, status } = makeDeps({ client, allFiles, workingTree: new WorkingTree() });
+  const { onMoveFolder } = createFileOps(deps);
+
+  const seen = [];
+  const originalConfirm = globalThis.confirm;
+  globalThis.confirm = (msg) => { seen.push(msg); return false; };
+  try {
+    await onMoveFolder('Notes', 'Docs');
+  } finally {
+    globalThis.confirm = originalConfirm;
+  }
+
+  assert.equal(client.puts.length, 0, 'zero puts');
+  assert.equal(client.deletes.length, 0, 'zero deletes');
+  assert.equal(seen.length, 1, 'exactly one confirm was shown');
+  assert.match(seen[0], /Move "Notes"/, 'names the folder');
+  assert.match(seen[0], /1 file/, 'shows the file count');
+  assert.match(seen[0], /Docs/, 'shows the destination');
+  assert.match(status().msg, /cancelled/i);
+});
+
+test('onMoveFolder to the repository root moves the folder up (Notes/Sub → Sub)', async () => {
+  const client = new FakeClient({ 'Notes/Sub/a.md': '# a' });
+  const allFiles = [{ path: 'Notes/Sub/a.md', sha: 'sha-a' }];
+  const workingTree = new WorkingTree();
+  const { deps, status } = makeDeps({ client, allFiles, workingTree });
+  const { onMoveFolder } = createFileOps(deps);
+
+  await onMoveFolder('Notes/Sub', '');
+
+  assert.equal(client.puts.length, 1, 'one put for the moved file');
+  assert.equal(client.deletes.length, 1, 'one delete for the old path');
+  assert.equal(client.files.has('Notes/Sub/a.md'), false, 'old path removed');
+  assert.equal(client.files.get('Sub/a.md').text, '# a', 'file lands in the root-level folder');
+  assert.match(status().msg, /Moved: Notes\/Sub → Sub/, 'status reports the landing spot');
+  assert.equal(status().isError, false, 'move reported as success');
+});
+
+test('onMoveFolder blocks when a file inside has unsaved edits (zero requests)', async () => {
+  const client = new FakeClient({ 'Notes/a.md': '# a', 'Notes/b.md': '# b' });
+  const allFiles = [
+    { path: 'Notes/a.md', sha: 'sha-a' },
+    { path: 'Notes/b.md', sha: 'sha-b' },
+  ];
+  const workingTree = new WorkingTree();
+  workingTree.setDirty('Notes/b.md', '# local b', 'sha-b');
+  const { deps, status } = makeDeps({ client, allFiles, workingTree });
+  const { onMoveFolder } = createFileOps(deps);
+
+  await onMoveFolder('Notes', 'Docs');
+
+  assert.equal(client.puts.length, 0, 'zero puts');
+  assert.equal(client.deletes.length, 0, 'zero deletes');
+  const { msg, isError } = status();
+  assert.match(msg, /unsaved changes/, 'status mentions unsaved changes');
+  assert.match(msg, /Notes\/b\.md/, 'lists the dirty file');
+  assert.equal(isError, true, 'status is an error');
+});
+
+test('a successful onMoveFolder renames tabs and working-tree entries to the new paths', async () => {
+  const client = new FakeClient({ 'Notes/a.md': '# a' });
+  const allFiles = [{ path: 'Notes/a.md', sha: 'sha-a' }];
+  const workingTree = new WorkingTree();
+
+  // The user types into the file WHILE the async pre-check has already run:
+  // the move goes through (the check saw a clean tree), and the post-move
+  // steps must still carry the freshly-created entry to the new path.
+  const realPut = client.putFile.bind(client);
+  client.putFile = async (path, b64, message, sha) => {
+    workingTree.setDirty('Notes/a.md', '# typed mid-move', sha || 'sha-a');
+    return realPut(path, b64, message, sha);
+  };
+
+  const { deps, status } = makeDeps({ client, allFiles, workingTree });
+  const renameFolderCalls = [];
+  const tabMoves = [];
+  deps.getTabs = () => ({
+    rename: () => {},
+    paths: [],
+    renameFolder: (from, to) => {
+      renameFolderCalls.push([from, to]);
+      // Mirror the real tabs model: rebase the file's path under the new folder.
+      return [['Notes/a.md', `${to}/a.md`]];
+    },
+  });
+  deps.moveTabDoc = (from, to) => tabMoves.push([from, to]);
+  const loadOpts = [];
+  deps.loadTree = async (opts) => { loadOpts.push(opts); };
+
+  const { onMoveFolder } = createFileOps(deps);
+  await onMoveFolder('Notes', 'Docs');
+
+  assert.equal(client.puts.length, 1, 'one put for the move');
+  assert.equal(client.deletes.length, 1, 'one delete for the move');
+  assert.equal(client.files.has('Notes/a.md'), false, 'old path removed');
+  assert.equal(client.files.get('Docs/Notes/a.md').text, '# a', 'file lands inside the target folder');
+  assert.deepEqual(renameFolderCalls, [['Notes', 'Docs/Notes']], 'tabs model told about the folder rename');
+  assert.deepEqual(tabMoves, [['Notes/a.md', 'Docs/Notes/a.md']], 'tab document moved to the new path');
+  assert.equal(workingTree.isDirty('Notes/a.md'), false, 'old working-tree entry gone');
+  assert.equal(workingTree.isDirty('Docs/Notes/a.md'), true, 'working-tree entry followed the file');
+  assert.deepEqual(loadOpts[0], { expandFolder: 'Docs/Notes' }, 'tree reloads with the destination expanded');
+  assert.equal(status().isError, false, 'move reported as success');
+  assert.match(status().msg, /Moved: Notes → Docs\/Notes/);
 });

@@ -697,51 +697,150 @@ export function createFileOps(deps) {
     try {
       deps.setSaveStatus(`Renaming ${folderPath}...`, false);
       const { moved, updatedFiles } = await renameFolder(deps.getState().client, deps.getState().allFiles, folderPath, newPath);
-      for (const [from, to] of deps.getTabs().renameFolder(folderPath, newPath)) deps.moveTabDoc(from, to);
-      // Move every working-tree entry that lived under the old folder prefix
-      // so the Commit panel follows the files to their new paths.
-      if (deps.getWorkingTree) {
-        const folderPrefix = folderPath + '/';
-        const newFolderPrefix = newPath + '/';
-        const changes = deps.getWorkingTree().listChanges();
-        for (const { path } of changes) {
-          if (path.startsWith(folderPrefix)) {
-            deps.getWorkingTree().rename(path, newFolderPrefix + path.slice(folderPrefix.length));
-          }
-        }
-        deps.refreshCommitBadge?.();
-        deps.getFileTree().setDirtyMap(deps.getWorkingTree().statusMap());
-      }
-      deps.markStale(updatedFiles);
-
-      // Optimistic local update (see onMoveFile), but a folder rename moves MANY
-      // files. renameFolder() reads deps.getState().allFiles without mutating it, so every
-      // entry still names its OLD path; repoint them all under the new prefix so
-      // the whole folder visibly moves at once. The eventual deps.loadTree() overwrites
-      // with authoritative state when GitHub catches up.
-      const folderPrefix = folderPath + '/';
-      const newFolderPrefix = newPath + '/';
-      let folderPatched = false;
-      for (let i = 0; i < deps.getState().allFiles.length; i++) {
-        const f = deps.getState().allFiles[i];
-        if (f.path.startsWith(folderPrefix)) {
-          deps.getState().allFiles[i] = { ...f, path: newFolderPrefix + f.path.slice(folderPrefix.length) };
-          folderPatched = true;
-        }
-      }
-      if (folderPatched) deps.getFileTree().setFiles(deps.getState().allFiles);
-
-      if (deps.getState().currentPath && deps.getState().currentPath.startsWith(folderPath + '/')) {
-        deps.getState().currentPath = newPath + deps.getState().currentPath.slice(folderPath.length);
-        els.currentFileLabel.textContent = deps.getState().currentPath;
-        await deps.openFile(deps.getState().currentPath, { reload: true });
-      }
-      deps.persistTabs();
-      deps.renderTabs();
-      await deps.loadTree();
+      await afterFolderMoved({ folderPath, newPath, updatedFiles });
       deps.setSaveStatus(`Renamed: ${folderPath} → ${newPath} (files: ${moved.length})`, false);
     } catch (e) {
       deps.setSaveStatus('Error: ' + e.message, true);
+    }
+  }
+
+
+  /**
+   * Moves a folder to another parent by drag & drop (no rename prompt — the
+   * user picked the destination with the pointer). Same physical operation as
+   * a rename (renameFolder = per-file moves + ONE reference-rewrite pass) and
+   * the same post-move steps, shared with onRenameFolder via afterFolderMoved.
+   */
+  async function onMoveFolder(oldPath, targetParent) {
+    const name = basenameOf(oldPath);
+    const newPath = targetParent ? `${targetParent}/${name}` : name;
+    const destLabel = targetParent || 'the repository root';
+
+    // Already where it would land: dropped on its current parent, or on the
+    // root strip while already at the root. Zero requests.
+    if (newPath === oldPath) {
+      deps.setSaveStatus(`"${name}" is already in ${destLabel}`, false);
+      return;
+    }
+
+    // A folder cannot become its own child.
+    if (targetParent === oldPath || (targetParent && targetParent.startsWith(oldPath + '/'))) {
+      alert(`Cannot move "${name}" into itself — "${targetParent}" is inside it.`);
+      deps.setSaveStatus('Move blocked: a folder cannot be moved into itself', true);
+      return;
+    }
+
+    // Name collision: a file OR a folder already called `name` in the target.
+    // (A folder is implied by any file under its prefix.) Zero requests.
+    const candidate = (targetParent ? targetParent + '/' : '') + name;
+    const clash = deps.getState().allFiles.some(
+      (f) => f.path === candidate || f.path.startsWith(candidate + '/')
+    );
+    if (clash) {
+      alert(`A file or folder named "${name}" already exists in ${destLabel}.`);
+      deps.setSaveStatus(`Move blocked: "${name}" already exists in ${destLabel}`, true);
+      return;
+    }
+
+    // Block if any file inside has unsaved local edits (working tree, live
+    // autosave draft, or a stored IndexedDB draft) — same protection as rename.
+    const dirtyInside = await findUnsavedInside(oldPath);
+    if (dirtyInside.length > 0) {
+      const listed = dirtyInside.join(', ');
+      alert(`"${oldPath}" has unsaved changes in: ${listed}\nSave or Commit first.`);
+      const shown = dirtyInside.slice(0, 3).join(', ') + (dirtyInside.length > 3 ? ', …' : '');
+      deps.setSaveStatus(`Folder move blocked: unsaved changes in ${dirtyInside.length} file(s): ${shown}`, true);
+      return;
+    }
+
+    const count = deps.getState().allFiles.filter((f) => f.path.startsWith(oldPath + '/')).length;
+    const confirmed = confirm(
+      `Move "${name}" (${count} file${count === 1 ? '' : 's'}) to ${destLabel}?\nLinks in other notes will be updated.`
+    );
+    if (!confirmed) {
+      deps.setSaveStatus('Move cancelled', false);
+      return;
+    }
+
+    try {
+      deps.setSaveStatus(`Moving ${oldPath} → ${newPath}...`, false);
+      const { moved, updatedFiles } = await renameFolder(deps.getState().client, deps.getState().allFiles, oldPath, newPath);
+      await afterFolderMoved({ folderPath: oldPath, newPath, updatedFiles });
+      deps.setSaveStatus(`Moved: ${oldPath} → ${newPath} (files: ${moved.length})`, false);
+    } catch (e) {
+      deps.setSaveStatus('Move error: ' + e.message, true);
+    }
+  }
+
+
+  /**
+   * Everything that must follow a folder that physically moved on GitHub —
+   * shared by onRenameFolder and onMoveFolder so the two cannot drift apart:
+   * tabs, working tree, optimistic tree patch, open-file repoint, and a tree
+   * reload with the destination expanded and (when it was the create target)
+   * the active folder rebased onto the new location.
+   */
+  async function afterFolderMoved({ folderPath, newPath, updatedFiles }) {
+    // Captured BEFORE the optimistic setFiles below: patching the entries
+    // makes the old folder disappear from the tree, and setFiles() would prune
+    // the active target to the root before we could rebase it.
+    const fileTree = deps.getFileTree();
+    const wasActive = fileTree && typeof fileTree.getActiveFolder === 'function'
+      ? fileTree.getActiveFolder()
+      : '';
+
+    for (const [from, to] of deps.getTabs().renameFolder(folderPath, newPath)) deps.moveTabDoc(from, to);
+    // Move every working-tree entry that lived under the old folder prefix
+    // so the Commit panel follows the files to their new paths.
+    if (deps.getWorkingTree) {
+      const folderPrefix = folderPath + '/';
+      const newFolderPrefix = newPath + '/';
+      const changes = deps.getWorkingTree().listChanges();
+      for (const { path } of changes) {
+        if (path.startsWith(folderPrefix)) {
+          deps.getWorkingTree().rename(path, newFolderPrefix + path.slice(folderPrefix.length));
+        }
+      }
+      deps.refreshCommitBadge?.();
+      fileTree.setDirtyMap(deps.getWorkingTree().statusMap());
+    }
+    deps.markStale(updatedFiles);
+
+    // Optimistic local update (see onMoveFile), but a folder move moves MANY
+    // files. renameFolder() reads deps.getState().allFiles without mutating it, so every
+    // entry still names its OLD path; repoint them all under the new prefix so
+    // the whole folder visibly moves at once. The eventual deps.loadTree() overwrites
+    // with authoritative state when GitHub catches up.
+    const folderPrefix = folderPath + '/';
+    const newFolderPrefix = newPath + '/';
+    let folderPatched = false;
+    for (let i = 0; i < deps.getState().allFiles.length; i++) {
+      const f = deps.getState().allFiles[i];
+      if (f.path.startsWith(folderPrefix)) {
+        deps.getState().allFiles[i] = { ...f, path: newFolderPrefix + f.path.slice(folderPrefix.length) };
+        folderPatched = true;
+      }
+    }
+    if (folderPatched) fileTree.setFiles(deps.getState().allFiles);
+
+    if (deps.getState().currentPath && deps.getState().currentPath.startsWith(folderPath + '/')) {
+      deps.getState().currentPath = newPath + deps.getState().currentPath.slice(folderPath.length);
+      if (els.currentFileLabel) els.currentFileLabel.textContent = deps.getState().currentPath;
+      await deps.openFile(deps.getState().currentPath, { reload: true });
+    }
+    deps.persistTabs();
+    deps.renderTabs();
+
+    // Reload with the destination expanded so the user sees where the folder
+    // landed; rebase the "create here" target when it pointed at the moved
+    // folder or anywhere inside it.
+    await deps.loadTree({ expandFolder: newPath });
+    if (wasActive === folderPath || wasActive.startsWith(folderPath + '/')) {
+      const targetActive = newPath + wasActive.slice(folderPath.length);
+      if (typeof fileTree.expandFolderChain === 'function') fileTree.expandFolderChain(targetActive);
+      else if (fileTree && typeof fileTree.setActiveFolder === 'function') {
+        fileTree.setActiveFolder(targetActive, { expand: true });
+      }
     }
   }
 
@@ -787,6 +886,7 @@ export function createFileOps(deps) {
   function treeHandlers() {
     return {
       onMoveFile,
+      onMoveFolder,
       onRenameFolder,
       onDeleteFolder,
       onCreateFileIn,
@@ -805,6 +905,7 @@ export function createFileOps(deps) {
     onCreateNewFolder,
     onDeleteFile,
     onMoveFile,
+    onMoveFolder,
     onRenameFile,
     onDeleteFileAt,
     onCopyLinkToFile,

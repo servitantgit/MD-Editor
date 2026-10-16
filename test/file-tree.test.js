@@ -26,15 +26,35 @@ test('buildTreeStructure nests files under their folders correctly', () => {
 });
 
 /** Renders a FileTree into a detached jsdom container. */
-function mountTree(files) {
+function mountTree(files, extraHandlers = {}) {
   const dom = new JSDOM('<!doctype html><body><div id="tree"></div></body>');
   const previous = { document: globalThis.document, window: globalThis.window };
   globalThis.document = dom.window.document;
   globalThis.window = dom.window;
   const container = dom.window.document.getElementById('tree');
-  const tree = new FileTree(container, { getActivePath: () => null });
+  const tree = new FileTree(container, { getActivePath: () => null, ...extraHandlers });
   tree.setFiles(files);
   return { dom, container, tree, restore: () => Object.assign(globalThis, previous) };
+}
+
+/** A minimal DataTransfer stand-in: jsdom has none, and the drag code only
+ *  ever setData/getData strings — exactly what an internal tree drag carries. */
+function makeDataTransfer() {
+  const store = new Map();
+  return {
+    effectAllowed: 'none',
+    dropEffect: 'none',
+    store,
+    setData: (type, value) => { store.set(type, String(value)); },
+    getData: (type) => (store.has(type) ? store.get(type) : ''),
+  };
+}
+
+function fireDrag(el, type, dataTransfer) {
+  const ev = new el.ownerDocument.defaultView.Event(type, { bubbles: true, cancelable: true });
+  ev.dataTransfer = dataTransfer;
+  el.dispatchEvent(ev);
+  return ev;
 }
 
 function click(el) {
@@ -240,6 +260,100 @@ test('setActiveFolder survives setFiles when folder has only .gitkeep', () => {
     // Reloading with the same gitkeep-only file must NOT reset activeFolder.
     tree.setFiles([{ path: 'Docs/.gitkeep' }]);
     assert.equal(tree.getActiveFolder(), 'Docs', 'gitkeep-only folder must remain the active target');
+  } finally {
+    restore();
+  }
+});
+
+test('folder rows are draggable and dragstart publishes the folder payload', () => {
+  const { container, restore } = mountTree([{ path: 'Notes/a.md' }]);
+  try {
+    const row = container.querySelector('.file-item.folder[data-path="Notes"]');
+    assert.equal(row.draggable, true, 'folder row must be draggable');
+    const dt = makeDataTransfer();
+    fireDrag(row, 'dragstart', dt);
+    assert.equal(dt.getData('application/x-md-folder'), 'Notes', 'custom folder type is set');
+    assert.equal(dt.getData('text/plain'), 'Notes', 'text/plain fallback is set');
+    assert.equal(dt.effectAllowed, 'move');
+    assert.equal(row.classList.contains('dragging'), true, 'visual dragging state on the row');
+    fireDrag(row, 'dragend', makeDataTransfer());
+    assert.equal(row.classList.contains('dragging'), false, 'dragging cleared on dragend');
+  } finally {
+    restore();
+  }
+});
+
+test('a folder drop calls onMoveFolder; a file payload still calls onMoveFile', async () => {
+  const calls = [];
+  const { container, restore } = mountTree(
+    [{ path: 'Notes/a.md' }, { path: 'Other/b.md' }],
+    {
+      onMoveFolder: async (src, target) => { calls.push(['folder', src, target]); },
+      onMoveFile: async (src, target) => { calls.push(['file', src, target]); },
+    }
+  );
+  try {
+    const target = container.querySelector('.file-item.folder[data-path="Other"]');
+
+    // Folder payload — the text/plain fallback must NOT route it to onMoveFile.
+    const folderDt = makeDataTransfer();
+    folderDt.setData('application/x-md-folder', 'Notes');
+    folderDt.setData('text/plain', 'Notes');
+    fireDrag(target, 'drop', folderDt);
+
+    // Plain file payload — unchanged behaviour.
+    const fileDt = makeDataTransfer();
+    fileDt.setData('text/plain', 'Notes/a.md');
+    fireDrag(target, 'drop', fileDt);
+
+    await new Promise((r) => setTimeout(r, 0));
+    assert.deepEqual(calls, [
+      ['folder', 'Notes', 'Other'],
+      ['file', 'Notes/a.md', 'Other'],
+    ]);
+  } finally {
+    restore();
+  }
+});
+
+test('dragover refuses the folder itself, its descendants and its current parent', () => {
+  const { container, restore } = mountTree([
+    { path: 'Notes/Sub/a.md' },
+    { path: 'Other/b.md' },
+  ]);
+  try {
+    // Expand Notes so its Sub row exists (folders start collapsed).
+    click(container.querySelector('.file-item.folder[data-path="Notes"] .folder-toggle'));
+    const notesRow = container.querySelector('.file-item.folder[data-path="Notes"]');
+    const subRow = container.querySelector('.file-item.folder[data-path="Notes/Sub"]');
+    const otherRow = container.querySelector('.file-item.folder[data-path="Other"]');
+    const rootStrip = container.querySelector('.tree-root-drop-root');
+    assert.ok(subRow, 'precondition: Notes/Sub row is visible');
+
+    // A real drag of Notes: dragstart sets the tree-internal dragged-folder
+    // state (getData is empty during dragover in real browsers).
+    fireDrag(notesRow, 'dragstart', makeDataTransfer());
+
+    for (const [label, el] of [
+      ['the folder itself', notesRow],
+      ['a descendant', subRow],
+      ['its current parent (the root strip)', rootStrip],
+    ]) {
+      const ev = fireDrag(el, 'dragover', makeDataTransfer());
+      assert.equal(el.classList.contains('drop-target'), false, `no highlight on ${label}`);
+      assert.equal(ev.dataTransfer.dropEffect, 'none', `dropEffect none on ${label}`);
+    }
+
+    // A different folder is still a valid target.
+    const ok = fireDrag(otherRow, 'dragover', makeDataTransfer());
+    assert.equal(otherRow.classList.contains('drop-target'), true, 'valid target is highlighted');
+    assert.equal(ok.dataTransfer.dropEffect, 'move');
+
+    // dragend clears the state — afterwards it is not a folder drag any more.
+    fireDrag(notesRow, 'dragend', makeDataTransfer());
+    const after = fireDrag(otherRow, 'dragover', makeDataTransfer());
+    assert.equal(otherRow.classList.contains('drop-target'), true);
+    assert.equal(after.dataTransfer.dropEffect, 'move');
   } finally {
     restore();
   }

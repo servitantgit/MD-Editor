@@ -331,6 +331,9 @@ button.secondary:hover { background: #21262d; }
 .file-item .name { overflow: hidden; text-overflow: ellipsis; }
 .file-item.dragging { opacity: 0.4; }
 .file-item.drop-target { outline: 2px dashed #58a6ff; background: #1f6feb22; }
+/* Folder rows are draggable too — they reuse .dragging above; grab the cursor
+   so a folder drag reads as different from a file drag. */
+.file-item.folder.dragging { cursor: grabbing; }
 .file-item.folder .folder-toggle {
   display: inline-block;
   width: 14px;
