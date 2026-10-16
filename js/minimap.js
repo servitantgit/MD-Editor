@@ -45,33 +45,90 @@ export function createMinimap(cm, canvasEl, opts = {}) {
   const getPreviewEl = typeof opts.getPreviewEl === 'function' ? opts.getPreviewEl : () => null;
   const isPreviewActive = typeof opts.isPreviewActive === 'function' ? opts.isPreviewActive : () => false;
   const isSplitActive = typeof opts.isSplit === 'function' ? opts.isSplit : () => false;
-  // Scroll-sync guard with async release: cm.scrollTo() / pv.scrollTop fire
-  // their scroll events ASYNC (next tick / rAF). Clearing the guard in a
-  // finally{} releases it BEFORE those events arrive, so the follower's event
-  // is mistaken for a user scroll and writes back with rounding error —
-  // the pair then ping-pongs and converges to the bottom ("throws down").
-  // Guard is released on rAF/timeout instead, after both events land.
-  let syncingScroll = 0;
-  function guardSync(fn) {
-    syncingScroll++;
-    try { fn(); } finally {
-      const release = () => { syncingScroll = Math.max(0, syncingScroll - 1); };
-      if (typeof requestAnimationFrame === 'function') {
-        requestAnimationFrame(() => setTimeout(release, 0));
-      } else {
-        setTimeout(release, 0);
-      }
-    }
+  // Track the destination of each programmatic scroll rather than relying on
+  // a short-lived global lock. Browser scroll events and CodeMirror's scroll
+  // signal can arrive on different ticks; releasing a timer-based lock too
+  // early lets the follower misread an echo as a fresh user action and bounce
+  // both panes toward the document end.
+  const SCROLL_EPSILON = 3;
+  const EXPECTED_SCROLL_TTL_MS = 300;
+  let expectedCMTop = null;
+  let expectedCMTimer = 0;
+  let expectedPreviewScroll = null; // { element, top }
+  let expectedPreviewTimer = 0;
+
+  function clearExpectedCMScroll() {
+    if (expectedCMTimer) clearTimeout(expectedCMTimer);
+    expectedCMTimer = 0;
+    expectedCMTop = null;
+  }
+  function expectCMScroll(top) {
+    if (expectedCMTimer) clearTimeout(expectedCMTimer);
+    expectedCMTop = top;
+    expectedCMTimer = setTimeout(clearExpectedCMScroll, EXPECTED_SCROLL_TTL_MS);
+  }
+  function consumeExpectedCMScroll() {
+    if (expectedCMTop === null) return false;
+    let top = NaN;
+    try { top = Number(cm.getScrollInfo().top); } catch (_) { /* ignore */ }
+    const matches = Number.isFinite(top) && Math.abs(top - expectedCMTop) <= SCROLL_EPSILON;
+    clearExpectedCMScroll();
+    return matches;
+  }
+  function clearExpectedPreviewScroll() {
+    if (expectedPreviewTimer) clearTimeout(expectedPreviewTimer);
+    expectedPreviewTimer = 0;
+    expectedPreviewScroll = null;
+  }
+  function expectPreviewScroll(element, top) {
+    if (expectedPreviewTimer) clearTimeout(expectedPreviewTimer);
+    expectedPreviewScroll = { element, top };
+    expectedPreviewTimer = setTimeout(clearExpectedPreviewScroll, EXPECTED_SCROLL_TTL_MS);
+  }
+  function consumeExpectedPreviewScroll(element) {
+    if (!expectedPreviewScroll) return false;
+    const expected = expectedPreviewScroll;
+    const matches = expected.element === element
+      && Math.abs(Number(element.scrollTop) - expected.top) <= SCROLL_EPSILON;
+    clearExpectedPreviewScroll();
+    return matches;
+  }
+  function setCMScrollTop(target) {
+    const info = cm.getScrollInfo();
+    const current = Number(info.top) || 0;
+    const hasMetrics = Number.isFinite(info.height) && Number.isFinite(info.clientHeight);
+    const max = hasMetrics ? Math.max(0, info.height - info.clientHeight) : Infinity;
+    const next = Math.max(0, Math.min(max, Number(target) || 0));
+    if (Math.abs(current - next) <= SCROLL_EPSILON) return;
+    expectCMScroll(next);
+    cm.scrollTo(null, next);
+  }
+  function setPreviewScrollTop(pv, target) {
+    const max = Math.max(0, pv.scrollHeight - pv.clientHeight);
+    const next = Math.max(0, Math.min(max, Number(target) || 0));
+    if (Math.abs(pv.scrollTop - next) <= SCROLL_EPSILON) return;
+    expectPreviewScroll(pv, next);
+    pv.scrollTop = next;
   }
   function onCMScroll() {
-    if (programmaticScroll || syncingScroll) { return; }
+    const isEcho = consumeExpectedCMScroll();
+    if (programmaticScroll || isEcho) {
+      schedulePaint();
+      return;
+    }
     if (isSplitActive()) {
       try { syncFromCM(); } catch (_) { /* ignore */ }
     }
     schedulePaint();
   }
   function onPreviewScroll() {
-    if (programmaticScroll || syncingScroll) { return; }
+    const pv = previewEl();
+    if (!pv) return;
+    const isEcho = consumeExpectedPreviewScroll(pv);
+    if (programmaticScroll || isEcho) {
+      schedulePaint();
+      return;
+    }
     if (isSplitActive()) {
       try { syncFromPreview(); } catch (_) { /* ignore */ }
     }
@@ -86,26 +143,22 @@ export function createMinimap(cm, canvasEl, opts = {}) {
     const max = Math.max(1, pv.scrollHeight - pv.clientHeight);
     return Math.min(1, Math.max(0, pv.scrollTop / max));
   }
-  // Epsilon: skip the write when the follower is already there, so rounding
-  // between different content heights cannot start a ping-pong.
+  // Epsilon: skip the write when the follower is already there. Echo events
+  // are identified by their expected destination, not by a timing assumption.
   function syncFromCM() {
     const pv = previewEl();
     if (!pv) return;
     const max = Math.max(0, pv.scrollHeight - pv.clientHeight);
     if (max <= 0) return;
-    const target = cmRatio() * max;
-    if (Math.abs(pv.scrollTop - target) < 2) return;
-    guardSync(() => { pv.scrollTop = target; });
+    setPreviewScrollTop(pv, cmRatio() * max);
   }
   function syncFromPreview() {
     const pv = previewEl();
     if (!pv) return;
-    const ratio = pvRatio(pv);
     const s = cm.getScrollInfo();
-    const max = Math.max(1, s.height - s.clientHeight);
-    const target = ratio * max;
-    if (Math.abs(s.top - target) < 2) return;
-    guardSync(() => { cm.scrollTo(null, target); });
+    const max = Math.max(0, s.height - s.clientHeight);
+    if (max <= 0) return;
+    setCMScrollTop(pvRatio(pv) * max);
   }
   function previewEl() {
     try {
@@ -123,6 +176,9 @@ export function createMinimap(cm, canvasEl, opts = {}) {
     if (boundPreview) {
       try { boundPreview.removeEventListener('scroll', onPreviewScroll); } catch (_) {}
       try { if (ro) ro.unobserve(boundPreview); } catch (_) {}
+      if (expectedPreviewScroll && expectedPreviewScroll.element === boundPreview) {
+        clearExpectedPreviewScroll();
+      }
     }
     boundPreview = el;
     if (boundPreview) {
@@ -252,28 +308,27 @@ export function createMinimap(cm, canvasEl, opts = {}) {
     const cssH = Math.max(1, rect.height);
     const ratioY = Math.max(0, Math.min(1, y / cssH));
     // Click/drag scrolls the visible scroller(s). In Live (split) BOTH panes
-    // move together to the same fraction; writes go through guardSync() and
-    // the guard releases ASYNC (scroll events arrive a tick later), so the
-    // follower's event cannot bounce back with rounding error ("throws down").
+    // move together to the same fraction; expected scroll destinations keep
+    // delayed scroll events from being mistaken for a new user scroll.
     programmaticScroll++;
     try {
       if (isSplitActive()) {
         const pv = previewEl();
         if (pv) {
           const max = Math.max(0, pv.scrollHeight - pv.clientHeight);
-          if (max > 0) { syncingScroll++; try { pv.scrollTop = ratioY * max; } finally { asyncRelease(); } }
+          if (max > 0) setPreviewScrollTop(pv, ratioY * max);
         }
         const lineCount = Math.max(1, cm.lineCount());
         const line = Math.min(lineCount - 1, Math.floor(ratioY * lineCount));
         const scroll = cm.getScrollInfo();
         const lineTop = cm.heightAtLine(line, 'local');
         const target = lineTop - scroll.clientHeight / 3;
-        syncingScroll++; try { cm.scrollTo(null, Math.max(0, target)); } finally { asyncRelease(); }
+        setCMScrollTop(Math.max(0, target));
       } else if (inPreviewMode()) {
         const pv = previewEl();
         if (pv) {
           const max = Math.max(0, pv.scrollHeight - pv.clientHeight);
-          pv.scrollTop = ratioY * max;
+          setPreviewScrollTop(pv, ratioY * max);
         }
       } else {
         const lineCount = Math.max(1, cm.lineCount());
@@ -281,7 +336,7 @@ export function createMinimap(cm, canvasEl, opts = {}) {
         const scroll = cm.getScrollInfo();
         const lineTop = cm.heightAtLine(line, 'local');
         const target = lineTop - scroll.clientHeight / 3;
-        cm.scrollTo(null, Math.max(0, target));
+        setCMScrollTop(Math.max(0, target));
       }
     } catch (_) {
       const fallbackLine = Math.min(Math.max(1, cm.lineCount()) - 1, Math.floor(ratioY * cm.lineCount()));
@@ -360,6 +415,8 @@ export function createMinimap(cm, canvasEl, opts = {}) {
         try { if (ro) ro.unobserve(boundPreview); } catch (_) {}
         boundPreview = null;
       }
+      clearExpectedCMScroll();
+      clearExpectedPreviewScroll();
       if (ro) ro.disconnect();
     },
   };
