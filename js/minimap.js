@@ -30,6 +30,8 @@ export function createMinimap(cm, canvasEl, opts = {}) {
   let raf = 0;
   let paintTimer = 0;
   let boundPreview = null;
+  let syncingCmToPv = false;
+  let syncingPvToCm = false;
   // Scroll-sync echo guard. The browser delivers the target pane's scroll
   // event ASYNCHRONOUSLY — after our sync write already returned — so a flag
   // cleared in `finally` is always gone by then and can never swallow the
