@@ -30,13 +30,36 @@ export function createMinimap(cm, canvasEl, opts = {}) {
   let raf = 0;
   let paintTimer = 0;
   let boundPreview = null;
-  // Separate flags per direction: a programmatic scroll of one pane must not
-  // echo back into the other. A single shared flag is reset too early — the
-  // browser can still fire a scroll event on the target pane after it, and
-  // that event would re-enter the opposite handler and throw the pane to the
-  // end of the document.
-  let syncingCmToPv = false;
-  let syncingPvToCm = false;
+  // Scroll-sync echo guard. The browser delivers the target pane's scroll
+  // event ASYNCHRONOUSLY — after our sync write already returned — so a flag
+  // cleared in `finally` is always gone by then and can never swallow the
+  // echo: every programmatic write bounced straight back into the opposite
+  // handler (measured in prod: echoes === writes, 50-88 ping-pong alternations
+  // per second) and each hop wrote again. The rules that actually terminate
+  // the loop, in order of application inside each sync handler:
+  //   (1) skip the OTHER direction while OUR write is still in flight: a CM
+  //       write sets `expectCmEcho`; the CM handler consumes (clears) it on
+  //       the very next cm scroll, and likewise for pv. The flags are cleared
+  //       by consumption OR by a short rAF/timeout release, never by finally —
+  //       only the flag's own echo may consume it, so a stuck flag cannot
+  //       swallow unrelated user input forever;
+  //   (2) never write when either pane has no scrollable range (max <= 0):
+  //       ratio = top/0 was 0 (or Infinity before the zero guard), which threw
+  //       the other pane to the document start — the `pvMax: 0` case that threw
+  //       CM from mid-document to 0 in the field capture;
+  //   (3) skip the step when a max jumped materially since the last stable
+  //       sample (EasyMDE re-render / async image resolve shrinks pv.scrollHeight
+  //       mid-scroll, the browser clamps scrollTop to the new bottom, and the
+  //       bogus ratio 1.0 dragged everything to the document end — the reported
+  //       bug; caught here as a ~2x pvMax swing);
+  //   (4) skip-if-already-close: if the target lies within 1px of where the
+  //       pane already sits, do not write at all — no new scroll event, the
+  //       feedback chain dies structurally instead of amplifying subpixel drift.
+  let expectCmEcho = false;
+  let expectPvEcho = false;
+  let releaseTimer = 0;
+  let lastCmMax = 0;
+  let lastPvMax = 0;
   let cmScrollHandler = null;
   let pvScrollHandler = null;
   const ro = typeof ResizeObserver !== 'undefined'
@@ -77,40 +100,83 @@ export function createMinimap(cm, canvasEl, opts = {}) {
   // Keep CodeMirror and the visible preview pane scrolled to the same relative
   // position. EasyMDE's built-in sync is disabled (it divides by scrollHeight
   // minus clientHeight with no zero guard → Infinity during relayout), so the
-  // minimap owns scroll sync instead. Separate per-direction flags prevent the
-  // programmatic scroll of one pane from echoing back into the other.
+  // minimap owns scroll sync instead. Echo guard uses per-direction flags that
+  // survive the async delivery window: each handler swallows ONLY the echo of
+  // its own opposite-direction write (consumed once or released via rAF, never
+  // cleared in finally), so user input on either pane always flows through.
+  // A skipped (already-close or unstable) write arms no flag and fires no
+  // event, which is exactly what breaks the write→echo→write feedback loop.
+  function releaseEchoSoon() {
+    try { if (releaseTimer) { clearTimeout(releaseTimer); releaseTimer = 0; } } catch (_) {}
+    try {
+      releaseTimer = setTimeout(() => {
+        releaseTimer = 0;
+        expectCmEcho = false;
+        expectPvEcho = false;
+      }, 120);
+    } catch (_) {}
+  }
+
+  // Drifts beyond 10% cannot come from scrolling (scrolling moves tops, not
+  // heights): the pane content re-rendered mid-gesture. Syncing a ratio across
+  // two different content heights is how a mid-document position became
+  // ratio~1 and threw everything to the document end — skip the step and
+  // resync from the new stable snapshot on the next event.
+  function metricDrifted(prev, next) {
+    if (!(prev > 0) || !(next > 0)) return false;
+    return Math.abs(next - prev) > prev * 0.1;
+  }
+
   function syncCmToPreview() {
-    if (syncingCmToPv) return;
+    // CM echo of our own pv->cm write: consume (clear) and swallow.
+    if (expectCmEcho) { expectCmEcho = false; return; }
     const pv = previewEl();
     if (!pv) return;
-    syncingCmToPv = true;
     try {
       const info = cm.getScrollInfo();
       const max = info.height - info.clientHeight;
-      const ratio = max <= 0 ? 0 : info.top / max;
-      const pvMax = Math.max(0, pv.scrollHeight - pv.clientHeight);
-      pv.scrollTop = Math.min(Math.max(0, ratio * pvMax), pvMax);
+      const pvMax = pv.scrollHeight - pv.clientHeight;
+      if (max <= 0 || pvMax <= 0) return; // empty pane: ratio would be 0/Infinity
+      if (metricDrifted(lastCmMax, max) || metricDrifted(lastPvMax, pvMax)) {
+        lastCmMax = max; lastPvMax = pvMax;
+        return; // relayout in progress: skip one step, resync from the new max
+      }
+      lastCmMax = max; lastPvMax = pvMax;
+      const ratio = Math.min(1, Math.max(0, info.top / max));
+      const target = Math.min(Math.max(0, ratio * pvMax), pvMax);
+      if (Math.abs(target - pv.scrollTop) <= 1) return; // already there: no write, no echo
+      pv.scrollTop = target;
+      expectPvEcho = true;
+      releaseEchoSoon();
     } finally {
-      syncingCmToPv = false;
+      schedulePaint();
     }
-    schedulePaint();
   }
 
   function syncPreviewToCm() {
-    if (syncingPvToCm) return;
+    // PV echo of our own cm->pv write: consume (clear) and swallow.
+    if (expectPvEcho) { expectPvEcho = false; return; }
     const pv = previewEl();
     if (!pv) return;
-    syncingPvToCm = true;
     try {
-      const pvMax = Math.max(0, pv.scrollHeight - pv.clientHeight);
-      const ratio = pvMax <= 0 ? 0 : pv.scrollTop / pvMax;
+      const pvMax = pv.scrollHeight - pv.clientHeight;
       const info = cm.getScrollInfo();
-      const cmMax = Math.max(0, info.height - info.clientHeight);
-      cm.scrollTo(null, Math.min(Math.max(0, ratio * cmMax), cmMax));
+      const max = info.height - info.clientHeight;
+      if (max <= 0 || pvMax <= 0) return; // empty pane: ratio would be 0/Infinity
+      if (metricDrifted(lastPvMax, pvMax) || metricDrifted(lastCmMax, max)) {
+        lastPvMax = pvMax; lastCmMax = max;
+        return; // relayout in progress: skip one step, resync from the new max
+      }
+      lastPvMax = pvMax; lastCmMax = max;
+      const ratio = Math.min(1, Math.max(0, pv.scrollTop / pvMax));
+      const target = Math.max(0, Math.min(ratio * max, max));
+      if (Math.abs(target - info.top) <= 1) return; // already there: no write, no echo
+      cm.scrollTo(null, target);
+      expectCmEcho = true;
+      releaseEchoSoon();
     } finally {
-      syncingPvToCm = false;
+      schedulePaint();
     }
-    schedulePaint();
   }
 
   function bindScrollSync() {

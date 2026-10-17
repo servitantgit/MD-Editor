@@ -17,6 +17,16 @@ import { buildHtmlSrcdoc } from './html-preview.js';
  */
 export function createEditor(textareaEl, deps) {
   let previewRenderToken = 0;
+  // pane -> { path, text } last rendered into it. Rewriting the DOM for
+  // UNCHANGED text is what threw the panes to the document end during scroll:
+  // EasyMDE re-runs previewRender on every CodeMirror 'update' (fired on every
+  // scroll frame), each rewrite resets <img> srcs, the preview scrollHeight
+  // oscillates as images re-resolve, the browser clamps pv.scrollTop to the
+  // shrinking max, and the ratio scroll sync then dragged the other pane to
+  // that clamped edge. Text is what drives a re-render — unchanged text must
+  // leave the DOM alone. Set only for markdown (the branch with images); HTML
+  // always returns null before this point and code has no async heights.
+  const renderedText = new WeakMap();
   // Per-PANE HTML preview state. EasyMDE's container always holds TWO preview
   // nodes (.editor-preview-side and .editor-preview), and renderActivePreview
   // loops over both: a GLOBAL token would make the second pane's call starve
@@ -74,9 +84,30 @@ export function createEditor(textareaEl, deps) {
     previewRender(plainText, previewEl) {
       // IMPORTANT: EasyMDE ITSELF runs `previewEl.innerHTML = <what we return here>`
       // right after this function is called. Post-processing runs on the next tick.
-      const myToken = ++previewRenderToken;
       const path = deps.getCurrentPath ? deps.getCurrentPath() : null;
       const kind = kindFromPath(path || '');
+
+      // Unchanged markdown text must NOT rewrite the pane: EasyMDE re-runs
+      // previewRender on every CodeMirror 'update', and 'update' fires on every
+      // scroll frame — each rewrite resets <img> srcs, the preview scrollHeight
+      // oscillates as images re-resolve, the browser clamps pv.scrollTop to the
+      // shrinking max, and the ratio scroll sync drags both panes to the end.
+      // Return null so EasyMDE's `if (newValue != null)` skips the write.
+      // The check runs BEFORE ++previewRenderToken on purpose: a cache hit must
+      // not cancel the pending finishPreviewRender of the same text (its image
+      // resolve would never complete). `innerHTML !== ''` guards a pane that was
+      // wiped meanwhile (mode switch / HTML funnel) — never serve a cache hit
+      // into an empty pane. Keyed by path on purpose: the same text of another
+      // file may resolve images differently (relative URLs) or take the code
+      // branch, so text alone cannot be shared across files.
+      const last = previewEl && renderedText.get(previewEl);
+      if (kind.preview !== 'html' && kind.preview !== 'code' && previewEl &&
+          last && last.path === path && last.text === plainText &&
+          previewEl.innerHTML !== '') {
+        return null;
+      }
+
+      const myToken = ++previewRenderToken;
 
       // HTML: sandboxed iframe (filled after EasyMDE writes our return value).
       // Single funnel renderHtmlPreview (below): all parallel triggers queue
@@ -85,6 +116,11 @@ export function createEditor(textareaEl, deps) {
       // EasyMDE's own `if (newValue != null) preview.innerHTML = newValue`
       // and value()'s `!== null` write both skip the pane for this branch.
       if (kind.preview === 'html') {
+        // Leaving markdown/code for another file invalidates that pane's text
+        // cache: same-text-but-different-file must re-render (image URLs and
+        // ext resolve per path), and an iframe-occupied pane must never serve
+        // a markdown cache hit.
+        if (previewEl) renderedText.delete(previewEl);
         // Capture the pane now: toggleSideBySide replaces the preview element
         // on mode switches, and a stale setTimeout closure must not render
         // into the detached node.
@@ -128,6 +164,10 @@ export function createEditor(textareaEl, deps) {
         console.error('Preview render error:', e);
         return `<div class="render-error"><strong>⚠ Preview render error</strong><br>${escapeHtml(e.message)}</div>`;
       }
+      // Record the pane+path+text hit for the next no-op pass: only the
+      // successful markdown render arms the cache (error html must NOT arm it,
+      // or an error would freeze the pane until the text changes).
+      if (previewEl) renderedText.set(previewEl, { path, text: plainText });
       setTimeout(() => finishPreviewRender(previewEl, myToken), 0);
       return html;
     },
