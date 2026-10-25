@@ -1,0 +1,58 @@
+npx repomix - Запускати в корені MD-Editor. 
+
+Створить repomix-output.xml з усім кодом, 
+сам пропускає node_modules, .git і бінарні файли. 
+
+Або онлайн: gitingest.com → вставити адресу репо.
+
+Варіант 2. Свій скрипт у MD-Editor як tools/dump_code.ps1:
+
+<#
+.SYNOPSIS
+    Dumps MD Editor source code into one text file (for AI review).
+.DESCRIPTION
+    Run from the MD-Editor repository root: .\tools\dump_code.ps1
+    Output goes OUTSIDE the repo (Desktop) so it is never committed.
+#>
+
+$OutputFile = Join-Path $env:USERPROFILE "Desktop\md-editor-code.txt"
+$Include    = @('*.js', '*.mjs', '*.css', '*.html', '*.md', '*.py', '*.json', '*.yml', '*.toml')
+$ExcludeDirs = @('node_modules', '.git', 'assets', 'screenshots')
+$ExcludeFiles = @('package-lock.json')
+
+$root = (Get-Location).Path
+if (-not (Test-Path (Join-Path $root 'js\app.js'))) {
+    Write-Host "ERROR: run from the MD-Editor repository root." -ForegroundColor Red
+    exit 1
+}
+
+$files = Get-ChildItem -Path $root -Recurse -File -Include $Include |
+    Where-Object {
+        $rel = $_.FullName.Substring($root.Length).TrimStart('\', '/')
+        $parts = $rel -split '[\\/]'
+        -not ($parts | Where-Object { $ExcludeDirs -contains $_ }) -and
+        -not ($ExcludeFiles -contains $_.Name)
+    } |
+    Sort-Object FullName
+
+$sb = [System.Text.StringBuilder]::new()
+$sep = '=' * 48
+foreach ($f in $files) {
+    $rel = $f.FullName.Substring($root.Length).TrimStart('\', '/') -replace '\\', '/'
+    [void]$sb.AppendLine($sep)
+    [void]$sb.AppendLine("FILE: $rel")
+    [void]$sb.AppendLine($sep)
+    [void]$sb.AppendLine([System.IO.File]::ReadAllText($f.FullName, [System.Text.Encoding]::UTF8))
+    [void]$sb.AppendLine()
+}
+
+[System.IO.File]::WriteAllText($OutputFile, $sb.ToString(), (New-Object System.Text.UTF8Encoding $false))
+$sizeKB = [math]::Round((Get-Item $OutputFile).Length / 1KB, 1)
+Write-Host "DONE: $($files.Count) files -> $OutputFile ($sizeKB KB)" -ForegroundColor Cyan
+Що в ньому враховано:
+
+результат пишеться на робочий стіл, поза репо, тож випадково не закомітиться і не потрапить у пошук;
+читає і пише UTF-8 без BOM, кракозябр не буде;
+пропускає node_modules, .git, картинки і package-lock.json;
+формат той самий, що в md.txt, який я вже вмію читати.
+Якщо PowerShell не дає запустити скрипт: powershell -ExecutionPolicy Bypass -File .\tools\dump_code.ps1.
