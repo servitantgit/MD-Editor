@@ -10,6 +10,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - **Drag-and-drop move: tree refreshes before link rewrite.** PUT+DELETE already moved the blob on GitHub, but the sidebar waited for `updateReferencesEverywhere` (one request per `.md` in the repo) and could also be overwritten by a lagging recursive `git/trees` response — so the file looked stuck until F5. `onMoved` now runs `loadTree({ rewritePath, expandFolder })` immediately after the Contents write; link updates continue afterward with status `Moved: … (updating links…)`. Documented in `AGENTS.md` / `REGRESSION.md`.
 
+### Changed
+- **Copy as link now always produces a repo-root absolute link (`/path`).** Previously the link was relative to the currently open file at copy time, which broke when the link was pasted into a note in a different folder. Links now use `/path` format everywhere, which the editor, the reference rewriter, and GitHub all resolve from the repo root regardless of the destination file. (`js/file-ops.js`, 5 new cases in `test/file-ops.test.js`)
+
 ## [Unreleased]
 
 ### Added

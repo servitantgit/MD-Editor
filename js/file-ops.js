@@ -1,6 +1,6 @@
-// file-ops.js
+﻿// file-ops.js
 // File and folder CRUD orchestration: create / rename / move / delete / copy link.
-// Pure extraction from app.js — same behaviour; app state via injected deps.
+// Pure extraction from app.js â€” same behaviour; app state via injected deps.
 //
 // Lower-level helpers stay in file-mover.js, folder-manager.js, paths.js.
 
@@ -38,26 +38,26 @@ export function createFileOps(deps) {
 
 
   /**
-   * True when `path` has local edits GitHub does not have yet — from ANY of
+   * True when `path` has local edits GitHub does not have yet â€” from ANY of
    * the three places they can live:
    *
    *   1. the in-memory WorkingTree (edits waiting for Commit), and
    *   2. the open file's Autosave (typed, not yet flushed to IndexedDB), and
-   *   3. a dirty draft in IndexedDB — the one that survives a page reload,
+   *   3. a dirty draft in IndexedDB â€” the one that survives a page reload,
    *      when the WorkingTree is empty again and "Keep local" restored a
    *      draft without ever marking the tree dirty.
    *
    * All three are lost by a move: moveToPath() reads the committed GitHub
    * blob (never the draft), and sweepStaleDrafts() on loadTree() deletes the
    * draft stored under the OLD path. Always run this BEFORE any GitHub
-   * request — a blocked move makes zero requests. Async only because the
+   * request â€” a blocked move makes zero requests. Async only because the
    * draft store is IndexedDB; a missing/degraded store never blocks.
    */
   async function hasUnsavedEdits(path) {
     if (deps.getWorkingTree && deps.getWorkingTree().isDirty(path)) return true;
     const autosave = deps.getAutosave ? deps.getAutosave() : null;
     // autosave.path (not state.currentPath) names the file this instance is
-    // bound to — that is the definition of "the open file" for the live draft.
+    // bound to â€” that is the definition of "the open file" for the live draft.
     if (autosave && autosave.path === path && autosave.hasUnsavedDraft()) return true;
     const store = deps.getDraftStore ? deps.getDraftStore() : null;
     if (store) {
@@ -71,7 +71,7 @@ export function createFileOps(deps) {
         });
         // Records are written dirty=true and a successful push DELETES them,
         // so anything still stored is unsaved work. `!== false` lets only an
-        // explicitly clean record pass — the safe direction is to BLOCK.
+        // explicitly clean record pass â€” the safe direction is to BLOCK.
         if (draft && draft.dirty !== false) return true;
       } catch (_) {
         // A degraded/unavailable store must not lock clean files in place.
@@ -102,21 +102,21 @@ export function createFileOps(deps) {
 
   async function onMoveFile(oldPath, targetFolder) {
     // Block the move if the file has unsaved local edits (working tree, live
-    // autosave draft, or a stored IndexedDB draft — see hasUnsavedEdits):
+    // autosave draft, or a stored IndexedDB draft â€” see hasUnsavedEdits):
     // moving would read the committed GitHub version (not the local text),
     // then sweepDrafts() on loadTree() would delete the draft under the old
-    // path. Data loss either way, so refuse to start — zero GitHub requests.
+    // path. Data loss either way, so refuse to start â€” zero GitHub requests.
     if (await hasUnsavedEdits(oldPath)) {
-      alert(`"${oldPath}" has unsaved changes — Save or Commit first.`);
+      alert(`"${oldPath}" has unsaved changes â€” Save or Commit first.`);
       deps.setSaveStatus(`Move blocked: "${oldPath}" has unsaved changes`, true);
       return;
     }
-    deps.setSaveStatus(`Moving ${oldPath}…`, false, { sticky: true });
+    deps.setSaveStatus(`Moving ${oldPath}â€¦`, false, { sticky: true });
     try {
       const wasCurrent = deps.getState().currentPath === oldPath;
 
       async function afterPhysicalMove({ newPath }) {
-        // Tabs + tree must update as soon as put+delete land — not after
+        // Tabs + tree must update as soon as put+delete land â€” not after
         // updateReferencesEverywhere finishes (that can be hundreds of GETs).
         deps.getTabs().rename(oldPath, newPath);
         deps.moveTabDoc(oldPath, newPath);
@@ -145,7 +145,7 @@ export function createFileOps(deps) {
             console.warn('openFile after move', e);
           }
         }
-        deps.setSaveStatus(`Moved: ${oldPath} → ${newPath} (updating links…)`, false, { sticky: true });
+        deps.setSaveStatus(`Moved: ${oldPath} â†’ ${newPath} (updating linksâ€¦)`, false, { sticky: true });
       }
 
       let result;
@@ -174,13 +174,13 @@ export function createFileOps(deps) {
         return;
       }
 
-      // Link rewrites finished — mark those tabs stale so next open gets fresh text
+      // Link rewrites finished â€” mark those tabs stale so next open gets fresh text
       if (updatedFiles && updatedFiles.length) {
         deps.markStale(updatedFiles);
       }
 
       deps.setSaveStatus(
-        `Moved: ${oldPath} → ${newPath}` +
+        `Moved: ${oldPath} â†’ ${newPath}` +
           (overwritten ? ' (replaced the existing file)' : '') +
           (updatedFiles.length ? ` (updated links in ${updatedFiles.length} file(s))` : ''),
         false
@@ -209,7 +209,7 @@ export function createFileOps(deps) {
       await deps.loadTree();
       deps.setSaveStatus(`File deleted: ${path}`, false);
     } catch (e) {
-      // The file is still in place — restore the buttons to a working state so you can
+      // The file is still in place â€” restore the buttons to a working state so you can
       // either retry or save the remaining edits.
       els.btnSave.disabled = false;
       els.btnDelete.disabled = false;
@@ -239,7 +239,7 @@ export function createFileOps(deps) {
    *
    * The toolbar wires these handlers through `onclick`, and a click event can
    * reach here as `folderPath`. Returning '' (the repo root) for that would
-   * silently drop the user's intent — the active folder is what they are looking
+   * silently drop the user's intent â€” the active folder is what they are looking
    * at, so fall back to it, exactly like the default parameter does for
    * `undefined`. Only an explicit empty string means the repo root. */
   function toFolderPath(value) {
@@ -249,7 +249,7 @@ export function createFileOps(deps) {
 
 
   /**
-   * Creates a new text file (.md, .html, .js, .css, …). folderPath defaults to the
+   * Creates a new text file (.md, .html, .js, .css, â€¦). folderPath defaults to the
    * tree's active folder so the file lands where the user is looking.
    */
 
@@ -333,7 +333,7 @@ export function createFileOps(deps) {
     const nf = newFileEls();
     if (!nf.preview || !nf.nameInput || !nf.typeSelect) return;
     const composed = composeFileName(nf.nameInput.value, nf.typeSelect.value);
-    nf.preview.textContent = '→ ' + composed;
+    nf.preview.textContent = 'â†’ ' + composed;
   }
 
   /**
@@ -351,7 +351,7 @@ export function createFileOps(deps) {
         if (!raw) return resolve(null);
         const composed = extOfPath(raw.trim()) ? raw.trim() : raw.trim() + '.md';
         if (!isCreatableFilePath(composed)) {
-          alert('Choose a name with a supported extension (.md, .html, .js, …)');
+          alert('Choose a name with a supported extension (.md, .html, .js, â€¦)');
           return resolve(null);
         }
         return resolve(composed);
@@ -433,7 +433,7 @@ export function createFileOps(deps) {
       }
       if (!isCreatableFilePath(path)) {
         throw new Error(
-          'Unsupported file type. Choose a type from the list (.md, .html, .js, .css, …)'
+          'Unsupported file type. Choose a type from the list (.md, .html, .js, .css, â€¦)'
         );
       }
       if (deps.getState().allFiles.some((f) => f.path === path)) throw new Error(`"${path}" already exists`);
@@ -534,7 +534,7 @@ export function createFileOps(deps) {
     // Block the rename if the file has unsaved local edits (working tree,
     // live autosave draft, or a stored IndexedDB draft).
     if (await hasUnsavedEdits(path)) {
-      alert(`"${path}" has unsaved changes — Save or Commit first.`);
+      alert(`"${path}" has unsaved changes â€” Save or Commit first.`);
       deps.setSaveStatus(`Rename blocked: "${path}" has unsaved changes`, true);
       return;
     }
@@ -571,7 +571,7 @@ export function createFileOps(deps) {
             console.warn('openFile after rename', e);
           }
         }
-        deps.setSaveStatus(`Renamed: ${path} → ${newPath} (updating links…)`, false, { sticky: true });
+        deps.setSaveStatus(`Renamed: ${path} â†’ ${newPath} (updating linksâ€¦)`, false, { sticky: true });
       }
 
       const result = await renameFile(deps.getState().client, deps.getState().allFiles, path, trimmed, {
@@ -585,7 +585,7 @@ export function createFileOps(deps) {
       }
 
       deps.setSaveStatus(
-        `Renamed: ${path} → ${newPath}` +
+        `Renamed: ${path} â†’ ${newPath}` +
           (updatedFiles.length ? ` (updated links in ${updatedFiles.length} file(s))` : ''),
         false
       );
@@ -605,7 +605,7 @@ export function createFileOps(deps) {
       deps.setSaveStatus(`Deleting ${path}...`, false);
       const entry = deps.getState().allFiles.find((f) => f.path === path);
       const sha = deps.getState().currentPath === path ? deps.getState().currentSha : entry && entry.sha;
-      if (!sha) throw new Error(`No sha known for ${path} — refresh the tree and try again`);
+      if (!sha) throw new Error(`No sha known for ${path} â€” refresh the tree and try again`);
 
       await deps.getState().client.deleteFile(path, sha, `Delete ${path}`);
       deps.getImageResolver().invalidate(path);
@@ -620,33 +620,31 @@ export function createFileOps(deps) {
 
   /**
    * Builds a markdown link to `targetPath` and copies it to the clipboard.
-   * Relative to the currently open file when there is one; falls back to
-   * repo-root absolute (/path) otherwise. For .md files the display name
-   * strips the extension; everything else keeps its extension (images,
+   * Always a repo-root absolute link (/path): the link is pasted into a file
+   * opened later, in a different folder, so a relative link computed from the
+   * currently open file at COPY time breaks whenever the two folders differ.
+   * The editor, the reference rewriter and GitHub all resolve /path from
+   * the repo root regardless of the file it lands in. For .md files the display
+   * name strips the extension; everything else keeps its extension (images,
    * html, code files).
    */
   async function onCopyLinkToFile(targetPath) {
     const basename = basenameOf(targetPath);
     const displayName = basename.replace(/\.md$/i, '');
 
-    let linkPath;
-    if (deps.getState().currentPath) {
-      linkPath = relativePathFromTo(dirnameOf(deps.getState().currentPath), targetPath);
-    } else {
-      // No open file — root-absolute link. The leading slash is a convention
-      // the editor already understands (see reference-rewriter.js).
-      linkPath = '/' + targetPath;
-    }
+    // Always a repo-root absolute link. The leading slash is a convention
+    // the editor already understands (see reference-rewriter.js).
+    const linkPath = '/' + targetPath;
     // DO NOT percent-encode here. marked (the markdown renderer) captures the
-    // link URL verbatim and percent-encodes it once at HTML serialization — so a
+    // link URL verbatim and percent-encodes it once at HTML serialization â€” so a
     // pre-encoded %20 would come back out as %20 and then be re-encoded to %25 by
     // encodePathForApi on the way to GitHub (a 404). The raw path with real
-    // spaces/unicode is the correct wire format for markdown link syntax —
+    // spaces/unicode is the correct wire format for markdown link syntax â€”
     // GitHub, Obsidian and VS Code all accept and prefer this.
     //
     // Markdown has one real escaping concern: parentheses terminate link syntax,
     // and a bare space inside (...) is not parsed as a link at all. Wrap the URL
-    // in <...> when it contains spaces or parens — the standard markdown escape
+    // in <...> when it contains spaces or parens â€” the standard markdown escape
     // for arbitrary URLs. marked strips the angle brackets and encodes the
     // spaces into the href, and the click handler decodes them back.
     const needsAngleBrackets = /[()\s]/.test(linkPath);
@@ -687,15 +685,15 @@ export function createFileOps(deps) {
     if (dirtyInside.length > 0) {
       const listed = dirtyInside.join(', ');
       alert(`"${folderPath}" has unsaved changes in: ${listed}\nSave or Commit first.`);
-      // The alert vanishes on click — repeat the reason in the status line
+      // The alert vanishes on click â€” repeat the reason in the status line
       // (capped, so a 100-file folder does not flood it).
-      const shown = dirtyInside.slice(0, 3).join(', ') + (dirtyInside.length > 3 ? ', …' : '');
+      const shown = dirtyInside.slice(0, 3).join(', ') + (dirtyInside.length > 3 ? ', â€¦' : '');
       deps.setSaveStatus(`Folder rename blocked: unsaved changes in ${dirtyInside.length} file(s): ${shown}`, true);
       return;
     }
 
     try {
-      deps.setSaveStatus(`Renaming ${folderPath}…`, false, { sticky: true });
+      deps.setSaveStatus(`Renaming ${folderPath}â€¦`, false, { sticky: true });
       let phase1UiDone = false;
       const { moved, updatedFiles } = await renameFolder(
         deps.getState().client,
@@ -705,10 +703,10 @@ export function createFileOps(deps) {
         {
           onProgress: ({ phase, done, total }) => {
             if (phase === 'move') {
-              deps.setSaveStatus(`Renaming ${folderPath}… ${done}/${total} files`, false, { sticky: true });
+              deps.setSaveStatus(`Renaming ${folderPath}â€¦ ${done}/${total} files`, false, { sticky: true });
             } else if (phase === 'links') {
               deps.setSaveStatus(
-                `Renamed ${folderPath} → ${newPath} (updating links… ${done}/${total})`,
+                `Renamed ${folderPath} â†’ ${newPath} (updating linksâ€¦ ${done}/${total})`,
                 false,
                 { sticky: true }
               );
@@ -717,14 +715,14 @@ export function createFileOps(deps) {
           onPhase1Done: async () => {
             await afterFolderMoved({ folderPath, newPath, updatedFiles: [] });
             phase1UiDone = true;
-            deps.setSaveStatus(`Renamed ${folderPath} → ${newPath} (updating links…)`, false, { sticky: true });
+            deps.setSaveStatus(`Renamed ${folderPath} â†’ ${newPath} (updating linksâ€¦)`, false, { sticky: true });
           },
         }
       );
       if (!phase1UiDone) await afterFolderMoved({ folderPath, newPath, updatedFiles: [] });
       if (updatedFiles && updatedFiles.length) deps.markStale(updatedFiles);
       deps.setSaveStatus(
-        `Renamed: ${folderPath} → ${newPath} (files: ${moved.length}` +
+        `Renamed: ${folderPath} â†’ ${newPath} (files: ${moved.length}` +
           (updatedFiles.length ? `, links in ${updatedFiles.length}` : '') +
           ')',
         false
@@ -736,7 +734,7 @@ export function createFileOps(deps) {
 
 
   /**
-   * Moves a folder to another parent by drag & drop (no rename prompt — the
+   * Moves a folder to another parent by drag & drop (no rename prompt â€” the
    * user picked the destination with the pointer). Same physical operation as
    * a rename (renameFolder = per-file moves + ONE reference-rewrite pass) and
    * the same post-move steps, shared with onRenameFolder via afterFolderMoved.
@@ -755,7 +753,7 @@ export function createFileOps(deps) {
 
     // A folder cannot become its own child.
     if (targetParent === oldPath || (targetParent && targetParent.startsWith(oldPath + '/'))) {
-      alert(`Cannot move "${name}" into itself — "${targetParent}" is inside it.`);
+      alert(`Cannot move "${name}" into itself â€” "${targetParent}" is inside it.`);
       deps.setSaveStatus('Move blocked: a folder cannot be moved into itself', true);
       return;
     }
@@ -773,12 +771,12 @@ export function createFileOps(deps) {
     }
 
     // Block if any file inside has unsaved local edits (working tree, live
-    // autosave draft, or a stored IndexedDB draft) — same protection as rename.
+    // autosave draft, or a stored IndexedDB draft) â€” same protection as rename.
     const dirtyInside = await findUnsavedInside(oldPath);
     if (dirtyInside.length > 0) {
       const listed = dirtyInside.join(', ');
       alert(`"${oldPath}" has unsaved changes in: ${listed}\nSave or Commit first.`);
-      const shown = dirtyInside.slice(0, 3).join(', ') + (dirtyInside.length > 3 ? ', …' : '');
+      const shown = dirtyInside.slice(0, 3).join(', ') + (dirtyInside.length > 3 ? ', â€¦' : '');
       deps.setSaveStatus(`Folder move blocked: unsaved changes in ${dirtyInside.length} file(s): ${shown}`, true);
       return;
     }
@@ -793,7 +791,7 @@ export function createFileOps(deps) {
     }
 
     try {
-      deps.setSaveStatus(`Moving ${oldPath} → ${newPath}…`, false, { sticky: true });
+      deps.setSaveStatus(`Moving ${oldPath} â†’ ${newPath}â€¦`, false, { sticky: true });
       let phase1UiDone = false;
       const { moved, updatedFiles } = await renameFolder(
         deps.getState().client,
@@ -803,10 +801,10 @@ export function createFileOps(deps) {
         {
           onProgress: ({ phase, done, total }) => {
             if (phase === 'move') {
-              deps.setSaveStatus(`Moving ${oldPath}… ${done}/${total} files`, false, { sticky: true });
+              deps.setSaveStatus(`Moving ${oldPath}â€¦ ${done}/${total} files`, false, { sticky: true });
             } else if (phase === 'links') {
               deps.setSaveStatus(
-                `Moved ${oldPath} → ${newPath} (updating links… ${done}/${total})`,
+                `Moved ${oldPath} â†’ ${newPath} (updating linksâ€¦ ${done}/${total})`,
                 false,
                 { sticky: true }
               );
@@ -815,14 +813,14 @@ export function createFileOps(deps) {
           onPhase1Done: async () => {
             await afterFolderMoved({ folderPath: oldPath, newPath, updatedFiles: [] });
             phase1UiDone = true;
-            deps.setSaveStatus(`Moved ${oldPath} → ${newPath} (updating links…)`, false, { sticky: true });
+            deps.setSaveStatus(`Moved ${oldPath} â†’ ${newPath} (updating linksâ€¦)`, false, { sticky: true });
           },
         }
       );
       if (!phase1UiDone) await afterFolderMoved({ folderPath: oldPath, newPath, updatedFiles: [] });
       if (updatedFiles && updatedFiles.length) deps.markStale(updatedFiles);
       deps.setSaveStatus(
-        `Moved: ${oldPath} → ${newPath} (files: ${moved.length}` +
+        `Moved: ${oldPath} â†’ ${newPath} (files: ${moved.length}` +
           (updatedFiles.length ? `, links in ${updatedFiles.length}` : '') +
           ')',
         false
@@ -834,7 +832,7 @@ export function createFileOps(deps) {
 
 
   /**
-   * Everything that must follow a folder that physically moved on GitHub —
+   * Everything that must follow a folder that physically moved on GitHub â€”
    * shared by onRenameFolder and onMoveFolder so the two cannot drift apart:
    * tabs, working tree, optimistic tree patch, open-file repoint, and a tree
    * reload with the destination expanded and (when it was the create target)
@@ -979,3 +977,6 @@ export function createFileOps(deps) {
     closeAddMenu,
   };
 }
+
+
+

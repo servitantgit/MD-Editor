@@ -14,6 +14,17 @@ globalThis.alert = () => {};
 globalThis.confirm = () => true;
 globalThis.prompt = () => null;
 
+Object.defineProperty(globalThis, 'navigator', {
+  value: {
+    clipboard: {
+      writeText: async (text) => { lastClipboardText = text; },
+    },
+  },
+  configurable: true,
+  writable: true,
+});
+let lastClipboardText = null;
+
 /** Minimal fake client backed by an in-memory Map, recording every request. */
 class FakeClient {
   constructor(files) {
@@ -452,4 +463,70 @@ test('a successful onMoveFolder renames tabs and working-tree entries to the new
   );
   assert.equal(status().isError, false, 'move reported as success');
   assert.match(status().msg, /Moved: Notes → Docs\/Notes/);
+})
+test('onCopyLinkToFile produces a root-absolute link from a different folder depth', async () => {
+  const client = new FakeClient({});
+  const allFiles = [];
+  const { deps, status } = makeDeps({ client, allFiles, currentPath: 'Notes/a.md' });
+  const { onCopyLinkToFile } = createFileOps(deps);
+
+  lastClipboardText = null;
+  await onCopyLinkToFile('AI corrected/SSAM 1 - 2/Lasery Hood.md');
+
+  assert.equal(lastClipboardText, '[Lasery Hood](</AI corrected/SSAM 1 - 2/Lasery Hood.md>)', 'root-absolute link with angle brackets');
+  const { msg } = status();
+  assert.match(msg, /Link copied: Lasery Hood.md/, 'status reports link copied');
 });
+
+test('onCopyLinkToFile produces a root-absolute link from the same folder', async () => {
+  const client = new FakeClient({});
+  const allFiles = [];
+  const { deps, status } = makeDeps({ client, allFiles, currentPath: 'Notes/a.md' });
+  const { onCopyLinkToFile } = createFileOps(deps);
+
+  lastClipboardText = null;
+  await onCopyLinkToFile('Notes/b.md');
+
+  assert.equal(lastClipboardText, '[b](/Notes/b.md)', 'root-absolute link without angle brackets');
+  const { msg } = status();
+  assert.match(msg, /Link copied: b.md/, 'status reports link copied');
+});
+
+test('onCopyLinkToFile produces a root-absolute link with no open file', async () => {
+  const client = new FakeClient({});
+  const allFiles = [];
+  const { deps, status } = makeDeps({ client, allFiles, currentPath: null });
+  const { onCopyLinkToFile } = createFileOps(deps);
+
+  lastClipboardText = null;
+  await onCopyLinkToFile('Notes/note.md');
+
+  assert.equal(lastClipboardText, '[note](/Notes/note.md)', 'root-absolute link regardless of open file');
+  const { msg } = status();
+  assert.match(msg, /Link copied: note.md/, 'status reports link copied');
+});
+
+test('onCopyLinkToFile omits angle brackets when the path has no spaces or parens', async () => {
+  const client = new FakeClient({});
+  const allFiles = [];
+  const { deps } = makeDeps({ client, allFiles, currentPath: 'Notes/a.md' });
+  const { onCopyLinkToFile } = createFileOps(deps);
+
+  lastClipboardText = null;
+  await onCopyLinkToFile('Notes/note.md');
+
+  assert.equal(lastClipboardText, '[note](/Notes/note.md)', 'no angle brackets for simple path');
+});
+
+test('onCopyLinkToFile keeps the extension in the display name for non-.md files', async () => {
+  const client = new FakeClient({});
+  const allFiles = [];
+  const { deps } = makeDeps({ client, allFiles, currentPath: 'Notes/a.md' });
+  const { onCopyLinkToFile } = createFileOps(deps);
+
+  lastClipboardText = null;
+  await onCopyLinkToFile('Notes/image.png');
+
+  assert.equal(lastClipboardText, '[image.png](/Notes/image.png)', 'extension kept in display name');
+});
+;

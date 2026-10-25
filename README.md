@@ -217,7 +217,8 @@ python3 e2e_smoke_test.py         # editing, hybrid autosave + 409, tabs, create
 - **File and folder context menus** — right-click any file or folder in the
   tree to create, rename, or delete. The menu survives edge clicks and closes
   on Escape.
-- **PDF export** — the "📄 PDF" button renders the active page with images
+-
+- **Copy as link** — right-click a file → “🔗 Copy as link” copies a markdown link that always works wherever it is pasted. Links are repo-root absolute (`/path/to/file.md`), not relative to the file you happened to have open when you copied them, so pasting the link into a note in a different folder never breaks. The editor, the reference rewriter, and GitHub all resolve `/path` from the repo root. **PDF export** — the "📄 PDF" button renders the active page with images
   resolved in place. Large images are scaled to avoid page-break splits.
 
 ## Known limitations
