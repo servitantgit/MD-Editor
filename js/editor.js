@@ -8,7 +8,7 @@
 import { markdownToCanonicalHtml } from './markdown-tokens.js';
 import { attachResizeHandles, resolveAllImages } from './image-preview.js';
 import { kindFromPath } from './file-kind.js';
-import { dirnameOf, basenameOf, resolveRelativePath, isExternalOrAnchor, isImagePath } from './paths.js';
+import { dirnameOf, basenameOf, resolveRelativePath, isExternalOrAnchor, isImagePath, decodeUriSafe } from './paths.js';
 import { buildHtmlSrcdoc } from './html-preview.js';
 
 /**
@@ -322,7 +322,7 @@ export function createEditor(textareaEl, deps) {
           // path and encodePathForApi turns the % into %25, 404-ing on GitHub.
           // This also revives links that were written pre-encoded (%20) by an
           // older build, which otherwise stay permanently broken.
-          const decoded = (() => { try { return decodeURIComponent(href); } catch (_) { return href; } })();
+          const decoded = decodeUriSafe(href);
           target = resolveRelativePath(dirnameOf(cur || ''), decoded);
         }
       } catch (_) { /* keep target */ }
