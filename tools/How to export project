@@ -9,6 +9,8 @@ npx repomix - Запускати в корені MD-Editor.
 Але можна брати окремі файли, потрібні для кожної задачі.
 npx repomix --include "html-preview.js,preview*.js,tests/**/*preview*,tests/**/*link*" --output "$env:USERPROFILE\Desktop\repomix-part.xml"
 
+Не працює з джиллетом. Блокує.
+
 Варіант 2. Свій скрипт у MD-Editor як tools/dump_code.ps1:
 
 <#
