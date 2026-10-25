@@ -113,7 +113,7 @@ test('a keystroke marks the file dirty and arms all three timers', withTimers(as
   assert.equal(lastStatus(statuses).text, STATUS.unsaved.text);
   assert.equal(autosave.hasUnsavedDraft(), true);
 
-  // Nothing is written per keystroke â€” 400ms is "finished the current word".
+  // Nothing is written per keystroke - 400ms is "finished the current word".
   await advance(LOCAL_WRITE_DEBOUNCE_MS - 1);
   assert.equal(store.writes, 0, 'the draft must be debounced, not written per keystroke');
   assert.equal(client.puts.length, 0, 'typing must never commit');
