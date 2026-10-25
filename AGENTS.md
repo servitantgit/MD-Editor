@@ -877,3 +877,28 @@ insignificant relative to the main task. Before push:
    report as failed (the parent fails with its child), which reads like a second,
    unrelated regression. After editing test files, eyeball the `test(...)` /
    `});` pairing or run the file alone: `node --test test/<file>.test.js`.
+8. Run `node --check <file>` after EVERY edit of a JS file, before running
+   tests or reporting. If `npm test` shows the same `SyntaxError` for every
+   test of one module (e.g. `Unexpected token 'function'` in all
+   `test/editor.test.js` tests), the module does not parse — that is the
+   first thing to check, not the tests. A module that does not parse also
+   breaks the whole app in the browser (`app.js` cannot import it), which in
+   `e2e_smoke_test.py` shows up as `#app-main` staying hidden. Never "fix"
+   that by changing the e2e startup path.
+9. Keep every file UTF-8 without BOM. On Windows, PowerShell `Set-Content`,
+   `Out-File` and `>` re-encode files (cp1250), turning `—`, `→`, `…` and
+   quotes into mojibake like `â€"`, `â†'`, `â€¦`, `Ã`. This silently broke
+   user-visible messages and two tests once. Edit files with a tool that
+   writes UTF-8, and before every commit run:
+
+       git grep -n -e "â€" -e "â†" -e "Ã" -- . ':!AGENTS.md' ':!*.png'
+
+   It must print nothing. Also check `git diff` shows only the lines you
+   meant to change — no line-ending or whitespace churn on untouched lines.
+10. Leave no temporary files in the repo. Probe scripts, logs and diff
+    dumps go to the OS temp folder and are deleted before reporting;
+    `git status` must show only the intended changes.
+11. A failing test after your change is caused by your change until proven
+    otherwise. Compare the counts with the previous run (pass / fail /
+    cancelled) — do not report failures as "pre-existing" without showing
+    they failed before your change.
