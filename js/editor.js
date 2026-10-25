@@ -560,6 +560,11 @@ export function createEditor(textareaEl, deps) {
         continue;
       }
       inlineImageMarks.push(mark);
+wrapper.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        showImageMenu(e.clientX, e.clientY, mark, () => link.click());
+      });
 
       Promise.resolve()
         .then(() => deps.imageResolver.resolve(item.src, currentPath))
@@ -593,6 +598,114 @@ export function createEditor(textareaEl, deps) {
     renderInlineImages();
   }
 
+//// ---- Moving lines (Alt+Up / Alt+Down) and the image context menu -------
+  // One replaceRange inside one operation = one undo step, and a normal
+  // 'change' event, so autosave, the Commit badge and the outline see it.
+  function moveLines(dir) {
+    const cm = easyMDE.codemirror;
+    const sel = cm.listSelections()[0];
+    const from = Math.min(sel.anchor.line, sel.head.line);
+    const to = Math.max(sel.anchor.line, sel.head.line);
+    if (dir < 0 && from === 0) return;
+    if (dir > 0 && to >= cm.lastLine()) return;
+    const lines = [];
+    for (let i = from; i <= to; i++) lines.push(cm.getLine(i));
+    const block = lines.join('\n');
+    cm.operation(() => {
+      if (dir < 0) {
+        const above = cm.getLine(from - 1);
+        cm.replaceRange(block + '\n' + above,
+          { line: from - 1, ch: 0 }, { line: to, ch: cm.getLine(to).length });
+      } else {
+        const below = cm.getLine(to + 1);
+        cm.replaceRange(below + '\n' + block,
+          { line: from, ch: 0 }, { line: to + 1, ch: cm.getLine(to + 1).length });
+      }
+      cm.setSelection(
+        { line: sel.anchor.line + dir, ch: sel.anchor.ch },
+        { line: sel.head.line + dir, ch: sel.head.ch }
+      );
+    });
+  }
+
+  const lineMoveKeys = {
+    'Alt-Up': () => moveLines(-1),
+    'Alt-Down': () => moveLines(1),
+  };
+  if (typeof easyMDE.codemirror.addKeyMap === 'function') {
+    easyMDE.codemirror.addKeyMap(lineMoveKeys);
+  }
+
+  // ---- End Moving lines ----
+
+  function copyText(text) {
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).catch(() => {});
+      }
+    } catch (_) { /* clipboard unavailable — Undo still restores a Cut */ }
+  }
+
+  let imageMenuEl = null;
+  function onImageMenuDocClick(e) {
+    if (imageMenuEl && !imageMenuEl.contains(e.target)) closeImageMenu();
+  }
+  function onImageMenuKey(e) {
+    if (e.key === 'Escape') closeImageMenu();
+  }
+  function closeImageMenu() {
+    if (!imageMenuEl) return;
+    imageMenuEl.remove();
+    imageMenuEl = null;
+    document.removeEventListener('click', onImageMenuDocClick, true);
+    document.removeEventListener('keydown', onImageMenuKey, true);
+  }
+
+  function showImageMenu(x, y, mark, onOpen) {
+    closeImageMenu();
+    const cm = easyMDE.codemirror;
+    const start = mark.find();
+    if (!start) return;
+    // Every action re-reads the mark position at click time.
+    const withRange = (fn) => () => { const r = mark.find(); if (r) fn(r); };
+    const items = [
+      { label: '⬆ Move up', disabled: start.from.line === 0,
+        run: withRange((r) => { cm.setCursor(r.from); moveLines(-1); }) },
+      { label: '⬇ Move down', disabled: start.from.line >= cm.lastLine(),
+        run: withRange((r) => { cm.setCursor(r.from); moveLines(1); }) },
+      { label: '✂ Cut',
+        run: withRange((r) => { copyText(cm.getRange(r.from, r.to)); cm.replaceRange('', r.from, r.to); }) },
+      { label: '📋 Copy',
+        run: withRange((r) => copyText(cm.getRange(r.from, r.to))) },
+      { label: '🗑 Delete from text',
+        run: withRange((r) => cm.replaceRange('', r.from, r.to)) },
+      { label: '🖼 Open image', run: () => onOpen() },
+    ];
+    const menu = document.createElement('div');
+    menu.className = 'folder-context-menu image-context-menu';
+    for (const it of items) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.textContent = it.label;
+      if (it.disabled) b.disabled = true;
+      b.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        closeImageMenu();
+        it.run();
+        cm.focus();
+      });
+      menu.appendChild(b);
+    }
+    menu.style.left = x + 'px';
+    menu.style.top = y + 'px';
+    document.body.appendChild(menu);
+    const rect = menu.getBoundingClientRect();
+    if (rect.bottom > window.innerHeight) menu.style.top = Math.max(0, y - rect.height) + 'px';
+    if (rect.right > window.innerWidth) menu.style.left = Math.max(0, x - rect.width) + 'px';
+    imageMenuEl = menu;
+    document.addEventListener('click', onImageMenuDocClick, true);
+    document.addEventListener('keydown', onImageMenuKey, true);
+  }
   refreshInlineImages();
 
   // ---- One CodeMirror document per open tab -------------------------------
@@ -704,6 +817,10 @@ export function createEditor(textareaEl, deps) {
     inlineImageTimer = null;
     inputField.removeEventListener('paste', onPaste);
     easyMDE.codemirror.off('change', onChange);
+closeImageMenu();
+    if (typeof easyMDE.codemirror.removeKeyMap === 'function') {
+      easyMDE.codemirror.removeKeyMap(lineMoveKeys);
+    }
     for (const mark of inlineImageMarks) mark.clear();
     inlineImageMarks = [];
     // Hand the plain textarea back so a fresh createEditor() can wrap it cleanly.
