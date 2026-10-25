@@ -313,16 +313,15 @@ export function createEditor(textareaEl, deps) {
       if (isImagePath(href.split('?')[0])) return;
       e.preventDefault();
       e.stopPropagation();
-      const cur = deps.getCurrentPath ? deps.getCurrentPath() : null;
-      let target = href.replace(/^\//, '');
+            const cur = deps.getCurrentPath ? deps.getCurrentPath() : null;
+      // marked percent-encodes the href (spaces -> %20 etc.). Decode ONCE,
+      // before the absolute/relative branching: both '/…' (root-absolute,
+      // produced by Copy as link) and relative links need a decoded repo path,
+      // otherwise encodePathForApi turns the % into %25 and GitHub 404s.
+      const decoded = decodeUriSafe(href);
+      let target = decoded.replace(/^\//, '');
       try {
-        if (!href.startsWith('/')) {
-          // marked percent-encodes the href (spaces -> %20 etc.), so decode it
-          // before resolving — otherwise the literal %20 survives into the repo
-          // path and encodePathForApi turns the % into %25, 404-ing on GitHub.
-          // This also revives links that were written pre-encoded (%20) by an
-          // older build, which otherwise stay permanently broken.
-          const decoded = decodeUriSafe(href);
+        if (!decoded.startsWith('/')) {
           target = resolveRelativePath(dirnameOf(cur || ''), decoded);
         }
       } catch (_) { /* keep target */ }
