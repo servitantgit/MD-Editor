@@ -5,6 +5,10 @@ npx repomix - Запускати в корені MD-Editor.
 
 Або онлайн: gitingest.com → вставити адресу репо.
 
+Повний експорт не влазить в чат джилетт, завеликий навіть для нового.
+Але можна брати окремі файли, потрібні для кожної задачі.
+npx repomix --include "html-preview.js,preview*.js,tests/**/*preview*,tests/**/*link*" --output "$env:USERPROFILE\Desktop\repomix-part.xml"
+
 Варіант 2. Свій скрипт у MD-Editor як tools/dump_code.ps1:
 
 <#
