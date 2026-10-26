@@ -4,7 +4,7 @@
 // file path via the same ImageResolver / Contents API used for markdown images.
 // Relative <a href> to repo files post a message to the parent so the app can open them.
 
-import { dirnameOf, resolveRelativePath, isExternalOrAnchor } from './paths.js';
+import { dirnameOf, resolveRelativePath, isExternalOrAnchor, decodeUriSafe } from './paths.js';
 
 /**
  * @param {string} html
@@ -35,7 +35,8 @@ export async function buildHtmlSrcdoc(html, currentPath, resolver) {
     if (!val || isExternalOrAnchor(val) || val.startsWith('data:') || val.startsWith('blob:')) return;
     if (!resolver || typeof resolver.resolve !== 'function') return;
     try {
-      const url = await resolver.resolve(val, base);
+      // Decode %20 etc. so the resolver sees the real repo path (the API layer re-encodes it).
+      const url = await resolver.resolve(decodeUriSafe(val), base);
       el.setAttribute(attr, url);
     } catch (_) {
       // leave original; broken asset stays visible in the iframe
@@ -67,6 +68,8 @@ export async function buildHtmlSrcdoc(html, currentPath, resolver) {
       if (!href.startsWith('/')) abs = resolveRelativePath(dir, href);
     } catch (_) { /* keep abs */ }
     abs = String(abs || '').split('#')[0].split('?')[0];
+    // Decode AFTER stripping '#'/'?': an encoded %23 in a file name must stay part of the path.
+    abs = decodeUriSafe(abs);
     if (!abs) return;
     a.setAttribute('data-md-path', abs);
     a.setAttribute('title', abs);
