@@ -3001,3 +3001,8 @@ body.md-layout-source .editor-preview-active-side {
   padding: 0;
   vertical-align: middle;
 }
+/* Task checkboxes in Preview/Live are clickable (toggle [ ] / [x] in the source). */
+.editor-preview input[type="checkbox"],
+.editor-preview-side input[type="checkbox"] {
+  cursor: pointer;
+}

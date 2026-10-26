@@ -4,6 +4,7 @@
 
 const TASK_RE = /^(\s*)[-*+] \[[ xX]\] /;
 const LIST_RE = /^(\s*)(?:[-*+]|\d+[.)]) /;
+const TASK_ITEM_RE = /^((?:[ \t]*>)*[ \t]*(?:[-*+]|\d+[.)])[ \t]+)\[([ xX])\](?=\s|$)/;
 
 /**
  * Toggle "- [ ] " task markers on a block of lines.
@@ -58,4 +59,29 @@ export function applyTaskList(cm) {
     }
   });
   cm.focus();
+}
+const FENCE_RE = /^[ \t]*(`{3,}|~{3,})/;
+
+/**
+ * Find task list items in markdown text, in document order, skipping fenced code.
+ * The order matches the checkboxes marked renders in the preview.
+ * @param {string} text
+ * @returns {{line: number, ch: number, checked: boolean}[]} ch = column of the mark between [ ]
+ */
+export function findTaskLines(text) {
+  const lines = String(text || '').split('\n');
+  const out = [];
+  let fence = null;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].replace(/\r$/, '');
+    const f = line.match(FENCE_RE);
+    if (fence) {
+      if (f && f[1][0] === fence[0] && f[1].length >= fence.length) fence = null;
+      continue;
+    }
+    if (f) { fence = f[1]; continue; }
+    const m = line.match(TASK_ITEM_RE);
+    if (m) out.push({ line: i, ch: m[1].length + 1, checked: m[2] !== ' ' });
+  }
+  return out;
 }

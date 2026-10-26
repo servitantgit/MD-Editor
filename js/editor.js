@@ -9,7 +9,7 @@ import { markdownToCanonicalHtml } from './markdown-tokens.js';
 import { attachResizeHandles, resolveAllImages } from './image-preview.js';
 import { kindFromPath } from './file-kind.js';
 import { dirnameOf, basenameOf, resolveRelativePath, isExternalOrAnchor, isImagePath, decodeUriSafe } from './paths.js';
-import { applyTaskList } from './markdown-commands.js';
+import { applyTaskList, findTaskLines } from './markdown-commands.js';
 import { buildHtmlSrcdoc } from './html-preview.js';
 
 /**
@@ -223,6 +223,9 @@ export function createEditor(textareaEl, deps) {
   }
 
   async function finishPreviewRender(previewEl, myToken) {
+    // Task checkboxes: enable + wire BEFORE the token check. The token is shared by
+    // both preview panes, so a superseded pass still owns its pane's fresh HTML.
+    try { wirePreviewTasks(previewEl); } catch (_) { /* never break the render */ }
     if (myToken !== previewRenderToken) return; // a newer render arrived meanwhile
     // Notepad++-style readability: highlight fenced code in the rendered preview
     try {
@@ -308,6 +311,34 @@ export function createEditor(textareaEl, deps) {
     // the chain for the next pass.
     state.chain = state.chain.then(() => run, () => run);
     return run;
+  }
+  /**
+   * Task checkboxes in the markdown preview toggle "[ ]" <-> "[x]" in the source.
+   * marked renders them disabled; enable them on every render (idempotent) and
+   * wire ONE delegated listener per pane (the pane survives re-renders).
+   * The edit goes through CodeMirror, so undo, drafts and Save work as for typing.
+   * If the boxes on screen cannot be matched 1:1 to task lines in the text
+   * (raw HTML checkboxes, unsupported syntax), the click is cancelled.
+   */
+  function wirePreviewTasks(previewEl) {
+    if (!previewEl || typeof previewEl.querySelectorAll !== 'function') return;
+    previewEl.querySelectorAll('input[type="checkbox"][disabled]').forEach((cb) => cb.removeAttribute('disabled'));
+    if (previewEl.dataset.taskToggle === '1') return;
+    previewEl.dataset.taskToggle = '1';
+    previewEl.addEventListener('click', (e) => {
+      const cb = e.target && e.target.closest && e.target.closest('input[type="checkbox"]');
+      if (!cb || !previewEl.contains(cb)) return;
+      const boxes = Array.from(previewEl.querySelectorAll('input[type="checkbox"]'));
+      const index = boxes.indexOf(cb);
+      const cm = easyMDE.codemirror;
+      const tasks = findTaskLines(cm.getValue());
+      if (index < 0 || boxes.length !== tasks.length) {
+        e.preventDefault(); // browser reverts the box: never tick the wrong line
+        return;
+      }
+      const t = tasks[index];
+      cm.replaceRange(t.checked ? ' ' : 'x', { line: t.line, ch: t.ch }, { line: t.line, ch: t.ch + 1 });
+    });
   }
   function wirePreviewLinks(previewEl) {
     if (!previewEl || previewEl.dataset.linkNav === '1') return;
