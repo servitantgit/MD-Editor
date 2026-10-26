@@ -9,6 +9,7 @@ import { markdownToCanonicalHtml } from './markdown-tokens.js';
 import { attachResizeHandles, resolveAllImages } from './image-preview.js';
 import { kindFromPath } from './file-kind.js';
 import { dirnameOf, basenameOf, resolveRelativePath, isExternalOrAnchor, isImagePath, decodeUriSafe } from './paths.js';
+import { applyTaskList } from './markdown-commands.js';
 import { buildHtmlSrcdoc } from './html-preview.js';
 
 /**
@@ -62,8 +63,15 @@ export function createEditor(textareaEl, deps) {
     // EasyMDE's preview / side-by-side here: they fight our modes and only work
     // cleanly in Source. Fullscreen stays; F9/F10 EasyMDE shortcuts are disabled.
     toolbar: [
-      'bold', 'italic', 'heading', '|',
-      'quote', 'unordered-list', 'ordered-list', '|',
+      'bold', 'italic', 'strikethrough', 'heading', '|',
+      'quote', 'unordered-list', 'ordered-list',
+      {
+        name: 'task-list',
+        action: (editor) => applyTaskList(editor.codemirror),
+        className: 'fa fa-check-square-o',
+        title: 'Task list (checkbox)',
+      }, '|',
+      'code', 'table', 'horizontal-rule', '|',
       'link',
       {
         name: 'image',
@@ -864,7 +872,7 @@ closeImageMenu();
     if (!toolbar) return;
     const mdOnly = new Set([
       'bold', 'italic', 'heading', 'quote', 'unordered-list', 'ordered-list',
-      'link', 'image', 'guide',
+      'link', 'image', 'guide', 'strikethrough', 'task-list', 'code', 'table', 'horizontal-rule',
     ]);
     toolbar.querySelectorAll('button').forEach((btn) => {
       const name = btn.className || '';
@@ -879,7 +887,7 @@ closeImageMenu();
       // Match by title keywords EasyMDE uses
       const title = (btn.title || '').toLowerCase();
       const isMdBtn =
-        /bold|italic|heading|quote|list|link|image|guide|markdown/i.test(title) &&
+        /bold|italic|heading|quote|list|link|image|guide|markdown|strike|code|table|horizontal/i.test(title) &&
         !/fullscreen|full screen/i.test(title);
       if (!isMdBtn) return; // fullscreen etc. stay active
       if (isMd) {

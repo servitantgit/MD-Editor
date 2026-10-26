@@ -2987,3 +2987,17 @@ body.md-layout-source .editor-preview-active-side {
 .status.status-busy::before {
   content: '⏳ ';
 }
+/* Task lists (- [ ] / - [x]) in Preview, Live and PDF: no bullet, checkbox right before the text. */
+.editor-preview li:has(> input[type="checkbox"]),
+.editor-preview-side li:has(> input[type="checkbox"]),
+#pdf-export-container li:has(> input[type="checkbox"]) {
+  list-style: none;
+}
+.editor-preview li > input[type="checkbox"],
+.editor-preview-side li > input[type="checkbox"],
+#pdf-export-container li > input[type="checkbox"] {
+  width: auto;
+  margin: 0 0.4em 0 -1.3em;
+  padding: 0;
+  vertical-align: middle;
+}
