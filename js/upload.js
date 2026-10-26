@@ -4,6 +4,7 @@
 // automatically detected shared images folder.
 
 import { dirnameOf, findAssetFolder, relativePathFromTo, encodeLinkPath, guessMime } from './paths.js';
+import { compressImage } from './image-compress.js';
 
 /**
  * @param {HTMLElement} dropZoneEl  element on which we listen for OS file drag&drop
@@ -103,6 +104,8 @@ export async function uploadImage(file, deps) {
 
   deps.onStatus('Uploading image...', false);
   try {
+    // Paste / drop / toolbar all land here: shrink to <=1920px, opaque PNG -> JPEG (original on any problem).
+    file = await compressImage(file);
     const b64 = await fileToBase64(file);
     const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
     const folder = findAssetFolder(deps.getAllFiles().map((f) => f.path), currentPath);
