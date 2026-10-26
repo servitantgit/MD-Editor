@@ -893,6 +893,8 @@ insignificant relative to the main task. Before push:
 
        git grep -n -e "â€" -e "â†" -e "Ã" -- . ':!AGENTS.md' ':!*.png'
 
+$pats = @("$([char]0xE2)$([char]0x20AC)", "$([char]0xE2)$([char]0x2020)", "$([char]0xC3)")
+    git -c core.quotepath=off ls-files --cached --others --exclude-standard | Where-Object { $_ -ne 'AGENTS.md' -and $_ -match '\.(js|mjs|ts|html|css|md|json|py|ps1|txt|toml|yml|yaml)$' } | ForEach-Object { Select-String -LiteralPath $_ -Pattern $pats -SimpleMatch -CaseSensitive -Encoding UTF8 } | ForEach-Object { "$($_.Path):$($_.LineNumber): $($_.Line.Trim())" }
    It must print nothing. Also check `git diff` shows only the lines you
    meant to change — no line-ending or whitespace churn on untouched lines.
 10. Leave no temporary files in the repo. Probe scripts, logs and diff
@@ -901,4 +903,8 @@ insignificant relative to the main task. Before push:
 11. A failing test after your change is caused by your change until proven
     otherwise. Compare the counts with the previous run (pass / fail /
     cancelled) — do not report failures as "pre-existing" without showing
+12. Reports must contain RAW command output, pasted verbatim (test summary
+    numbers, git diff, git status, check results). Summaries such as
+    "all passed" or "expected empty output" are rejected. If a command
+    could not be run, say so and paste the error.
     they failed before your change.
