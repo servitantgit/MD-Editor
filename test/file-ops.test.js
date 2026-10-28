@@ -530,3 +530,105 @@ test('onCopyLinkToFile keeps the extension in the display name for non-.md files
   assert.equal(lastClipboardText, '[image.png](/Notes/image.png)', 'extension kept in display name');
 });
 ;
+
+/** Records which draft paths were deleted; reports no stored drafts. */
+function fakeDraftStore() {
+  return {
+    deleted: [],
+    async get() { return null; },
+    async delete(ref) { this.deleted.push(ref.path); },
+  };
+}
+
+test('onDeleteFileAt drops the deleted file from the working tree and deletes its draft', async () => {
+  const client = new FakeClient({ 'Notes/a.md': '# a', 'Notes/b.md': '# b' });
+  const allFiles = [{ path: 'Notes/a.md', sha: 'sha-Notes/a.md' }, { path: 'Notes/b.md', sha: 'sha-Notes/b.md' }];
+  const workingTree = new WorkingTree();
+  workingTree.setDirty('Notes/a.md', '# unsaved', 'sha-Notes/a.md');
+  workingTree.setDirty('Notes/b.md', '# other', 'sha-Notes/b.md');
+  const draftStore = fakeDraftStore();
+  const { deps } = makeDeps({ client, allFiles, currentPath: null, currentSha: null, workingTree, draftStore });
+  const ops = createFileOps(deps);
+  await ops.onDeleteFileAt('Notes/a.md');
+  assert.deepEqual(client.deletes, ['Notes/a.md']);
+  assert.equal(workingTree.isDirty('Notes/a.md'), false);
+  assert.equal(workingTree.isDirty('Notes/b.md'), true);
+  assert.deepEqual(draftStore.deleted, ['Notes/a.md']);
+});
+
+test('onDeleteFile (toolbar) drops the open file from the working tree and deletes its draft', async () => {
+  const client = new FakeClient({ 'Notes/a.md': '# a' });
+  const allFiles = [{ path: 'Notes/a.md', sha: 'sha-Notes/a.md' }];
+  const workingTree = new WorkingTree();
+  workingTree.setDirty('Notes/a.md', '# unsaved', 'sha-Notes/a.md');
+  const draftStore = fakeDraftStore();
+  const { deps } = makeDeps({ client, allFiles, workingTree, draftStore });
+  deps.els.btnDelete = { disabled: false };
+  deps.els.btnSave = { disabled: false };
+  const ops = createFileOps(deps);
+  await ops.onDeleteFile();
+  assert.deepEqual(client.deletes, ['Notes/a.md']);
+  assert.equal(workingTree.isDirty('Notes/a.md'), false);
+  assert.deepEqual(draftStore.deleted, ['Notes/a.md']);
+});
+
+test('onDeleteFolder drops every file under the folder (incl. never-committed) and nothing outside it', async () => {
+  const client = new FakeClient({ 'Docs/a.md': '# a', 'Docs/Sub/b.md': '# b', 'Other/c.md': '# c' });
+  const allFiles = [
+    { path: 'Docs/a.md', sha: 'sha-Docs/a.md' },
+    { path: 'Docs/Sub/b.md', sha: 'sha-Docs/Sub/b.md' },
+    { path: 'Other/c.md', sha: 'sha-Other/c.md' },
+  ];
+  const workingTree = new WorkingTree();
+  workingTree.setDirty('Docs/a.md', '# unsaved', 'sha-Docs/a.md');
+  workingTree.setDirty('Docs/new.md', '# never committed', null);
+  workingTree.setDirty('Other/c.md', '# keep', 'sha-Other/c.md');
+  workingTree.setDirty('Docsx/d.md', '# keep, other folder', null);
+  const draftStore = fakeDraftStore();
+  const { deps } = makeDeps({ client, allFiles, currentPath: null, currentSha: null, workingTree, draftStore });
+  const ops = createFileOps(deps);
+  await ops.onDeleteFolder('Docs');
+  assert.equal(workingTree.isDirty('Docs/a.md'), false);
+  assert.equal(workingTree.isDirty('Docs/new.md'), false);
+  assert.equal(workingTree.isDirty('Other/c.md'), true);
+  assert.equal(workingTree.isDirty('Docsx/d.md'), true);
+  assert.deepEqual(draftStore.deleted.slice().sort(), ['Docs/Sub/b.md', 'Docs/a.md', 'Docs/new.md']);
+});
+
+test('a failed delete keeps the unsaved edits and the draft (guard)', async () => {
+  class FailingClient extends FakeClient {
+    async deleteFile() { throw new Error('boom'); }
+  }
+  const client = new FailingClient({ 'Notes/a.md': '# a' });
+  const allFiles = [{ path: 'Notes/a.md', sha: 'sha-Notes/a.md' }];
+  const workingTree = new WorkingTree();
+  workingTree.setDirty('Notes/a.md', '# unsaved', 'sha-Notes/a.md');
+  const draftStore = fakeDraftStore();
+  const { deps } = makeDeps({ client, allFiles, currentPath: null, currentSha: null, workingTree, draftStore });
+  const ops = createFileOps(deps);
+  await ops.onDeleteFileAt('Notes/a.md');
+  assert.equal(workingTree.isDirty('Notes/a.md'), true);
+  assert.deepEqual(draftStore.deleted, []);
+});
+
+test('the delete confirm warns only when the file has unsaved edits', async () => {
+  const client = new FakeClient({ 'Notes/a.md': '# a', 'Notes/b.md': '# b' });
+  const allFiles = [{ path: 'Notes/a.md', sha: 'sha-Notes/a.md' }, { path: 'Notes/b.md', sha: 'sha-Notes/b.md' }];
+  const workingTree = new WorkingTree();
+  workingTree.setDirty('Notes/a.md', '# unsaved', 'sha-Notes/a.md');
+  const { deps } = makeDeps({ client, allFiles, currentPath: null, currentSha: null, workingTree, draftStore: fakeDraftStore() });
+  const ops = createFileOps(deps);
+  const messages = [];
+  const original = globalThis.confirm;
+  globalThis.confirm = (m) => { messages.push(m); return false; };
+  try {
+    await ops.onDeleteFileAt('Notes/a.md');
+    await ops.onDeleteFileAt('Notes/b.md');
+  } finally {
+    globalThis.confirm = original;
+  }
+  assert.equal(messages.length, 2);
+  assert.match(messages[0], /unsaved/i);
+  assert.doesNotMatch(messages[1], /unsaved/i);
+  assert.deepEqual(client.deletes, []);
+});

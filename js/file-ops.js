@@ -191,11 +191,62 @@ export function createFileOps(deps) {
   }
 
 
+  /**
+   * Forget local edits of paths that were just DELETED on GitHub. Without this
+   * the WorkingTree keeps them: the Commit panel still lists the deleted file and
+   * a Commit writes it back. The IndexedDB draft goes too: sweepStaleDrafts() on
+   * loadTree() can miss it while the GitHub tree still lags behind the delete,
+   * and a file re-created under the same name would then surface a stale draft.
+   * Call ONLY after the delete succeeded (a failed delete keeps the edits), and
+   * after dropTabs() (it releases the autosave, so no timer writes the draft back).
+   */
+  async function forgetPaths(paths) {
+    const list = (paths || []).filter((p) => typeof p === 'string' && p !== '');
+    if (list.length === 0) return;
+    const wt = deps.getWorkingTree ? deps.getWorkingTree() : null;
+    if (wt) {
+      for (const p of list) wt.clear(p);
+      const ft = deps.getFileTree ? deps.getFileTree() : null;
+      if (ft && typeof ft.setDirtyMap === 'function') ft.setDirtyMap(wt.statusMap());
+      if (deps.refreshCommitBadge) deps.refreshCommitBadge();
+    }
+    const store = deps.getDraftStore ? deps.getDraftStore() : null;
+    if (!store) return;
+    const state = deps.getState();
+    for (const path of list) {
+      try {
+        await store.delete({
+          owner: state.owner ?? state.client?.owner,
+          repo: state.repo ?? state.client?.repo,
+          branch: state.branch,
+          path,
+        });
+      } catch (_) { /* a missing/degraded store never blocks a delete */ }
+    }
+  }
+
+  /** Every path under a folder: committed files AND never-committed working-tree files. */
+  function pathsUnderFolder(folderPath) {
+    const prefix = folderPath + '/';
+    const out = new Set();
+    for (const f of deps.getState().allFiles || []) {
+      if (f && f.path && f.path.startsWith(prefix)) out.add(f.path);
+    }
+    const wt = deps.getWorkingTree ? deps.getWorkingTree() : null;
+    if (wt) {
+      for (const c of wt.listChanges()) {
+        if (c.path.startsWith(prefix)) out.add(c.path);
+      }
+    }
+    return Array.from(out);
+  }
+
   async function onDeleteFile() {
     const path = deps.getState().currentPath;
     if (!path) return;
 
-    const confirmed = confirm(`Are you sure you want to delete this file?\n\n${path}\n\nThe file will be removed from the repository; this cannot be undone.`);
+    const unsavedNote = (await hasUnsavedEdits(path)) ? '\n\nThis file has UNSAVED local changes. They will be lost.' : '';
+    const confirmed = confirm(`Are you sure you want to delete this file?\n\n${path}\n\nThe file will be removed from the repository; this cannot be undone.${unsavedNote}`);
     if (!confirmed) return;
 
     els.btnDelete.disabled = true;
@@ -206,6 +257,7 @@ export function createFileOps(deps) {
       await deps.getState().client.deleteFile(path, deps.getState().currentSha, `Delete ${path}`);
       deps.getImageResolver().invalidate(path);
       await deps.dropTabs([path]);
+      await forgetPaths([path]);
       await deps.loadTree();
       deps.setSaveStatus(`File deleted: ${path}`, false);
     } catch (e) {
@@ -596,8 +648,9 @@ export function createFileOps(deps) {
 
 
   async function onDeleteFileAt(path) {
+    const unsavedNote = (await hasUnsavedEdits(path)) ? '\n\nThis file has UNSAVED local changes. They will be lost.' : '';
     const confirmed = confirm(
-      `Are you sure you want to delete this file?\n\n${path}\n\nThe file will be removed from the repository; this cannot be undone.`
+      `Are you sure you want to delete this file?\n\n${path}\n\nThe file will be removed from the repository; this cannot be undone.${unsavedNote}`
     );
     if (!confirmed) return;
 
@@ -610,6 +663,7 @@ export function createFileOps(deps) {
       await deps.getState().client.deleteFile(path, sha, `Delete ${path}`);
       deps.getImageResolver().invalidate(path);
       await deps.dropTabs([path]);
+      await forgetPaths([path]);
       await deps.loadTree();
       deps.setSaveStatus(`File deleted: ${path}`, false);
     } catch (e) {
@@ -917,8 +971,12 @@ export function createFileOps(deps) {
 
     try {
       deps.setSaveStatus(`Deleting folder ${folderPath}...`, false);
+      // Collected BEFORE the delete: allFiles still lists the folder, and the
+      // working tree may also hold new (never committed) files under it.
+      const folderPaths = pathsUnderFolder(folderPath);
       await deleteFolder(deps.getState().client, deps.getState().allFiles, folderPath);
       await deps.dropTabs(deps.getTabs().paths.filter((p) => p.startsWith(folderPath + '/')));
+      await forgetPaths(folderPaths);
       await deps.loadTree();
       deps.setSaveStatus(`Folder deleted: ${folderPath}`, false);
     } catch (e) {
