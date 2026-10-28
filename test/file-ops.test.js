@@ -632,3 +632,42 @@ test('the delete confirm warns only when the file has unsaved edits', async () =
   assert.doesNotMatch(messages[1], /unsaved/i);
   assert.deepEqual(client.deletes, []);
 });
+
+/** Runs onRenameFolder('Docs') with the prompt answering `name`. */
+async function runFolderRename(name, paths) {
+  const client = new FakeClient(Object.fromEntries(paths.map((p) => [p, '# ' + p])));
+  const allFiles = paths.map((p) => ({ path: p, sha: 'sha-' + p }));
+  const { deps, status } = makeDeps({ client, allFiles, currentPath: null, currentSha: null, workingTree: new WorkingTree() });
+  const ops = createFileOps(deps);
+  const original = globalThis.prompt;
+  globalThis.prompt = () => name;
+  try {
+    await ops.onRenameFolder('Docs');
+  } finally {
+    globalThis.prompt = original;
+  }
+  return { client, status: status() };
+}
+
+test('onRenameFolder refuses to merge into an existing folder (zero requests)', async () => {
+  const { client, status } = await runFolderRename('Notes', ['Docs/a.md', 'Notes/b.md']);
+  assert.equal(client.puts.length, 0);
+  assert.equal(client.deletes.length, 0);
+  assert.equal(status.isError, true);
+});
+
+test('onRenameFolder refuses a name taken by a FILE in the same parent (zero requests)', async () => {
+  const { client, status } = await runFolderRename('README.md', ['Docs/a.md', 'README.md']);
+  assert.equal(client.puts.length, 0);
+  assert.equal(client.deletes.length, 0);
+  assert.equal(status.isError, true);
+});
+
+test('onRenameFolder rejects slashes and dot names (zero requests)', async () => {
+  for (const name of ['Docs/Sub', '..', '.']) {
+    const { client, status } = await runFolderRename(name, ['Docs/a.md']);
+    assert.equal(client.puts.length, 0, name);
+    assert.equal(client.deletes.length, 0, name);
+    assert.equal(status.isError, true, name);
+  }
+});

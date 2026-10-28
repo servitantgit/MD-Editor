@@ -733,6 +733,24 @@ export function createFileOps(deps) {
     const newPath = `${dirnameOf(folderPath)}/${newName.trim()}`.replace(/^\/+/, '');
     if (newPath === folderPath) return;
 
+    // Name checks BEFORE any request. A rename is a rename, not a move: a name
+    // with a slash would nest the folder (possibly inside itself), and "."/".."
+    // are not names. Moving between folders is drag & drop (onMoveFolder).
+    const cleanName = newName.trim();
+    if (cleanName === '.' || cleanName === '..' || /[\\/]/.test(cleanName)) {
+      alert(`"${cleanName}" is not a valid folder name (no slashes, not "." or "..").`);
+      deps.setSaveStatus(`Folder rename blocked: "${cleanName}" is not a valid name`, true);
+      return;
+    }
+    // Name collision: a file OR a folder already called that in the same parent.
+    // renameFolder() only refuses when two FILES collide, so without this the two
+    // folders were silently merged. Zero requests, same rule as onMoveFolder.
+    const clash = deps.getState().allFiles.some((f) => f.path === newPath || f.path.startsWith(newPath + '/'));
+    if (clash) {
+      alert(`A file or folder named "${cleanName}" already exists here.`);
+      deps.setSaveStatus(`Folder rename blocked: "${cleanName}" already exists`, true);
+      return;
+    }
     // Block the folder rename if any file inside has unsaved local edits
     // (working tree, live autosave draft, or a stored IndexedDB draft).
     const dirtyInside = await findUnsavedInside(folderPath);
