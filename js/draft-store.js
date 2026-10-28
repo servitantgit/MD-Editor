@@ -97,24 +97,30 @@ export class DraftStore {
   /**
    * Drops drafts nobody can use any more, and returns how many went.
    *
-   * Stale means: older than the 30-day TTL, OR a path that is not in
-   * `knownPaths` (the file was deleted / renamed in the repository). Same TTL
+   * Stale means: older than the 30-day TTL - nothing else. `knownPaths` is
+   * ignored on purpose (see below). Same TTL
    * and the same justification as the search index sweep — without it a
    * repository deleted on GitHub would keep its drafts forever.
+   *
+   * A path missing from the tree is NOT a reason to delete: right after a write
+   * the GitHub tree can lag behind (a just-created file is not in it yet), and a
+   * truncated tree lists only part of the repo. Deleting on "not in the tree"
+   * silently destroyed drafts of files that exist. Deletes made in the editor
+   * remove their own drafts (file-ops.js forgetPaths); a file deleted outside
+   * the editor keeps its draft until the TTL, which is harmless.
    *
    * `scope` limits the sweep to ONE repository/branch. That is the normal call
    * (on tree load) and it is deliberately narrow: logging into another repo must
    * never delete the drafts of the repo you were just editing.
    */
   async sweepStaleDrafts(knownPaths, now = this.now(), scope = null) {
-    const known = new Set(knownPaths || []);
     const prefix = scope ? scopePrefix(scope.owner, scope.repo, scope.branch) : null;
     const records = await this.all();
     const stale = records.filter((r) => {
       if (!r) return false;
       if (prefix && !String(r.key).startsWith(prefix)) return false; // another repo's work
       const expired = !(r.savedAt >= now - TTL_MS);
-      return expired || !known.has(r.path);
+      return expired; // a path missing from the tree is NOT stale (see above)
     });
     for (const record of stale) await this.deleteByKey(record.key);
     return stale.length;

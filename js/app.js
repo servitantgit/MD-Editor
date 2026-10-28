@@ -1087,8 +1087,8 @@ async function loadTree(opts = {}) {
 }
 
 /**
- * Drops drafts nobody can use any more: older than 30 days, or for a path that
- * no longer exists in this repository. Scoped to the CURRENT repo/branch on
+ * Drops drafts nobody can use any more: older than 30 days. A path missing from
+ * the tree is NOT a reason (see draft-store.js). Scoped to the CURRENT repo/branch on
  * purpose — signing into another repository must never delete the drafts of the
  * one you were working in (you may switch back).
  */

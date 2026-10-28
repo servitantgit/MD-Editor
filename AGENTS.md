@@ -908,3 +908,20 @@ $pats = @("$([char]0xE2)$([char]0x20AC)", "$([char]0xE2)$([char]0x2020)", "$([ch
     "all passed" or "expected empty output" are rejected. If a command
     could not be run, say so and paste the error.
     they failed before your change.
+
+## Draft sweep: never delete a draft because its path is missing from the tree
+
+`sweepStaleDrafts()` used to drop every draft whose path was not in the tree
+returned by `getTree()`. That tree is not a reliable list of existing files:
+right after a write GitHub can return the pre-write tree (a just-created file is
+missing), and a large repository can come back `truncated`. `loadTree()` runs
+after every save/create/upload/delete, so the sweep silently deleted drafts of
+files that do exist - the crash-recovery copy was gone exactly when needed.
+
+The sweep now drops ONLY drafts older than the 30-day TTL (`knownPaths` is
+ignored). Deletes made in the editor remove their own drafts (`forgetPaths()` in
+`js/file-ops.js`). A file deleted outside the editor keeps its draft until the
+TTL; at worst a re-created file of the same name shows the draft banner, which
+the user can discard. Do not reintroduce the "not in the tree" rule.
+Pinned by `test/draft-store.test.js` ("drops only drafts older than the TTL",
+"an empty or partial tree never deletes a fresh draft").

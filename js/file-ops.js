@@ -48,8 +48,8 @@ export function createFileOps(deps) {
    *      draft without ever marking the tree dirty.
    *
    * All three are lost by a move: moveToPath() reads the committed GitHub
-   * blob (never the draft), and sweepStaleDrafts() on loadTree() deletes the
-   * draft stored under the OLD path. Always run this BEFORE any GitHub
+   * blob (never the draft), and the draft stays behind under the OLD path,
+   * orphaned until the TTL. Always run this BEFORE any GitHub
    * request — a blocked move makes zero requests. Async only because the
    * draft store is IndexedDB; a missing/degraded store never blocks.
    */
@@ -195,8 +195,8 @@ export function createFileOps(deps) {
    * Forget local edits of paths that were just DELETED on GitHub. Without this
    * the WorkingTree keeps them: the Commit panel still lists the deleted file and
    * a Commit writes it back. The IndexedDB draft goes too: sweepStaleDrafts() on
-   * loadTree() can miss it while the GitHub tree still lags behind the delete,
-   * and a file re-created under the same name would then surface a stale draft.
+   * loadTree() never deletes drafts by path (see draft-store.js), and a file
+   * re-created under the same name would then surface a stale draft.
    * Call ONLY after the delete succeeded (a failed delete keeps the edits), and
    * after dropTabs() (it releases the autosave, so no timer writes the draft back).
    */

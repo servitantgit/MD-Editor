@@ -83,7 +83,7 @@ test('another repository keeps its own drafts', async () => {
   );
 });
 
-test('sweepStaleDrafts drops what is too old OR no longer in the tree', async () => {
+test('sweepStaleDrafts drops only drafts older than the TTL', async () => {
   let clock = 10_000_000;
   const store = newStore({ now: () => clock });
 
@@ -94,11 +94,13 @@ test('sweepStaleDrafts drops what is too old OR no longer in the tree', async ()
   clock += 5_000;
   await store.put(draft('kept.md', 'FRESH'));
 
-  const swept = await store.sweepStaleDrafts(['kept.md'], clock, SCOPE);
+  // The clock was moved back to write the drafts. Sweep at a moment when only
+  // ancient.md (saved 10s before kept.md) is past the TTL: deleted.md is not.
+  const swept = await store.sweepStaleDrafts(['kept.md'], 10_000_000 - 7_500, SCOPE);
 
-  assert.equal(swept, 2, 'exactly the unknown path and the expired one go');
+  assert.equal(swept, 1, 'only the expired draft goes');
   assert.ok(await store.get(SCOPE_PATH('kept.md')), 'a current draft must survive');
-  assert.equal(await store.get(SCOPE_PATH('deleted.md')), null, 'a path not in the tree is not recoverable');
+  assert.ok(await store.get(SCOPE_PATH('deleted.md')), 'a path missing from the tree must survive (the tree can lag behind a write)');
   assert.equal(await store.get(SCOPE_PATH('ancient.md')), null, 'a draft past the 30-day TTL is not recoverable');
 });
 
@@ -120,7 +122,7 @@ test("a scoped sweep never touches another repository's drafts", async () => {
   // Signing into another repo must not delete the work of the repo you left.
   const swept = await store.sweepStaleDrafts([], Date.now(), SCOPE);
 
-  assert.equal(swept, 1, 'only the draft whose path is unknown to this tree is swept');
+  assert.equal(swept, 1, 'only the expired draft of THIS repository is swept');
   assert.ok(
     await store.get({ owner: 'someone', repo: 'elsewhere', branch: 'main', path: 'theirs.md' }),
     "another repository's draft was deleted by an unrelated sweep"
@@ -238,4 +240,17 @@ test('a persistent quota error degrades to memory rather than throwing', async (
   assert.equal(store.degraded, true);
   assert.ok(reasons.some((r) => r.startsWith('quota:')), reasons.join('|'));
   assert.equal((await store.get(SCOPE_PATH('a.md'))).text, 'TOOBIG', 'the session still works');
+});
+
+test('an empty or partial tree never deletes a fresh draft', async () => {
+  const now = 10_000_000;
+  const store = newStore({ now: () => now });
+  await store.put(draft('new-file.md', 'JUST CREATED, NOT IN THE TREE YET'));
+  await store.put(draft('Notes/b.md', 'MISSING FROM A TRUNCATED TREE'));
+
+  const swept = await store.sweepStaleDrafts([], now, SCOPE);
+
+  assert.equal(swept, 0);
+  assert.ok(await store.get(SCOPE_PATH('new-file.md')), 'a just-created file is not in the lagging tree yet');
+  assert.ok(await store.get(SCOPE_PATH('Notes/b.md')), 'a truncated tree does not list every file');
 });
