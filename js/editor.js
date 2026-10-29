@@ -5,7 +5,7 @@
 //   measured the container height BEFORE it was displayed/got its final layout);
 // * previewRender wired via the async pattern documented by EasyMDE itself.
 
-import { markdownToCanonicalHtml } from './markdown-tokens.js';
+import { renderMarkdownSafe } from './sanitize-html.js';
 import { attachResizeHandles, resolveAllImages } from './image-preview.js';
 import { kindFromPath } from './file-kind.js';
 import { dirnameOf, basenameOf, resolveRelativePath, isExternalOrAnchor, isImagePath, decodeUriSafe } from './paths.js';
@@ -167,7 +167,7 @@ export function createEditor(textareaEl, deps) {
       // Markdown (default)
       let html;
       try {
-        html = markdownToCanonicalHtml(plainText, deps.marked);
+        html = renderMarkdownSafe(plainText, deps.marked, deps.purifier);
       } catch (e) {
         console.error('Preview render error:', e);
         return `<div class="render-error"><strong>⚠ Preview render error</strong><br>${escapeHtml(e.message)}</div>`;

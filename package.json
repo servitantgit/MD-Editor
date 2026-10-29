@@ -9,6 +9,7 @@
     "serve": "node ./serve.mjs"
   },
   "devDependencies": {
+    "dompurify": "3.4.17",
     "easymde": "2.21.0",
     "fake-indexeddb": "^6.2.5",
     "html2pdf.js": "0.10.1",

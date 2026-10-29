@@ -925,3 +925,21 @@ TTL; at worst a re-created file of the same name shows the draft banner, which
 the user can discard. Do not reintroduce the "not in the tree" rule.
 Pinned by `test/draft-store.test.js` ("drops only drafts older than the TTL",
 "an empty or partial tree never deletes a fresh draft").
+
+## Never put unsanitized HTML into the main page
+
+The main page keeps the GitHub token in sessionStorage. Any HTML string assigned
+to innerHTML there runs with access to it: `<script>` does not execute via
+innerHTML, but attributes such as `onerror=`, `ontoggle=`, `onclick=` do, and so
+do `javascript:` links. marked does NOT sanitize.
+
+- Markdown that reaches innerHTML goes through `renderMarkdownSafe()`
+  (`js/sanitize-html.js`), never `markdownToCanonicalHtml()` directly.
+- The PDF export of an .html file uses `sanitizeHtmlDocument()`: unlike the
+  preview (sandboxed iframe, no allow-same-origin), PDF renders in the main page.
+- Fail-closed: if DOMPurify did not load, rendering throws and the preview shows
+  an error. Never fall back to raw HTML.
+- DOMPurify is injected like `marked` (`deps.purifier`). Its version is pinned in
+  three places that must agree: `index.html`, `package.json` (exact, no caret),
+  `CDN_MOCKS` in `e2e_smoke_test.py`.
+Pinned by `test/sanitize-html.test.js`.

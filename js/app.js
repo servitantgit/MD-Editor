@@ -640,6 +640,7 @@ function showApp(owner, repo) {
 
   editorHandle = createEditor(els.editorTextarea, {
     marked: window.marked,
+    purifier: window.DOMPurify,
     imageResolver,
     getCurrentPath: () => state.currentPath,
     onOpenInternalLink: (path) => {
@@ -1157,6 +1158,7 @@ async function onExportPdf() {
       getCurrentPath: () => state.currentPath,
       getMarkdownText: () => editorHandle.easyMDE.value(),
       marked: window.marked,
+      purifier: window.DOMPurify,
       imageResolver,
       onStatus: setSaveStatus,
     });

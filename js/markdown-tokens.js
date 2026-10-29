@@ -91,6 +91,8 @@ export function injectCanonicalImageTags(text) {
  * injection so this module doesn't pull in a specific markdown library directly
  * and is easy to swap in tests.
  */
+// UNSANITIZED output. Anything that reaches innerHTML must use renderMarkdownSafe()
+// from js/sanitize-html.js instead (the main page holds the GitHub token).
 export function markdownToCanonicalHtml(text, renderer) {
   if (!renderer || typeof renderer.parse !== 'function') {
     throw new Error('No markdown renderer provided (expected an object with a .parse method)');

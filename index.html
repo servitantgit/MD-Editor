@@ -23,6 +23,8 @@
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
   <!-- Markdown -> HTML -->
   <script src="https://cdn.jsdelivr.net/npm/marked@18.0.14/lib/marked.umd.js" onerror="window.__mdCdnMiss=(window.__mdCdnMiss||[]).concat(['marked'])"></script>
+  <!-- HTML sanitizer for preview/PDF. Version pinned in 3 places: here, package.json, CDN_MOCKS in e2e_smoke_test.py -->
+  <script src="https://cdn.jsdelivr.net/npm/dompurify@3.4.17/dist/purify.min.js" onerror="window.__mdCdnMiss=(window.__mdCdnMiss||[]).concat(['dompurify'])"></script>
   <!-- Syntax highlight in markdown/code preview (optional) -->
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/styles/github-dark.min.css">
   <script src="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/highlight.min.js"></script>

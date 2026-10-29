@@ -62,6 +62,7 @@ CDN_MOCKS = {
     "https://cdn.jsdelivr.net/npm/easymde@2.21.0/dist/easymde.min.css": BASE / "node_modules/easymde/dist/easymde.min.css",
     "https://cdn.jsdelivr.net/npm/easymde@2.21.0/dist/easymde.min.js": BASE / "node_modules/easymde/dist/easymde.min.js",
     "https://cdn.jsdelivr.net/npm/marked@18.0.14/lib/marked.umd.js": BASE / "node_modules/marked/lib/marked.umd.js",
+    "https://cdn.jsdelivr.net/npm/dompurify@3.4.17/dist/purify.min.js": BASE / "node_modules/dompurify/dist/purify.min.js",
     "https://cdn.jsdelivr.net/npm/minisearch@7.2.0/dist/umd/index.js": BASE / "node_modules/minisearch/dist/umd/index.js",
     "https://cdn.jsdelivr.net/npm/html2pdf.js@0.10.1/dist/html2pdf.bundle.min.js": BASE / "node_modules/html2pdf.js/dist/html2pdf.bundle.min.js",
 }

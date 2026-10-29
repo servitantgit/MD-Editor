@@ -3,7 +3,7 @@
 // container, wait for all images to actually load, hand it to html2pdf.js.
 
 import { basenameOf } from './paths.js';
-import { markdownToCanonicalHtml } from './markdown-tokens.js';
+import { renderMarkdownSafe, sanitizeHtmlDocument } from './sanitize-html.js';
 import { resolveAllImages } from './image-preview.js';
 
 // Printable height of one A4 page at 96dpi, minus the 10mm margins configured
@@ -75,9 +75,9 @@ export async function exportCurrentPageToPdf(deps) {
     const isHtml = /\.(html?|htm)$/i.test(currentPath);
     if (isHtml) {
       // Print the HTML document as-is (relative assets already resolved when possible)
-      container.innerHTML = text || '<p></p>';
+      container.innerHTML = sanitizeHtmlDocument(text || '<p></p>', deps.purifier);
     } else {
-      container.innerHTML = markdownToCanonicalHtml(text, deps.marked);
+      container.innerHTML = renderMarkdownSafe(text, deps.marked, deps.purifier);
       await resolveAllImages(container, deps.imageResolver, currentPath, () => true);
       container.querySelectorAll('img[data-md-src]').forEach((img) => img.removeAttribute('data-md-src'));
       // Images must be measured after they load, otherwise every height reads 0.
