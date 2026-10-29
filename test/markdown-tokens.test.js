@@ -70,3 +70,23 @@ test('setImageAttrsInLine rewrites only the targeted occurrence on the line', ()
   const updated = setImageAttrsInLine(line, 1, { src: 'y.jpg', alt: 'b', width: '400' });
   assert.equal(updated, '![a](x.jpg) <img src="y.jpg" alt="b" width="400">');
 });
+
+test('injectCanonicalImageTags leaves images inside fenced code blocks as plain text', () => {
+  const text = 'Example:\n```\n![a](x.jpg)\n```\n~~~\n<img src="y.png">\n~~~\n';
+  assert.equal(injectCanonicalImageTags(text), text);
+});
+
+test('injectCanonicalImageTags keeps whole-text line numbers for images after a code block', () => {
+  const text = '![a](x.jpg)\n```\n![b](y.jpg)\n```\n![c](z.jpg)\n';
+  const out = injectCanonicalImageTags(text);
+  assert.ok(out.includes('```\n![b](y.jpg)\n```\n'), 'image inside the fence must stay literal');
+  assert.ok(!out.includes('data-md-src="y.jpg"'), 'image inside the fence must not become a canonical tag');
+  assert.match(out, /data-md-line="0" data-md-occ="0" data-md-src="x\.jpg"/);
+  assert.match(out, /data-md-line="4" data-md-occ="0" data-md-src="z\.jpg"/);
+});
+
+test('markdownToCanonicalHtml renders an image inside a fenced block as code, not as a preview image', () => {
+  const html = markdownToCanonicalHtml('```\n![a](x.jpg)\n```\n', marked);
+  assert.match(html, /<pre><code>!\[a\]\(x\.jpg\)/);
+  assert.doesNotMatch(html, /md-img-wrap/);
+});

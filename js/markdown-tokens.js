@@ -4,6 +4,7 @@
 // so this module can be unit-tested in Node without jsdom.
 
 import { escapeAttr } from './paths.js';
+import { mapOutsideFences } from './md-fences.js';
 
 /** Transparent 1x1 GIF — placeholder until the real image source is loaded. */
 export const TRANSPARENT_PIXEL =
@@ -60,11 +61,11 @@ export function rebuildRefToken(parsed, newTarget, fullOriginal) {
  */
 export function injectCanonicalImageTags(text) {
   const lineOcc = {};
-  return text.replace(IMG_TOKEN_RE, (full, altG, srcG, titleG, offset) => {
+  return mapOutsideFences(text, (chunk, start) => chunk.replace(IMG_TOKEN_RE, (full, altG, srcG, titleG, offset) => {
     const isMdImg = srcG !== undefined;
     const attrs = isMdImg ? { src: srcG, alt: altG || '', width: '' } : parseImgTagAttrs(full);
 
-    const ln = (text.slice(0, offset).match(/\n/g) || []).length;
+    const ln = (text.slice(0, start + offset).match(/\n/g) || []).length;
     const occ = lineOcc[ln] || 0;
     lineOcc[ln] = occ + 1;
 
@@ -82,7 +83,7 @@ export function injectCanonicalImageTags(text) {
       `<span class="md-img-placeholder-text">⏳ ${escapeAttr(attrs.src)}</span>` +
       `</span>`
     );
-  });
+  }));
 }
 
 /**
