@@ -1,7 +1,7 @@
 # AGENTS.md
 
-Short version: if you're about to touch deployment, login, tests or GitHub
-API calls in this project — read this first. Everything below documents real
+Short version: if you're about to touch deployment, login, tests or GitHub API
+calls in this project — read this first. Everything below documents real
 pitfalls already hit while implementing GitHub OAuth (September 2026) and the
 GitHub API client — don't repeat them.
 
@@ -23,12 +23,11 @@ GitHub API client — don't repeat them.
   don't mix them up when copying code examples from the Workers docs.
 
 **The main takeaway, which cost a whole extra iteration here:** before writing
-server code for a specific Cloudflare product, check where the
-live domain is actually served from (Cloudflare dashboard, or just the URL shape:
-`*.pages.dev` → Pages, `*.workers.dev`/custom domain without `.pages.dev` →
-Workers). Here a Worker was first fully implemented (`worker/index.js` +
-`wrangler.toml main`), and it simply never ran in prod because prod
-lives on a different product.
+server code for a specific Cloudflare product, check where the live domain is
+actually served from (Cloudflare dashboard, or just the URL shape: `*.pages.dev`
+→ Pages, `*.workers.dev`/custom domain without `.pages.dev` → Workers). Here a
+Worker was first fully implemented (`worker/index.js` + `wrangler.toml main`),
+and it simply never ran in prod because prod lives on a different product.
 
 ## OAuth: how it works and what is deliberately missing
 
@@ -63,35 +62,35 @@ lives on a different product.
 
 `GITHUB_CLIENT_ID` (Type: **Text**) and `GITHUB_CLIENT_SECRET` (Type: **Secret**)
 are set in Cloudflare dashboard → Workers & Pages → project → Settings →
-Environment variables, separately for Production and Preview. **`wrangler secret
-put` doesn't work here** — that's a command for Worker projects, not for Pages
-Git deploys. Environment variable changes only take effect on the **next
-build** — after saving, redeploy once more (empty push or "Retry
-deployment" in the dashboard), otherwise the app will keep seeing the old/missing
-values.
+Environment variables, separately for Production and Preview.
+**`wrangler secret put` doesn't work here** — that's a command for Worker
+projects, not for Pages Git deploys. Environment variable changes only take
+effect on the **next build** — after saving, redeploy once more (empty push or
+"Retry deployment" in the dashboard), otherwise the app will keep seeing the
+old/missing values.
 
 ## Local development does NOT see /auth/*
 
 `node serve.mjs` is a bare static file server, it executes nothing from
-`/functions`. The "Sign in with GitHub" button on `localhost:8080` will hit a 404 or
-an unstyled `index.html` fallback (that's exactly how it was first discovered — an unstyled
-login screen at `/auth/login`, because CSS is linked via the relative path `./css/app.css`,
-which breaks when the current URL isn't `/`). To actually run the OAuth flow
-locally — serve via `npx wrangler pages dev .` (emulates both static assets and Pages
-Functions), not `node serve.mjs`.
+`/functions`. The "Sign in with GitHub" button on `localhost:8080` will hit a
+404 or an unstyled `index.html` fallback (that's exactly how it was first
+discovered — an unstyled login screen at `/auth/login`, because CSS is linked
+via the relative path `./css/app.css`, which breaks when the current URL isn't
+`/`). To actually run the OAuth flow locally — serve via `npx wrangler pages dev .`
+(emulates both static assets and Pages Functions), not `node serve.mjs`.
 
 ## package-lock.json — a silent npm ci trap
 
-`npm install` locally may say "up to date" and change nothing, while `npm
-ci` in GitHub Actions fails with `EUSAGE: Missing: ... from lock file`.
-The cause found here: the lock file had incomplete "stub" entries for transitive
-`"*"` dependencies (`@types/tern`, `typo-js` — pulled in via
-easymde/codemirror-spell-checker) without `resolved`/`integrity`, and was
-fully missing the `@types/estree` entry. `npm install --package-lock-only` doesn't
-fix this if the local npm cache is already "satisfied" with the old state.
+`npm install` locally may say "up to date" and change nothing, while `npm ci`
+in GitHub Actions fails with `EUSAGE: Missing: ... from lock file`. The cause
+found here: the lock file had incomplete "stub" entries for transitive `"*"`
+dependencies (`@types/tern`, `typo-js` — pulled in via
+easymde/codemirror-spell-checker) without `resolved`/`integrity`, and was fully
+missing the `@types/estree` entry. `npm install --package-lock-only` doesn't fix
+this if the local npm cache is already "satisfied" with the old state.
 
-**Before any push that touches `package.json`, or just whenever in doubt** —
-run `npm ci` itself locally, don't rely on CI to discover it first:
+**Before any push that touches `package.json`, or just whenever in doubt** — run
+`npm ci` itself locally, don't rely on CI to discover it first:
 
 ```bash
 rm -rf node_modules package-lock.json
@@ -128,8 +127,8 @@ Two things bit us here and both are invisible to the e2e test (see below):
 ## e2e_smoke_test.py mocks api.github.com, so it cannot catch CORS problems
 
 `handle_github_api()` fulfils every `https://api.github.com/*` request via
-Playwright's `page.route`, so those requests never hit the real CORS machinery of
-the browser — no preflight, no `Access-Control-Allow-Headers` check. The
+Playwright's `page.route`, so those requests never hit the real CORS machinery
+of the browser — no preflight, no `Access-Control-Allow-Headers` check. The
 `Cache-Control` header above passed the entire e2e suite locally and in CI and
 only failed in production. That's the same class of blind spot as the OAuth one
 below: anything enforced by the real network or by GitHub itself is untested
@@ -139,28 +138,28 @@ locally, so cover such rules with a plain unit test instead.
 
 The test can't go through real GitHub OAuth — there are no live credentials in
 CI, and even locally `node serve.mjs` doesn't serve `/functions`. So the test
-immediately puts a fake token/owner/repo directly into `sessionStorage` (the same
-four keys from `readSession()` (`js/login-ui.js`), see above) and reloads the page — this
-simulates the "already signed in" state, not the login process itself. `/auth/login` and
-`/auth/callback` are not covered by this test at all. If you ever need to
-really verify the OAuth round-trip itself — that's a separate scenario with `wrangler
-pages dev` and a test GitHub OAuth App (or a mocked `github.com`); such
-a thing doesn't exist here yet.
+immediately puts a fake token/owner/repo directly into `sessionStorage` (the
+same four keys from `readSession()` (`js/login-ui.js`), see above) and reloads
+the page — this simulates the "already signed in" state, not the login process
+itself. `/auth/login` and `/auth/callback` are not covered by this test at all.
+If you ever need to really verify the OAuth round-trip itself — that's a
+separate scenario with `wrangler pages dev` and a test GitHub OAuth App (or a
+mocked `github.com`); such a thing doesn't exist here yet.
 
 ## PDF export: never position #pdf-export-container itself
 
 This regressed twice, so the rule is worth writing down. html2canvas (inside
 html2pdf.js) renders the element **where it actually sits**. As long as
 `#pdf-export-container` had `position: fixed; left: -99999px` in `app.css`, the
-document rendered outside the captured area and `html2pdf().from(container)` saved
-a ~3 KB, one-empty-page PDF — no error, just a blank file. It was fixed once
-(`d3f3017`, an off-screen transparent holder) and silently reverted by `acbf466`
-when the positioning moved into CSS.
+document rendered outside the captured area and `html2pdf().from(container)`
+saved a ~3 KB, one-empty-page PDF — no error, just a blank file. It was fixed
+once (`d3f3017`, an off-screen transparent holder) and silently reverted by
+`acbf466` when the positioning moved into CSS.
 
 So: the container is a **neutral block** (width/background/padding only), and
 `js/pdf-export.js` wraps it in a throwaway `position: fixed; opacity: 0;
-z-index: -9999` holder that is removed in `finally`. Don't "simplify" the holder
-back into a CSS rule on the container.
+z-index: -9999` holder that is removed in `finally`. Don't "simplify" the
+holder back into a CSS rule on the container.
 
 `e2e_smoke_test.py` guards it three ways: it records the container's computed
 `position` while exporting (must be `static`), asserts the downloaded PDF is
@@ -171,9 +170,9 @@ replace the pixel check with a byte-length one.
 
 **The html2pdf.js version is pinned in three places that must agree:** the CDN
 URL in `index.html`, the devDependency in `package.json` (exact version, no
-`^`), and `CDN_MOCKS` in `e2e_smoke_test.py`. The e2e test serves the library from
-`node_modules` under the URL it mocks, so a mismatch means the PDF checks run
-against a different release than production does.
+`^`), and `CDN_MOCKS` in `e2e_smoke_test.py`. The e2e test serves the library
+from `node_modules` under the URL it mocks, so a mismatch means the PDF checks
+run against a different release than production does.
 
 ## PDF export: images must never be split across pages
 
@@ -183,11 +182,11 @@ it so the element lands whole on the next page. **But** it only does that when
 the element is at most one page tall — `nPages <= 1` — otherwise it leaves it to
 be sliced.
 
-That single condition is the whole trap. Clamping the `<img>` to the page
-height is *not* enough: `.md-img-wrap` also has `margin: 12px auto` and a
-border, so the wrapper ends up taller than the page, `nPages > 1`, and the image
-gets cut anyway. `clampImagesToPage()` therefore measures the wrapper's margins
-and border and shrinks the image to fit inside that budget.
+That single condition is the whole trap. Clamping the `<img>` to the page height
+is *not* enough: `.md-img-wrap` also has `margin: 12px auto` and a border, so the
+wrapper ends up taller than the page, `nPages > 1`, and the image gets cut
+anyway. `clampImagesToPage()` therefore measures the wrapper's margins and
+border and shrinks the image to fit inside that budget.
 
 `e2e_smoke_test.py` checks this for real, not by inspecting CSS: the test
 document contains a solid **red** image taller than a page, positioned to
@@ -200,21 +199,21 @@ fail when the fix is removed.
 
 Two HTML-preview bugs — the height-handshake race (`d6d7fcc`) and the
 blank-frame-on-large-files bug (`7cb7555`) — took ~3 hours to diagnose, mostly
-because the obvious tools give false comfort. The lessons are general: they apply
-anywhere the app touches a sandboxed iframe, a race, or parent↔child
+because the obvious tools give false comfort. The lessons are general: they
+apply anywhere the app touches a sandboxed iframe, a race, or parent↔child
 `postMessage`. Read this before the next one and it should be a 20-minute fix.
 
 **Why parent-side inspection is limited.** The preview iframe is created with
 `sandbox="allow-scripts allow-forms allow-modals"` — deliberately **without**
 `allow-same-origin`. That gives the frame an *opaque origin*, so from the parent
-`iframe.contentDocument` is `null` and `iframe.contentWindow` is the only handle.
-This is by design and must stay: adding `allow-same-origin` would let the
-sandboxed script reach the parent's cookies/storage and defeat the whole point of
-sandboxing untrusted HTML. html2canvas (PDF export) cannot capture the iframe
-interior for the same reason — it can capture the pane element (parent-side
-chrome), which proves the *positioning*, but not that the inner document painted.
-So render success must be inferred from **indirect signals readable from the
-parent window**.
+`iframe.contentDocument` is `null` and `iframe.contentWindow` is the only
+handle. This is by design and must stay: adding `allow-same-origin` would let
+the sandboxed script reach the parent's cookies/storage and defeat the whole
+point of sandboxing untrusted HTML. html2canvas (PDF export) cannot capture the
+iframe interior for the same reason — it can capture the pane element
+(parent-side chrome), which proves the *positioning*, but not that the inner
+document painted. So render success must be inferred from **indirect signals
+readable from the parent window**.
 
 Reliable parent-side signals (all proven today):
 
@@ -225,9 +224,9 @@ Reliable parent-side signals (all proven today):
 | `postMessage` traffic of type `md-editor-frame-height` within a time window | Install a temporary `window.addEventListener('message', …)`, filter by `ev.source === iframe.contentWindow`. Presence ⇒ the bridge script ran inside the frame. |
 | `iframe.srcdoc` length + substring check for `__mdPostHeight` | Proves the bridge was injected into the document that was actually assigned. A short/srcdoc-less frame ⇒ the assignment that carried the bridge never happened. |
 
-**The three visual tests.** When metrics give ambiguous answers, isolate the cause
-visually. Create side-by-side test iframes appended to `document.body` with
-`position: fixed`:
+**The three visual tests.** When metrics give ambiguous answers, isolate the
+cause visually. Create side-by-side test iframes appended to `document.body`
+with `position: fixed`:
 
 - **Red** — copy the production iframe's `srcdoc` and use the **same** sandbox
   attributes (`allow-scripts allow-forms allow-modals`). Reproduces the production
@@ -238,16 +237,16 @@ visually. Create side-by-side test iframes appended to `document.body` with
 - **Lime** — a tiny known-good HTML string with the same sandbox. Confirms the
   sandbox itself works at all.
 
-Compare visually. **If all three render but the production iframe stays blank, the
-issue is NOT sandbox, NOT size, NOT content — it is lifecycle**: multiple `srcdoc`
-assignments, DOM manipulation during render, etc. That is exactly how `7cb7555`
-was pinned down: three identical-sandbox test frames rendered fine, so the
-production frame's double `srcdoc` assignment (not the 3.7MB size) was the
+Compare visually. **If all three render but the production iframe stays blank,
+the issue is NOT sandbox, NOT size, NOT content — it is lifecycle**: multiple
+`srcdoc` assignments, DOM manipulation during render, etc. That is exactly how
+`7cb7555` was pinned down: three identical-sandbox test frames rendered fine, so
+the production frame's double `srcdoc` assignment (not the 3.7MB size) was the
 culprit.
 
 **Prototype-level `srcdoc` instrumentation.** To catch *every* `srcdoc`
-assignment, patch the prototype rather than a single iframe instance — the preview
-iframe is recreated on each render (`previewEl.innerHTML = ''` + fresh
+assignment, patch the prototype rather than a single iframe instance — the
+preview iframe is recreated on each render (`previewEl.innerHTML = ''` + fresh
 `createElement`), so an instance-level patch is gone the moment the frame is
 rebuilt:
 
@@ -264,39 +263,44 @@ Object.defineProperty(proto, 'srcdoc', {
     desc.set.call(this, v);
   }
 });
-// Always restore: Object.defineProperty(proto, 'srcdoc', desc);
+// Always restore:
+Object.defineProperty(proto, 'srcdoc', desc);
 ```
 
-This caught the double assignment (raw, then resolved ~40ms later) that per-instance
-patching missed. Leave the prototype patched only while debugging.
+This caught the double assignment (raw, then resolved ~40ms later) that
+per-instance patching missed. Leave the prototype patched only while debugging.
 
 **Why Playwright is not enough.** `e2e_smoke_test.py` mocks `cdn.jsdelivr.net`
-from local `node_modules`, which **changes timing**. Race conditions that trigger
-in production (slow CDN, multi-MB content, real network latency) may not reproduce
-under Playwright at all. For HTML-preview, sandbox, or `postMessage` bugs, open the
-**F12 Console on the actual production site** before concluding anything. Reference
-`7cb7555`: Playwright said PASS and pixel analysis in the demo said PASS, but a
-3.7MB file (`WinLase.html`) broke in production in a way neither test could see.
+from local `node_modules`, which **changes timing**. Race conditions that
+trigger in production (slow CDN, multi-MB content, real network latency) may not
+reproduce under Playwright at all. For HTML-preview, sandbox, or `postMessage`
+bugs, open the **F12 Console on the actual production site** before concluding
+anything. Reference `7cb7555`: Playwright said PASS and pixel analysis in the
+demo said PASS, but a 3.7MB file (`WinLase.html`) broke in production in a way
+neither test could see.
 
-**The "no placeholder" rule for async rendering.** If placeholder content arrives
-less than ~100ms before the real content, **do not render a placeholder at all.**
-On small payloads the user never sees it; on large payloads the second assignment
-interrupts the parser and may leave the frame in a broken state (blank). Prefer a
-**single render after the async step completes**, with an explicit loading state
-(empty frame or spinner) during the wait. This is precisely what `renderHtmlPreview`
-does now: it `await`s `buildHtmlSrcdoc()` and assigns `srcdoc` exactly once.
+**The "no placeholder" rule for async rendering.** If placeholder content
+arrives less than ~100ms before the real content, **do not render a placeholder
+at all.** On small payloads the user never sees it; on large payloads the second
+assignment interrupts the parser and may leave the frame in a broken state
+(blank). Prefer a **single render after the async step completes**, with an
+explicit loading state (empty frame or spinner) during the wait. This is
+precisely what `renderHtmlPreview` does now: it `await`s `buildHtmlSrcdoc()` and
+assigns `srcdoc` exactly once.
 
 ## Never assign a handler with a parameter straight to `onclick`
 
-`els.btnNewFile.onclick = onCreateNewFile;` looks fine and is a classic
-JS idiom — until the handler has a **path** parameter. The browser calls the
-handler with the `MouseEvent`/`PointerEvent`, so `folderPath` became the event
-object, the `= fileTree.getActiveFolder()` default never applied (defaults only
-fire on `undefined`), and the app asked GitHub for
+`els.btnNewFile.onclick = onCreateNewFile;` looks fine and is a classic JS idiom
+— until the handler has a **path** parameter. The browser calls the handler with
+the `MouseEvent`/`PointerEvent`, so `folderPath` became the event object, the
+`= fileTree.getActiveFolder()` default never applied (defaults only fire on
+`undefined`), and the app asked GitHub for
 `contents/%5Bobject%20PointerEvent%5D/name.md`. The user saw the prompt say
 `created in "[object PointerEvent]"`.
 
-Only `onCreateNewFile` / `onCreateNewFolder` (now in `js/file-ops.js`) take an argument — every other `onclick` assignment in `js/app.js` points at a zero-arg handler, which is why only these two broke. Two rules follow from it:
+Only `onCreateNewFile` / `onCreateNewFolder` (now in `js/file-ops.js`) take an
+argument — every other `onclick` assignment in `js/app.js` points at a zero-arg
+handler, which is why only these two broke. Two rules follow from it:
 
 1. Wrap such handlers in `() => fn()`.
 2. Make the function itself defensive, and fall back to the **active folder**,
@@ -307,9 +311,9 @@ Only `onCreateNewFile` / `onCreateNewFolder` (now in `js/file-ops.js`) take an a
    at a folder. Only an *explicit* empty string should mean the repo root.
 
 `e2e_smoke_test.py` clicks both buttons, answers the prompt, and asserts the
-resulting `/contents/...` request URL contains no `object`/`PointerEvent` **and**
-points at the tree's active folder. That second assertion is what makes the
-check meaningful: verified to fail if the file lands in the root instead.
+resulting `/contents/...` request URL contains no `object`/`PointerEvent`
+**and** points at the tree's active folder. That second assertion is what makes
+the check meaningful: verified to fail if the file lands in the root instead.
 
 ## renameFolder: the file snapshot must track the moves it makes
 
@@ -325,9 +329,9 @@ root-absolute links inside that already-moved file keep pointing at a folder
 that no longer exists. Verified in `test/folder-manager.test.js`, which fails
 without the fix: `Docs/a.md` kept `[b](/Notes/b.md)` instead of `[b](/Docs/b.md)`.
 
-The failure is easy to miss because it only shows up for **root-absolute**
-links (`/Notes/b.md`). Relative links between files of the same folder survive
-on their own — they keep pointing at the same relative position once the whole
+The failure is easy to miss because it only shows up for **root-absolute** links
+(`/Notes/b.md`). Relative links between files of the same folder survive on
+their own — they keep pointing at the same relative position once the whole
 folder travels together — so a fixture built only from relative links passes
 either way and proves nothing.
 
@@ -342,13 +346,12 @@ The `sha` is deliberately left stale there: `updateReferencesEverywhere()`
 re-fetches it per file, and a clash sha is only read under `{ overwrite: true }`,
 which a folder rename never passes.
 
-
 ## Drag-and-drop move: never block the tree on link rewriting
 
-**Symptom (hit more than once):** drag a file to another folder → GitHub PUT+DELETE
-succeed and a full page reload shows the new location, but the sidebar still shows
-the *old* path until F5. Create/delete look fine. Easy to mis-diagnose as "tree lag"
-or "collapsed folders".
+**Symptom (hit more than once):** drag a file to another folder → GitHub
+PUT+DELETE succeed and a full page reload shows the new location, but the
+sidebar still shows the *old* path until F5. Create/delete look fine. Easy to
+mis-diagnose as "tree lag" or "collapsed folders".
 
 **Root cause (two layers):**
 
@@ -358,7 +361,6 @@ or "collapsed folders".
    can take **minutes**. Until that loop finishes, `onMoveFile` never reaches
    `loadTree` / `setFiles`, so the UI looks frozen even though the blob already
    moved on GitHub.
-
 2. Even after the loop, `client.getTree()` (recursive git tree) can still list the
    *pre-move* paths for a few seconds. A bare `loadTree()` then **overwrites** any
    optimistic local patch with the stale remote list — same visual as (1).
@@ -388,28 +390,27 @@ mass link edits — different failure mode.
 **Regression check:** drag `Notes/a.md` → `Notes/Other/` on a repo with many
 `.md` files. The row must leave the source folder within ~1–2s of the DELETE
 (200), *without* waiting for the link-rewrite storm to finish. F5 must not be
-required. Console (optional): PUT 201 → DELETE 200 → soon after, `git/trees`
-GET and a DOM update; reference GETs may continue in the background.
+required. Console (optional): PUT 201 → DELETE 200 → soon after, `git/trees` GET
+and a DOM update; reference GETs may continue in the background.
 
 Related: `js/file-mover.js` (`onMoved`), `js/file-ops.js` (`onMoveFile` /
 `onRenameFile`), `js/app.js` (`loadTree` rewritePath), `js/file-tree.js`
 (`expandFolderChain`).
 
-
 ## The active folder must be re-validated on every tree load
 
-`FileTree.activeFolder` is the "create here" target, and it outlives the folder it
-names. Deleting or renaming that folder reloads the tree, but `setFiles()` used
-to only assign `files` and re-render — nothing noticed the stored path was gone.
-The next `onCreateNewFile()` (in `js/file-ops.js`) then PUT into it and silently resurrected a folder
-the user had just deleted.
+`FileTree.activeFolder` is the "create here" target, and it outlives the folder
+it names. Deleting or renaming that folder reloads the tree, but `setFiles()`
+used to only assign `files` and re-render — nothing noticed the stored path was
+gone. The next `onCreateNewFile()` (in `js/file-ops.js`) then PUT into it and
+silently resurrected a folder the user had just deleted.
 
 `setFiles()` now drops the target to the repository root when the folder is no
 longer in the tree, and prunes `collapsedFolders` at the same time. Both come
 from one `collectFolderPaths(files)` helper, because Git has no real folders —
-they exist only as path prefixes, so the set of folder paths implied by the
-file list *is* the definition of "which folders exist". One check therefore
-covers `onDeleteFolder` *and* `onRenameFolder`, since both end in `loadTree()`.
+they exist only as path prefixes, so the set of folder paths implied by the file
+list *is* the definition of "which folders exist". One check therefore covers
+`onDeleteFolder` *and* `onRenameFolder`, since both end in `loadTree()`.
 
 The `collapsedFolders` half used to be dismissed as harmless, and that was
 wrong: a stale entry is not inert, it becomes live again the moment a folder of
@@ -438,30 +439,30 @@ The listeners are registered synchronously and the document handler ignores
 clicks inside the menu (`menu.contains(e.target)`). That removes the race and
 makes the code correct even if the menu is ever opened from a plain left click
 (a "⋯" button), where the opening click would otherwise still be bubbling and
-would close the menu before anyone could pick from it. `closeMenu()` removes
-both listeners instead of relying on `{ once: true }`, because a click inside
-the menu must NOT consume the dismiss handler.
+would close the menu before anyone could pick from it. `closeMenu()` removes both
+listeners instead of relying on `{ once: true }`, because a click inside the
+menu must NOT consume the dismiss handler.
 
-`e2e_smoke_test.py` asserts the menu really detaches on Escape and on an
-outside click. It failed with the `setTimeout` version; 6/6 consecutive runs
-pass with the synchronous one.
+`e2e_smoke_test.py` asserts the menu really detaches on Escape and on an outside
+click. It failed with the `setTimeout` version; 6/6 consecutive runs pass with
+the synchronous one.
 
 ## b64ToUtf8 must keep `fatal: true`
 
 `escape`/`unescape` are Annex B (deprecated since 1999); `github-client.js` now
-uses `TextEncoder`/`TextDecoder`. The subtle part is the decoder's `fatal`
-flag, and it is easy to remove by accident:
+uses `TextEncoder`/`TextDecoder`. The subtle part is the decoder's `fatal` flag,
+and it is easy to remove by accident:
 
 ```js
 new TextDecoder('utf-8', { fatal: true }).decode(bytes)
 ```
 
-`moveToPath()` only rewrites the text of `.md` files, and it uses a thrown
-error as the signal to leave the original bytes alone (see its `catch` in
+`moveToPath()` only rewrites the text of `.md` files, and it uses a thrown error
+as the signal to leave the original bytes alone (see its `catch` in
 `file-mover.js`). The **default** `TextDecoder` never throws — it substitutes
 U+FFFD — so a binary blob sitting under a `.md` extension would be decoded into
-replacement characters and PUT straight back to GitHub. `updateReferencesEverywhere()`
-relies on the same throw.
+replacement characters and PUT straight back to GitHub.
+`updateReferencesEverywhere()` relies on the same throw.
 
 `test/base64-utf8.test.js` pins both halves against `Buffer` as an independent
 UTF-8 reference, and `test/file-mover.test.js` pins the end-to-end consequence:
@@ -470,16 +471,26 @@ verified to fail without `fatal`, with the mangled payload visible
 
 One deliberate behaviour change: `utf8ToB64` used to throw a `URIError` on a
 lone surrogate (`encodeURIComponent` did); `TextEncoder` substitutes U+FFFD
-instead. Strings arriving from a textarea are well-formed, so this should not
-be reachable in practice.
+instead. Strings arriving from a textarea are well-formed, so this should not be
+reachable in practice.
+
+## Empty files: `!x` is true for an empty string
+
+GitHub returns `content: ""` for a 0-byte file (every `.gitkeep` the app
+creates). `getFileB64()` used `if (!b64)` as "content missing / file too large",
+so an empty file threw `Empty contents or file too large` and aborted the whole
+folder move. It now returns `{ b64: '' }` when `data.size === 0`, before the
+blob fallback. Check `size === 0` explicitly; never treat an empty string as a
+failure. `getBlobB64()` still has the same `!data.content` check (history
+restore of an empty version) - open task. Pinned by `test/github-client.test.js`.
 
 ## inlineImageMarks: the generation guard is what stops orphaned marks
 
 A stale-mark leak here is easy to *claim* and hard to *believe*, so read
 `renderInlineImages()` before changing it. What it draws in Source is a file
 LINK (name + location) — the picture itself belongs to the Live/Preview panes
-(`markdown-tokens.js`). The invariant is not the generation
-guard on its own — it is the combination of three things:
+(`markdown-tokens.js`). The invariant is not the generation guard on its own —
+it is the combination of three things:
 
 - `markText()` and `inlineImageMarks.push(mark)` (editor.js) run **synchronously**
   in the same turn, *before* the `await` that resolves the image;
@@ -506,6 +517,9 @@ guard avoids building DOM that would be discarded, the post-await guard also
 covers the `catch` branch, and `mark.find() == null` additionally covers a mark
 cleared by a rebuild while the await was still in flight.
 
+Known gap: the Source widget is also drawn for image syntax inside fenced code
+blocks (display only, the text is not changed) - open task.
+
 ## createEditor() owns global resources and now has to be destroyed
 
 `createEditor()` attaches a `ResizeObserver`, a `paste` handler on CodeMirror's
@@ -520,9 +534,9 @@ idempotent and must never throw.
 `showApp()` calls `destroy()` on the previous handle before building a new one.
 
 **Logout cannot leak it.** `btnLogout` does `sessionStorage.clear()` +
-`location.reload()` (app.js), which tears down the whole JS realm — observers and
-all. There is no surviving editor after that. Don't "fix" logout by rebuilding
-the UI in place; that would be the only way to create the leak.
+`location.reload()` (app.js), which tears down the whole JS realm — observers
+and all. There is no surviving editor after that. Don't "fix" logout by
+rebuilding the UI in place; that would be the only way to create the leak.
 
 The path that *did* build the app twice is `init()` racing itself:
 
@@ -532,21 +546,22 @@ const saved = readSession(); // runs while the token check is still in flight (j
 if (saved) showApp(...);     // path A
 ```
 
-`finishLogin()` (`js/login-ui.js`) calls `showApp()` itself. So when an OAuth callback landed on a
-tab that still had a session (re-entering `/auth/login`, say), path A built the
-app, the network call resolved, and `showApp()` ran a second time — two editors,
-two observers, two paste handlers, with the first unreachable. `init()` is now
-`async`, awaits `consumeOAuthRedirect()` (`js/login-ui.js`), and returns early when it reports that
-it completed the login.
+`finishLogin()` (`js/login-ui.js`) calls `showApp()` itself. So when an OAuth
+callback landed on a tab that still had a session (re-entering `/auth/login`,
+say), path A built the app, the network call resolved, and `showApp()` ran a
+second time — two editors, two observers, two paste handlers, with the first
+unreachable. `init()` is now `async`, awaits `consumeOAuthRedirect()`
+(`js/login-ui.js`), and returns early when it reports that it completed the
+login.
 
 Two caveats worth keeping in mind:
 
-- `consumeOAuthRedirect()` (`js/login-ui.js`) returns `false` (so `init()` falls through to the
-  normal session path) both when there is no `#gh_token` at all **and** when the
-  `owner`/`repo` pair is missing. The second case used to leave the user on the
-  login screen; now it also renders that message underneath the app when a stale
-  session is present. Fixing that would mean deciding what "log in again" means,
-  so it was left alone deliberately.
+- `consumeOAuthRedirect()` (`js/login-ui.js`) returns `false` (so `init()` falls
+  through to the normal session path) both when there is no `#gh_token` at all
+  **and** when the `owner`/`repo` pair is missing. The second case used to leave
+  the user on the login screen; now it also renders that message underneath the
+  app when a stale session is present. Fixing that would mean deciding what "log
+  in again" means, so it was left alone deliberately.
 - `init()` is still invoked un-awaited at module top level, so with no hash the
   app now appears one microtask later than before. Nothing depends on it being
   synchronous (all callers are event handlers), but a `wait_for_selector`-style
@@ -554,20 +569,39 @@ Two caveats worth keeping in mind:
 
 **`e2e_smoke_test.py` does not cover either of these paths.** It fakes a session
 by writing the four `sessionStorage` keys and reloading — so it exercises the
-`readSession()` (`js/login-ui.js`) branch with no hash, and can never reach `consumeOAuthRedirect()` / `finishLogin()` (both `js/login-ui.js`) or `showApp()`-twice. The `destroy()` contract is covered by
-`test/editor.test.js` (verified to fail if the observer is not disconnected); the
-`init()` race is **not** covered by any test, and per the OAuth notes above it
-cannot be verified locally without `wrangler pages dev` and a test OAuth app.
+`readSession()` (`js/login-ui.js`) branch with no hash, and can never reach
+`consumeOAuthRedirect()` / `finishLogin()` (both `js/login-ui.js`) or
+`showApp()`-twice. The `destroy()` contract is covered by `test/editor.test.js`
+(verified to fail if the observer is not disconnected); the `init()` race is
+**not** covered by any test, and per the OAuth notes above it cannot be verified
+locally without `wrangler pages dev` and a test OAuth app.
 
 ## showApp() is re-entrant
 
-`showApp()` runs again when the user switches repositories in-app (no page reload). Every `setup*` function it calls must therefore be idempotent:
+`showApp()` runs again when the user switches repositories in-app (no page
+reload). Every `setup*` function it calls must therefore be idempotent:
 
-- **Dataset guard on the element.** Setup functions bind listeners to stable DOM nodes from `index.html`. A second `showApp()` would stack a second set of listeners, so each setup function guards with `if (el.dataset.<name>Bound) return;` then sets `el.dataset.<name>Bound = '1'` (see `setupMobileShell`, `setupImageDropzone`, `pickImageFiles`, `setupFolderDropzone`).
-- **Read session-dependent values through getters at use time.** `state.client`, `imageResolver`, the editor instance, etc. must never be captured by value at bind time — a captured client belongs to the previous session and writes would go to the wrong repository. Use `getClient: () => state.client` etc. and read them inside the handler (see `upload.js`, `folder-upload.js`).
-- **Subscriptions bound to an OBJECT need an identity check.** CodeMirror `cursorActivity` (outline scroll-spy) is bound to the editor handle, which is recreated on every `showApp()`. A DOM dataset guard is wrong here — the element is the same, the object is not. Use identity-keyed rebinding (`bindOutlineScrollSpy` returns early if `outlineCursorBoundTo === editorHandle`) instead.
-- **e2e scenario H guards this.** The e2e smoke test otherwise always cold-starts (seeds `sessionStorage`, reloads). Scenario H switches repo in-app and asserts exactly one PUT into the new repository plus working mobile toggle buttons — it goes red if any of the above rules regress.
-
+- **Dataset guard on the element.** Setup functions bind listeners to stable DOM
+  nodes from `index.html`. A second `showApp()` would stack a second set of
+  listeners, so each setup function guards with `if (el.dataset.<name>Bound) return;`
+  then sets `el.dataset.<name>Bound = '1'` (see `setupMobileShell`,
+  `setupImageDropzone`, `pickImageFiles`, `setupFolderDropzone`).
+- **Read session-dependent values through getters at use time.** `state.client`,
+  `imageResolver`, the editor instance, etc. must never be captured by value at
+  bind time — a captured client belongs to the previous session and writes would
+  go to the wrong repository. Use `getClient: () => state.client` etc. and read
+  them inside the handler (see `upload.js`, `folder-upload.js`).
+- **Subscriptions bound to an OBJECT need an identity check.** CodeMirror
+  `cursorActivity` (outline scroll-spy) is bound to the editor handle, which is
+  recreated on every `showApp()`. A DOM dataset guard is wrong here — the element
+  is the same, the object is not. Use identity-keyed rebinding
+  (`bindOutlineScrollSpy` returns early if `outlineCursorBoundTo === editorHandle`)
+  instead.
+- **e2e scenario H guards this.** The e2e smoke test otherwise always cold-starts
+  (seeds `sessionStorage`, reloads). Scenario H switches repo in-app and asserts
+  exactly one PUT into the new repository plus working mobile toggle buttons — it
+  goes red if any of the above rules regress.
+  
 ## Search index — IndexedDB quirks and the no-Cache-Control rule (again)
 
 Added for the client-side full-text search (MiniSearch + IndexedDB). The four
@@ -575,8 +609,8 @@ modules are `js/search-index.js` (pure logic), `js/search-store.js` (IndexedDB),
 `js/search-sync.js` (orchestration), `js/search-ui.js` (DOM).
 
 **No `Cache-Control` header, still.** The sync fetches hundreds of files in a
-loop, which makes "just add `no-cache` to be sure" very tempting. Don't — see the
-CORS safelist section above. `getTree()` busts GitHub's cache with a unique
+loop, which makes "just add `no-cache` to be sure" very tempting. Don't — see
+the CORS safelist section above. `getTree()` busts GitHub's cache with a unique
 query parameter, which is the only mechanism allowed here.
 
 **Degraded modes are deliberate — do not "fix" them by deleting the fallback.**
@@ -600,10 +634,10 @@ and the session appears to lose the index it just built. This was a real bug
 caught by `test/search-store.test.js`.
 
 **Records outlive the session on purpose.** The index lives in IndexedDB; the
-token lives in `sessionStorage`; logout clears only the latter. Signing back into
-the same repo reuses the index instead of refetching the repo. Do **not** add
-"clear the index on logout". Records carry a 30-day TTL on `savedAt`, swept in
-`open()`, so a repository deleted on GitHub does not linger forever.
+token lives in `sessionStorage`; logout clears only the latter. Signing back
+into the same repo reuses the index instead of refetching the repo. Do **not**
+add "clear the index on logout". Records carry a 30-day TTL on `savedAt`, swept
+in `open()`, so a repository deleted on GitHub does not linger forever.
 
 **The body is never in the index.** `storeFields: ['path', 'title']` only —
 serializing bodies would balloon the blob. Snippets come from a 200-entry LRU
@@ -613,9 +647,9 @@ fetch for a cache miss. `buildSnippet()` HTML-escapes everything except its own
 
 **`discard()`, not `remove()`.** MiniSearch's `remove()` demands the *full*
 original document, which we cannot reconstruct because we do not store the body.
-`discard(id)` is documented as having "the same visible effect", and MiniSearch's
-own auto-vacuuming cleans up afterwards. Calling `remove()` with a rebuilt body
-corrupts the index.
+`discard(id)` is documented as having "the same visible effect", and
+MiniSearch's own auto-vacuuming cleans up afterwards. Calling `remove()` with a
+rebuilt body corrupts the index.
 
 **MiniSearch 7 API changes** (`getDocument` → `getStoredFields`, deserializing
 via the static `MiniSearch.loadJSON(json, options)`). The options object must
@@ -637,14 +671,31 @@ file is skipped (unreadable, or not valid UTF-8), and `indexed` must not claim
 files that are absent from the index. Both are pinned in
 `test/search-sync.test.js`.
 
+**A path enters the manifest only after it has been fetched.** Unchanged paths
+go in up front; new/changed ones only after a successful download (a non-UTF-8
+body counts as fetched, so binaries are not re-downloaded every sync). A failed
+download stays out, so the next sync retries it. The manifest is persisted every
+`BATCH_SIZE` files, so pre-filling it would make an interrupted first sync (tab
+closed, repo switched) skip unfetched notes forever. Pinned by
+`test/search-sync.test.js`.
+
+**Bump INDEX_VERSION when indexing rules change.** `INDEX_VERSION` in
+`js/search-index.js` is stored with every record. `hydrate()` reuses a record
+only when the version matches AND the blob deserializes; otherwise it starts
+with an empty index AND an empty manifest, so the next sync refetches
+everything. Changing `extractTitle`, `stripMarkdown` or the searcher
+fields/options without a bump leaves old titles/bodies in every browser until a
+manual rebuild. Never keep a manifest next to an index that failed to load: the
+sync then believes everything is indexed and search stays empty.
+
 **Teardown**: `showApp()` destroys the in-flight sync alongside the editor
 handle, for the same reason — a re-login must not leave the old indexer fetching
 and writing into the new session's store.
 
-**What local checks cannot see:** `e2e_smoke_test.py` mocks `api.github.com`,
-so rate limits (403), IndexedDB quota and private-window behaviour are all
-invisible to it — they are covered by `test/search-store.test.js` instead. The e2e
-test seeds `sessionStorage` and reloads, so it is a cold start: never assert
+**What local checks cannot see:** `e2e_smoke_test.py` mocks `api.github.com`, so
+rate limits (403), IndexedDB quota and private-window behaviour are all
+invisible to it — they are covered by `test/search-store.test.js` instead. The
+e2e test seeds `sessionStorage` and reloads, so it is a cold start: never assert
 that the index survives a reload there.
 
 ### Autosave — hybrid model: local on idle, GitHub only on Save / Commit
@@ -670,10 +721,10 @@ hybrid checks.
 | max (5 min) | — | — | **disabled for remote**; kept as an API no-op so continuous typing does not force commits |
 
 **`beforeunload` is still a trap** — never await a network write there. Only
-`autosave.hasUnsavedDraft()` for the browser “unsaved changes” prompt.
+`autosave.hasUnsavedDraft()` for the browser "unsaved changes" prompt.
 
-**`visibilitychange` → hidden** and **`flushCurrentFile()`** (tab switch / close)
-checkpoint the **local draft only**. They must not call `_push`.
+**`visibilitychange` → hidden** and **`flushCurrentFile()`** (tab switch /
+close) checkpoint the **local draft only**. They must not call `_push`.
 
 **State machine** (pinned in `test/autosave.test.js` on `mock.timers`):
 
@@ -695,76 +746,81 @@ remote writes go through the **Commit** panel + `working-tree.js`. Successful
 remote writes clear that path in the working tree via `onRemoteCommit` /
 `noteCommit`.
 
-**Background failures** are still stored per-path so a failed Save after the user
-switched files does not paint ⚠ on the newly opened file.
+**Background failures** are still stored per-path so a failed Save after the
+user switched files does not paint ⚠ on the newly opened file.
 
 The e2e suite asserts: typing does not PUT; idle does not PUT; explicit Save
-PUTs once; draft survives reload; 409 retry / Reload / Overwrite still work.
-It never waits out a 5-minute max (CI flake) and never claims a cold-start
-reload keeps an in-memory-only index.
-
+PUTs once; draft survives reload; 409 retry / Reload / Overwrite still work. It
+never waits out a 5-minute max (CI flake) and never claims a cold-start reload
+keeps an in-memory-only index.
 
 ## Tabs: who owns what, and the rules that keep them safe
 
 **Split of responsibilities.** `js/tabs.js` is a pure model (ordered paths + the
-active one + rename/delete bookkeeping + persistence); `js/tabs-ui.js` only draws
-the strip and reports clicks; tab session state (`tabDocs: Map<path, {doc, sha, unsaved, stale, commitSeen}>`, open/close/switch) lives in `js/tabs-session.js`.
-is a restored tab that was never opened — it is fetched on first click, never at
-page load.
+active one + rename/delete bookkeeping + persistence); `js/tabs-ui.js` only
+draws the strip and reports clicks; tab session state
+(`tabDocs: Map<path, {doc, sha, unsaved, stale, commitSeen}>`, open/close/switch)
+lives in `js/tabs-session.js`. A *lazy* tab is a restored tab that was never
+opened - it is fetched on first click, never at page load.
 
-**One CodeMirror `Doc` per tab, swapped with `swapDoc()`** (`editorHandle.createDoc`
-/ `showDoc`). Do not load a tab's text with `easyMDE.value()`: that overwrites the
-single shared document and throws away undo history, cursor and scroll. `swapDoc`
-fires no `change` event, so switching tabs is not mistaken for typing, but inline
-image marks belong to a document and are rebuilt by `showDoc()`. `setEditorValue()`
-(which uses `.value()`) is still right for replacing the text of the CURRENT file
-in place — "Reload from GitHub" in the conflict banner.
+**One CodeMirror `Doc` per tab, swapped with `swapDoc()`**
+(`editorHandle.createDoc` / `showDoc`). Do not load a tab's text with
+`easyMDE.value()`: that overwrites the single shared document and throws away
+undo history, cursor and scroll. `swapDoc` fires no `change` event, so switching
+tabs is not mistaken for typing, but inline image marks belong to a document and
+are rebuilt by `showDoc()`. `setEditorValue()` (which uses `.value()`) is still
+right for replacing the text of the CURRENT file in place — "Reload from GitHub"
+in the conflict banner.
 
-**Going around `value()` has a price: whatever EasyMDE hangs on `value()` no longer
-happens.** The one that matters is the full **Preview** pane, which EasyMDE re-renders
-only from `value()`; `showDoc()` re-renders it by hand (`renderActivePreview()`),
-mirroring EasyMDE's own code. Without it the tab and file name change and Preview keeps
-showing the first document. Side-by-side needs nothing (it re-renders on CodeMirror's
-`update` event, which `swapDoc` fires) and cannot be combined with switching tabs anyway:
-EasyMDE puts it in fullscreen, over the tab bar. Any new editor mode or EasyMDE upgrade
-is a reason to re-run the Preview scenario in `e2e_smoke_test.py` (group G).
+**Going around `value()` has a price: whatever EasyMDE hangs on `value()` no
+longer happens.** The one that matters is the full **Preview** pane, which
+EasyMDE re-renders only from `value()`; `showDoc()` re-renders it by hand
+(`renderActivePreview()`), mirroring EasyMDE's own code. Without it the tab and
+file name change and Preview keeps showing the first document. Side-by-side
+needs nothing (it re-renders on CodeMirror's `update` event, which `swapDoc`
+fires) and cannot be combined with switching tabs anyway: EasyMDE puts it in
+fullscreen, over the tab bar. Any new editor mode or EasyMDE upgrade is a reason
+to re-run the Preview scenario in `e2e_smoke_test.py` (group G).
 
 **When is the cached document trusted?** Only if the tab was clean when left
-(`!unsaved`) and not `stale`. Autosave is a state machine for ONE file; a tab left
-dirty is re-fetched on return, and the draft banner then offers the local text — the
-same path as switching files has always taken, so there is a single code path for
-"what is the truth after a background commit". `unsaved` is computed in `openFile()`
-twice on purpose: once right after the first flush (so the commit overlaps the
-fetch), and again after the fetch, because the old tab stays editable while the new
-file loads and whatever was typed meanwhile must be flushed too. `commitSeen`
-exists because the background commit can land BEFORE we decide `unsaved`; without it
-the tab would stay marked unsaved forever.
+(`!unsaved`) and not `stale`. Autosave is a state machine for ONE file; a tab
+left dirty is re-fetched on return, and the draft banner then offers the local
+text — the same path as switching files has always taken, so there is a single
+code path for "what is the truth after a background commit". `unsaved` is
+computed in `openFile()` twice on purpose: once right after the first flush (so
+the commit overlaps the fetch), and again after the fetch, because the old tab
+stays editable while the new file loads and whatever was typed meanwhile must be
+flushed too. `commitSeen` exists because the background commit can land BEFORE
+we decide `unsaved`; without it the tab would stay marked unsaved forever.
 
-**Never `destroy()` the Autosave to leave a file — use `release()`.** A destroyed
-instance skips `_afterCommit`, so a push still in flight leaves its draft behind and
-the file later shows a phantom "unsaved local changes" banner. `release()` drops the
-path (typing is ignored, timers are gone) but lets the in-flight push clean up.
-`closeCurrentFile({flush:false})` is for files that were just DELETED.
+**Never `destroy()` the Autosave to leave a file — use `release()`.** A
+destroyed instance skips `_afterCommit`, so a push still in flight leaves its
+draft behind and the file later shows a phantom "unsaved local changes" banner.
+`release()` drops the path (typing is ignored, timers are gone) but lets the
+in-flight push clean up. `closeCurrentFile({flush:false})` is for files that
+were just DELETED.
 
-**`openFile(path)` on the file that is already open is a no-op** (it only focuses the
-editor). Re-opening it would call `autosave.onOpen()` and reset the state machine under
-the editor's unsaved text. Callers that really need a fresh copy — rename, move, links
-rewritten by a move — pass `{reload: true}`; moving/renaming the open file MUST do so,
-because it also rebinds autosave to the new path.
+**`openFile(path)` on the file that is already open is a no-op** (it only
+focuses the editor). Re-opening it would call `autosave.onOpen()` and reset the
+state machine under the editor's unsaved text. Callers that really need a fresh
+copy — rename, move, links rewritten by a move — pass `{reload: true}`;
+moving/renaming the open file MUST do so, because it also rebinds autosave to
+the new path.
 
-**`openSeq`** guards the slow-open race: every `openFile()` takes a number and gives up
-after each `await` if a newer one started. Do not move assignments to `state.currentPath`
-above those checks.
+**`openSeq`** guards the slow-open race: every `openFile()` takes a number and
+gives up after each `await` if a newer one started. Do not move assignments to
+`state.currentPath` above those checks.
 
-**Tabs are only dropped on purpose**: when the user closes one, or when a delete here
-removes its file (`dropTabs`). They are NOT pruned against every `loadTree()` — a tree
-that is momentarily behind a commit would close the editor under the user. The one
-exception is the restore at page load, which discards paths that no longer exist.
+**Tabs are only dropped on purpose**: when the user closes one, or when a delete
+here removes its file (`dropTabs`). They are NOT pruned against every
+`loadTree()` — a tree that is momentarily behind a commit would close the editor
+under the user. The one exception is the restore at page load, which discards
+paths that no longer exist.
 
-**Not done on purpose (v1):** drag-to-reorder, keyboard shortcuts for next/previous tab
-(Ctrl+Tab / Ctrl+W belong to the browser), a "reopen closed tab", pinned tabs, and
-refreshing a clean cached tab when the file changed on GitHub meanwhile (a stale sha
-surfaces as the usual 409 flow on the next commit).
+**Not done on purpose (v1):** drag-to-reorder, keyboard shortcuts for
+next/previous tab (Ctrl+Tab / Ctrl+W belong to the browser), a "reopen closed
+tab", pinned tabs, and refreshing a clean cached tab when the file changed on
+GitHub meanwhile (a stale sha surfaces as the usual 409 flow on the next commit).
 
 ## HTML Live/Preview — two panes, one funnel, null protocol, no srcdoc churn
 
@@ -775,58 +831,58 @@ render" → 2-3× flicker on every Live/Preview switch). Read this before touchi
 
 **There are TWO preview nodes per container**: `.editor-preview-side` (the
 visible Live/Preview pane) and `.editor-preview` (EasyMDE's full-preview pane,
-still in the DOM). `renderActivePreview()` loops over BOTH in one tick. A
-global `previewRenderToken` therefore made the SECOND pane's call cancel the
-FIRST pane's deferred fill — which pane "wins" depended on call order
-(EasyMDE's `update` vs our render), so the visible pane alternated between
-filled and empty on Live/Preview switches. **State is per-pane now**:
-`htmlPaneStates` WeakMap (`{token, chain, renderedText}`) inside
-`renderHtmlPreview()` — the single funnel for all HTML rendering. `fillPreviewPane`
-(app.js) must DELEGATE to `editorHandle.renderHtmlPreview()`, never build its
-own iframe; panes are independent and must never block each other.
+still in the DOM). `renderActivePreview()` loops over BOTH in one tick. A global
+`previewRenderToken` therefore made the SECOND pane's call cancel the FIRST
+pane's deferred fill — which pane "wins" depended on call order (EasyMDE's
+`update` vs our render), so the visible pane alternated between filled and empty
+on Live/Preview switches. **State is per-pane now**: `htmlPaneStates` WeakMap
+(`{token, chain, renderedText}`) inside `renderHtmlPreview()` — the single
+funnel for all HTML rendering. `fillPreviewPane` (app.js) must DELEGATE to
+`editorHandle.renderHtmlPreview()`, never build its own iframe; panes are
+independent and must never block each other.
 
-**`previewRender` returns `null` for HTML, never `''`.** EasyMDE has three
-write sites (`sideBySideRenderingFunction`, `togglePreview`, the `value()`
-setter), all guarded by `!= null` / `!== null` — `''` PASSES those guards and
-wipes the pane. Our own callers mirror the same rule (`renderActivePreview`
-and `fillPreviewPane` skip `null` too). The async fill owns the pane for the
-whole HTML branch; nobody may `innerHTML = ''` it.
+**`previewRender` returns `null` for HTML, never `''`.** EasyMDE has three write
+sites (`sideBySideRenderingFunction`, `togglePreview`, the `value()` setter), all
+guarded by `!= null` / `!== null` — `''` PASSES those guards and wipes the pane.
+Our own callers mirror the same rule (`renderActivePreview` and
+`fillPreviewPane` skip `null` too). The async fill owns the pane for the whole
+HTML branch; nobody may `innerHTML = ''` it.
 
-**Assigning `iframe.srcdoc` is a FULL iframe navigation — a visible flash.**
-One Live/Preview click triggers a render up to THREE times (our `forceLayout`
-runs on double-rAF + EasyMDE re-renders on CodeMirror `update` from
-`cm.refresh()`), and each render used to assign srcdoc twice (raw, then
-resolved) → up to 6 reloads per click (measured by the test: "iframe reloaded
-6x"). Two guards, both required:
+**Assigning `iframe.srcdoc` is a FULL iframe navigation — a visible flash.** One
+Live/Preview click triggers a render up to THREE times (our `forceLayout` runs on
+double-rAF + EasyMDE re-renders on CodeMirror `update` from `cm.refresh()`), and
+each render used to assign srcdoc twice (raw, then resolved) → up to 6 reloads
+per click (measured by the test: "iframe reloaded 6x"). Two guards, both
+required:
 
 - `state.renderedText === plainText` → **early return**, untouched srcdoc.
   A layout switch does not change the text, so it must reload nothing.
 - compare before assigning (`iframe.srcdoc !== raw` / `!== srcdoc`) — even an
   identical value reloads the frame.
 
-`renderedText` is stamped only AFTER the resolved srcdoc lands and only when
-the per-pane token is still current — a superseded pass must not claim the
-pane. Markdown/code panes must keep using plain `innerHTML` (no reload = no
-flicker) — routing them through the iframe path would reintroduce flashing.
+`renderedText` is stamped only AFTER the resolved srcdoc lands and only when the
+per-pane token is still current — a superseded pass must not claim the pane.
+Markdown/code panes must keep using plain `innerHTML` (no reload = no flicker) —
+routing them through the iframe path would reintroduce flashing.
 
-Covered by `test/editor.test.js`: "HTML preview fills BOTH panes on every
-render pass (no alternating starve)" and "Live/Preview switching with
-unchanged text NEVER reloads the HTML iframe (flicker)" — both verified RED
-without the fixes (starved first pane; `6 !== 0` reloads). The e2e HTML check
-(`HTML Live preview renders page content`) only proves content exists once; it
-cannot see alternation or flicker (timing), so the unit tests are the guard.
+Covered by `test/editor.test.js`: "HTML preview fills BOTH panes on every render
+pass (no alternating starve)" and "Live/Preview switching with unchanged text
+NEVER reloads the HTML iframe (flicker)" — both verified RED without the fixes
+(starved first pane; `6 !== 0` reloads). The e2e HTML check (`HTML Live preview
+renders page content`) only proves content exists once; it cannot see
+alternation or flicker (timing), so the unit tests are the guard.
 
 ## Outline (heading map) — jump to the VISIBLE scroller
 
 `js/doc-outline.js` is a pure parser (unit-tested in `test/doc-outline.test.js`):
-ATX headings with up to 3 leading spaces, skips fenced ``` / ~~~ blocks and
-indented code, does NOT strip the `#` of `C#`, skips bare `#`. Do not
-re-derive it inline in `app.js` — the original inlined regex listed `#`
-comments inside code blocks and mangled `C#`.
+ATX headings with up to 3 leading spaces, skips fenced code blocks and indented
+code, does NOT strip the `#` of `C#`, skips bare `#`. Do not re-derive it inline
+in `app.js` — the original inlined regex listed `#` comments inside code blocks
+and mangled `C#`.
 
 **A jump must scroll whichever pane is actually visible.** In Preview layout
-CodeMirror is `display:none`, so `setCursor` / `scrollIntoView` / `focus()`
-all silently do nothing on screen (that was the original "click highlights but
+CodeMirror is `display:none`, so `setCursor` / `scrollIntoView` / `focus()` all
+silently do nothing on screen (that was the original "click highlights but
 nothing happens" bug). `jumpToOutlineHeading()` in `app.js` scrolls CodeMirror
 AND the `.editor-preview-side` pane (Nth rendered heading by outline index,
 fractional `scrollTop` as fallback), unfolds a folded section first via
@@ -839,10 +895,46 @@ removed) and highlights the nearest heading above the cursor via
 `cursorActivity` (`markActiveOutlineItem` / `.outline-item.active`). Keep both
 when reworking the panel.
 
+## Fenced code blocks: scan markdown through js/md-fences.js
+
+Anything that looks for links, images or headings in markdown text must skip
+fenced code blocks (backtick or tilde fences). Otherwise an example inside a
+code block is treated as real content: a move rewrote links inside examples and
+committed the change, Preview turned example images into canonical tags, and a
+`# comment` in a bash block became the note title in search.
+
+Use the helpers from `js/md-fences.js` instead of writing a new fence regex:
+`splitByFences(text)` (segments `{text, code, start}` that join back
+byte-for-byte, CRLF included), `mapOutsideFences(text, fn)`,
+`replaceOutsideFences(text, re, fn)`. Segment boundaries are always at line
+starts, so look-behinds such as `(?<!!)` behave as before. When a caller needs
+positions in the WHOLE text (e.g. `data-md-line` in `injectCanonicalImageTags`),
+add the segment `start` to the match offset.
+
+Rules (deliberately lenient on indentation): any indentation before the fence; a
+backtick fence line must not contain another backtick (three backticks around a
+word on one line are inline code); the closing fence uses the same character, is
+at least as long, and has nothing after it; an unclosed fence runs to the end of
+the text. Pinned by `test/md-fences.test.js`.
+
+Known places that still use their own fence logic (open tasks, not precedents):
+`doc-outline.js`, `markdown-commands.js` (task checkboxes), `stripMarkdown()` in
+`search-index.js`. Inline code with a link inside and fences inside block quotes
+are not handled yet.
+
+## Sidebar: the file tree lives inside .folder-dropzone
+
+`.folder-dropzone` (flex: 1) wraps `#file-tree`; `#search-results` is its sibling
+(flex: 1). `search-ui.js` hides only the tree, so the wrapper used to keep half
+of the sidebar empty above the results. `css/app.css` hides the wrapper with
+`.folder-dropzone:has(> .file-tree.hidden)`. If the markup or the show/hide
+logic changes, keep the wrapper hidden whenever the tree is.
+`e2e_smoke_test.py` asserts the results start right under the search box.
+
 ## General rule before considering a task done
 
-Here CI broke twice in a row right after merge (first `npm ci`, then a
-stale `#input-token` selector in the e2e test), even though the changes looked
+Here CI broke twice in a row right after merge (first `npm ci`, then a stale
+`#input-token` selector in the e2e test), even though the changes looked
 insignificant relative to the main task. Before push:
 
 1. `npm ci && npm test` — from scratch, without leftovers of the old `node_modules`.
@@ -868,9 +960,11 @@ insignificant relative to the main task. Before push:
    `position: fixed; left: -99999px` back on `#pdf-export-container`, drop the
    `clampImagesToPage()` call, set `IDLE_MS` to 0, remove the silent 409 retry).
    The 409 scenario once only printed a ✓ without asserting anything.
-   `git stash push -- <files>` is the quickest way to get the "before" state for
-   a red run (remember to `git stash pop`; an interrupted git can leave
-   `.git/index.lock` behind — delete it before retrying).
+   In a task with a RED step, the red run comes from running the new test BEFORE
+   the code change (see rule 14). `git stash push -- <files>` is only for checking
+   an existing fix afterwards, and only when the task explicitly allows it
+   (remember to `git stash pop`; an interrupted git can leave `.git/index.lock`
+   behind — delete it before retrying).
 7. When INSERTING a new test into an existing `test/*.test.js`, make sure the
    previous test's closing `});` really precedes it. An insert slipped one line
    too early nests the new test inside the previous test's callback — both then
@@ -886,15 +980,20 @@ insignificant relative to the main task. Before push:
    `e2e_smoke_test.py` shows up as `#app-main` staying hidden. Never "fix"
    that by changing the e2e startup path.
 9. Keep every file UTF-8 without BOM. On Windows, PowerShell `Set-Content`,
-   `Out-File` and `>` re-encode files (cp1250), turning `—`, `→`, `…` and
-   quotes into mojibake like `â€"`, `â†'`, `â€¦`, `Ã`. This silently broke
-   user-visible messages and two tests once. Edit files with a tool that
-   writes UTF-8, and before every commit run:
+   `Out-File` and `>` re-encode files (cp1250), turning dashes, arrows,
+   ellipses and quotes into mojibake. This silently broke user-visible
+   messages and two tests once. Edit files with a tool that writes UTF-8, and
+   before every commit run this ASCII-only check (it builds the mojibake
+   patterns from char codes, so the command itself cannot get mangled):
 
-       git grep -n -e "â€" -e "â†" -e "Ã" -- . ':!AGENTS.md' ':!*.png'
+   ```powershell
+   $pats = @("$([char]0xE2)$([char]0x20AC)", "$([char]0xE2)$([char]0x2020)", "$([char]0xC3)")
+   git -c core.quotepath=off ls-files --cached --others --exclude-standard |
+     Where-Object { $_ -ne 'AGENTS.md' -and $_ -match '\.(js|mjs|ts|html|css|md|json|py|ps1|txt|toml|yml|yaml)$' } |
+     ForEach-Object { Select-String -LiteralPath $_ -Pattern $pats -SimpleMatch -CaseSensitive -Encoding UTF8 } |
+     ForEach-Object { "$($_.Path):$($_.LineNumber): $($_.Line.Trim())" }
+   ```
 
-$pats = @("$([char]0xE2)$([char]0x20AC)", "$([char]0xE2)$([char]0x2020)", "$([char]0xC3)")
-    git -c core.quotepath=off ls-files --cached --others --exclude-standard | Where-Object { $_ -ne 'AGENTS.md' -and $_ -match '\.(js|mjs|ts|html|css|md|json|py|ps1|txt|toml|yml|yaml)$' } | ForEach-Object { Select-String -LiteralPath $_ -Pattern $pats -SimpleMatch -CaseSensitive -Encoding UTF8 } | ForEach-Object { "$($_.Path):$($_.LineNumber): $($_.Line.Trim())" }
    It must print nothing. Also check `git diff` shows only the lines you
    meant to change — no line-ending or whitespace churn on untouched lines.
 10. Leave no temporary files in the repo. Probe scripts, logs and diff
@@ -903,11 +1002,18 @@ $pats = @("$([char]0xE2)$([char]0x20AC)", "$([char]0xE2)$([char]0x2020)", "$([ch
 11. A failing test after your change is caused by your change until proven
     otherwise. Compare the counts with the previous run (pass / fail /
     cancelled) — do not report failures as "pre-existing" without showing
+    they failed before your change.
 12. Reports must contain RAW command output, pasted verbatim (test summary
     numbers, git diff, git status, check results). Summaries such as
     "all passed" or "expected empty output" are rejected. If a command
     could not be run, say so and paste the error.
-    they failed before your change.
+13. Never rewrite a whole file, and never "restore" one by writing it back.
+    A rewrite silently changed a file's working-copy line endings
+    (w/lf -> w/crlf) and was then reported as "just a git config notice".
+    Check `git ls-files --eol <file>` before and after; report any change.
+14. Follow the step order of the task. RED is produced by running the new tests
+    BEFORE the code change, not by changing the code and then reverting it with
+    `git checkout` or `git stash`. If the order cannot be followed: STOP and ask.
 
 ## Draft sweep: never delete a draft because its path is missing from the tree
 
@@ -922,9 +1028,9 @@ The sweep now drops ONLY drafts older than the 30-day TTL (`knownPaths` is
 ignored). Deletes made in the editor remove their own drafts (`forgetPaths()` in
 `js/file-ops.js`). A file deleted outside the editor keeps its draft until the
 TTL; at worst a re-created file of the same name shows the draft banner, which
-the user can discard. Do not reintroduce the "not in the tree" rule.
-Pinned by `test/draft-store.test.js` ("drops only drafts older than the TTL",
-"an empty or partial tree never deletes a fresh draft").
+the user can discard. Do not reintroduce the "not in the tree" rule. Pinned by
+`test/draft-store.test.js` ("drops only drafts older than the TTL", "an empty or
+partial tree never deletes a fresh draft").
 
 ## Never put unsanitized HTML into the main page
 
@@ -941,5 +1047,5 @@ do `javascript:` links. marked does NOT sanitize.
   an error. Never fall back to raw HTML.
 - DOMPurify is injected like `marked` (`deps.purifier`). Its version is pinned in
   three places that must agree: `index.html`, `package.json` (exact, no caret),
-  `CDN_MOCKS` in `e2e_smoke_test.py`.
-Pinned by `test/sanitize-html.test.js`.
+  `CDN_MOCKS` in `e2e_smoke_test.py`. Pinned by `test/sanitize-html.test.js`.
+  
