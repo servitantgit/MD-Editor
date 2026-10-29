@@ -14,6 +14,13 @@ import { splitByFences } from './md-fences.js';
 export const MAX_RESULTS = 50;
 export const BODY_CACHE_LIMIT = 200;
 
+/**
+ * Bump by 1 whenever the indexing rules change (extractTitle, stripMarkdown,
+ * the searcher fields/options). A stored index with a different version is
+ * dropped on load and rebuilt in the background.
+ */
+export const INDEX_VERSION = 1;
+
 /** Characters of context kept before / after the highlighted term. */
 export const SNIPPET_BEFORE = 15;
 export const SNIPPET_AFTER = 60;

@@ -4,7 +4,7 @@ import MiniSearch from 'minisearch';
 import { IDBFactory } from 'fake-indexeddb';
 import { SearchSync, FETCH_CONCURRENCY, BATCH_SIZE } from '../js/search-sync.js';
 import { SearchStore } from '../js/search-store.js';
-import { SearchIndex, createSearchIndex, diffTree, isMarkdownPath } from '../js/search-index.js';
+import { SearchIndex, createSearchIndex, diffTree, isMarkdownPath, INDEX_VERSION } from '../js/search-index.js';
 
 /** A fake GitHub client that returns controlled responses. */
 class FakeGitHubClient {
@@ -318,13 +318,10 @@ test('search-sync: diffTree reports every file as REMOVED for emptied repository
 
 test('search-sync: hydrate loads persisted index and manifest', async () => {
   const store = newStore();
-  const serialized = JSON.stringify({
-    invertedIndex: {},
-    documents: {},
-    documentCount: 0,
-  });
+  const serialized = createSearchIndex(MiniSearch).serialize();
   await store.put({
     key: 'owner/repo@main',
+    indexVersion: INDEX_VERSION,
     serializedIndex: serialized,
     manifest: { 'Existing.md': 'sha-existing' },
   });
@@ -467,4 +464,50 @@ test('search-sync: an interrupted first sync does not mark unfetched files as in
   await second.run(tree);
   assert.equal(second.index.size, N, 'every note must end up searchable');
   assert.ok(client2.getFileCalls.length < N, 'files saved in the first session are not fetched again');
+});
+
+const ALL_SHAS = { 'Notes/a.md': 'sha-a', 'Notes/b.md': 'sha-b', 'README.md': 'sha-readme' };
+
+test('search-sync: a stored index without the current INDEX_VERSION is rebuilt from scratch', async () => {
+  const store = newStore();
+  await store.put({
+    key: 'owner/repo@main',
+    serializedIndex: createSearchIndex(MiniSearch).serialize(),
+    manifest: { ...ALL_SHAS },
+  });
+  const client = new FakeGitHubClient({ tree: SAMPLE_TREE, files: SAMPLE_FILES });
+  const sync = newSync({ client, store });
+  await sync.hydrate();
+  await sync.run(SAMPLE_TREE);
+  assert.equal(client.getFileCalls.length, 3, 'every note is fetched again');
+  assert.equal(sync.index.size, 3);
+});
+
+test('search-sync: an unreadable stored index is rebuilt instead of leaving search empty', async () => {
+  const store = newStore();
+  await store.put({
+    key: 'owner/repo@main',
+    indexVersion: INDEX_VERSION,
+    serializedIndex: 'this is not a minisearch index',
+    manifest: { ...ALL_SHAS },
+  });
+  const client = new FakeGitHubClient({ tree: SAMPLE_TREE, files: SAMPLE_FILES });
+  const sync = newSync({ client, store });
+  await sync.hydrate();
+  await sync.run(SAMPLE_TREE);
+  assert.equal(client.getFileCalls.length, 3, 'every note is fetched again');
+  assert.equal(sync.index.size, 3);
+});
+
+test('search-sync: an index saved by this version is reused on the next login without refetching', async () => {
+  const store = newStore();
+  const client = new FakeGitHubClient({ tree: SAMPLE_TREE, files: SAMPLE_FILES });
+  const first = newSync({ client, store });
+  await first.hydrate();
+  await first.run(SAMPLE_TREE);
+  client.getFileCalls = [];
+  const second = newSync({ client, store });
+  assert.equal(await second.hydrate(), 3, 'the saved index is loaded');
+  await second.run(SAMPLE_TREE);
+  assert.deepEqual(client.getFileCalls, [], 'nothing is fetched again');
 });

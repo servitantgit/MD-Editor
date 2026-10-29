@@ -8,7 +8,7 @@
 // stays thin and no request can bypass its cache-busting / CORS rules.
 
 import { b64ToUtf8 } from './github-client.js';
-import { createSearchIndex, diffTree, isSearchablePath } from './search-index.js';
+import { createSearchIndex, diffTree, isSearchablePath, SearchIndex, INDEX_VERSION } from './search-index.js';
 import { recordKey } from './search-store.js';
 
 /** Parallel getFileB64 calls. Enough to be quick, far below the rate limit. */
@@ -55,8 +55,19 @@ export class SearchSync {
   async hydrate() {
     const record = await this.store.get(this.key);
     if (this.destroyed) return 0;
-    this.index = createSearchIndex(this.MiniSearchCtor, record ? record.serializedIndex : null);
-    this.manifest = (record && record.manifest) || {};
+    // Reuse the stored record only when it was built by the same indexing rules
+    // (INDEX_VERSION) AND it can be read back. Otherwise start from an empty index
+    // AND an empty manifest, so the next run() refetches everything; keeping the
+    // manifest with an empty index would leave search empty until a manual rebuild.
+    this.index = null;
+    this.manifest = {};
+    if (record && record.indexVersion === INDEX_VERSION && record.serializedIndex) {
+      try {
+        this.index = new SearchIndex(this.MiniSearchCtor, { serialized: record.serializedIndex });
+        this.manifest = record.manifest || {};
+      } catch (_) { /* unreadable blob: rebuild from scratch */ }
+    }
+    if (!this.index) this.index = createSearchIndex(this.MiniSearchCtor);
     return this.index.size;
   }
 
@@ -214,6 +225,7 @@ export class SearchSync {
       key: this.key,
       serializedIndex: this.index.serialize(),
       manifest: this.manifest,
+      indexVersion: INDEX_VERSION,
     });
   }
 
