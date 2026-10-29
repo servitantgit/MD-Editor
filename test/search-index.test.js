@@ -397,3 +397,18 @@ test('updateDocument works for a path that was never indexed', () => {
   assert.deepEqual(index.query('brand').map((r) => r.path), ['Notes/New.md']);
   assert.equal(index.size, 4);
 });
+
+test('extractTitle skips a heading-like line inside a fenced code block', () => {
+  const body = '```bash\n# install dependencies\nnpm install\n```\n\n# Real title\n';
+  assert.equal(extractTitle('Notes/Setup.md', body), 'Real title');
+});
+
+test('extractTitle falls back to the file name when the only heading is inside code', () => {
+  const body = '```bash\n# install deps\nnpm i\n```\nno headings here\n';
+  assert.equal(extractTitle('Notes/Setup.md', body), 'Setup');
+});
+
+test('extractTitle skips headings inside tilde fences too', () => {
+  const body = '~~~\n# not a title\n~~~\n# Real\n';
+  assert.equal(extractTitle('a.md', body), 'Real');
+});

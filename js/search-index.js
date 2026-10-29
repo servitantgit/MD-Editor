@@ -9,6 +9,7 @@
 // (no bundler in this project), in Node the test passes the npm package.
 
 import { extOf, basenameOf, escapeAttr } from './paths.js';
+import { splitByFences } from './md-fences.js';
 
 export const MAX_RESULTS = 50;
 export const BODY_CACHE_LIMIT = 200;
@@ -52,8 +53,12 @@ export function titleFromPath(path) {
 
 /** The first `# ...` heading, or the file name when the note has none. */
 export function extractTitle(path, body) {
-  const heading = String(body || '').match(/^[ \t]{0,3}#{1,6}[ \t]+(.+?)[ \t]*#*[ \t]*$/m);
-  return heading ? heading[1].trim() : titleFromPath(path);
+  for (const seg of splitByFences(String(body || ''))) {
+    if (seg.code) continue;
+    const heading = seg.text.match(/^[ \t]{0,3}#{1,6}[ \t]+(.+?)[ \t]*#*[ \t]*$/m);
+    if (heading) return heading[1].trim();
+  }
+  return titleFromPath(path);
 }
 /**
  * Cheap markdown -> plain text. Deliberately a pile of regexes and NOT a real
