@@ -5,17 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## Unreleased
-
-### Fixed
-- **Drag-and-drop move: tree refreshes before link rewrite.** PUT+DELETE already moved the blob on GitHub, but the sidebar waited for `updateReferencesEverywhere` (one request per `.md` in the repo) and could also be overwritten by a lagging recursive `git/trees` response — so the file looked stuck until F5. `onMoved` now runs `loadTree({ rewritePath, expandFolder })` immediately after the Contents write; link updates continue afterward with status `Moved: … (updating links…)`. Documented in `AGENTS.md` / `REGRESSION.md`.
-
-### Changed
-- **Copy as link now always produces a repo-root absolute link (`/path`).** Previously the link was relative to the currently open file at copy time, which broke when the link was pasted into a note in a different folder. Links now use `/path` format everywhere, which the editor, the reference rewriter, and GitHub all resolve from the repo root regardless of the destination file. (`js/file-ops.js`, 5 new cases in `test/file-ops.test.js`)
-
 ## [Unreleased]
 
 ### Added
+- **More toolbar buttons:** strikethrough, task list, inline code, table, horizontal line
+- **Clickable checkboxes in Preview** - ticking a task in the preview changes `[ ]` / `[x]` in the text
+- **Pasted and dropped images are compressed** before upload: at most 1920 px wide, and screenshots without transparency are saved as JPEG
+- Image links in Source got a context menu; `Alt+Up` / `Alt+Down` move lines
+- Developer scripts in `tools/`: export the source to one text file, count Git objects
 - Hybrid **Source / Live / Preview** layouts (constrained EasyMDE side-by-side)
 - **Commit** and **History** right drawers (multi-file commit, diff, restore)
 - Multi-language files (HTML/JS/CSS/…) with kind-aware toolbar and preview
@@ -56,6 +53,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Copy as link now always produces a repo-root absolute link (`/path`).** Previously the link was relative to the currently open file at copy time, which broke when the link was pasted into a note in a different folder. Links now use `/path` format everywhere, which the editor, the reference rewriter, and GitHub all resolve from the repo root regardless of the destination file. (`js/file-ops.js`, 5 new cases in `test/file-ops.test.js`)
+- **The search index rebuilds itself after an update.** It is stored with a version number (`INDEX_VERSION`); when the indexing rules change, every browser re-indexes once in the background - no need to press the rebuild button
+- **CDN library versions are pinned** (EasyMDE 2.21.0, marked 18.0.14, DOMPurify 3.4.17) and must match in `index.html`, `package.json` and the e2e mocks, so tests run against the same code as production
 - **Idle and tab-hide no longer push to GitHub.** Drafts still write to IndexedDB
   (400ms debounce + 10s idle checkpoint). Remote writes are **Save** (current file)
   or **Commit** (working-tree batch).
@@ -70,6 +70,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Moving a folder created in the editor failed with "Empty contents or file too large".** Every such folder has an empty `.gitkeep`, and an empty file was treated as "content missing". 0-byte files are now read as empty content (`js/github-client.js`)
+- **Links and images inside code blocks were rewritten on move/rename.** An example such as `![x](pic.png)` inside a fenced code block was changed and committed like a real link. Code blocks are now skipped (`js/md-fences.js`, `js/reference-rewriter.js`)
+- **Notes whose links could not be updated after a move are now reported** instead of being skipped silently
+- **Renaming a folder could silently merge it into an existing one.** Names that already exist, contain a slash or are dot names are refused
+- **Deleting a file or folder now also forgets its unsaved edits and local draft**, and the confirmation warns when there are unsaved edits
+- **Local drafts could disappear right after saving.** Drafts were dropped when their file was missing from the file list, which GitHub can return out of date. Drafts are now removed only after 30 days or when the file is deleted in the editor
+- **Preview turned images inside code blocks into real images.** They are shown as code now
+- **Search:**
+  - a `# comment` inside a code block no longer becomes the note title;
+  - a note that failed to download is retried on the next sync instead of being skipped for good;
+  - closing the tab during the first indexing no longer leaves notes out of search;
+  - a damaged stored index no longer leaves search empty until a manual rebuild.
+- **Search results now start right under the search box** - half of the sidebar used to stay empty above them (`css/app.css`)
+- **Drag-and-drop move: tree refreshes before link rewrite.** PUT+DELETE already moved the blob on GitHub, but the sidebar waited for `updateReferencesEverywhere` (one request per `.md` in the repo) and could also be overwritten by a lagging recursive `git/trees` response - so the file looked stuck until F5. `onMoved` now runs `loadTree({ rewritePath, expandFolder })` immediately after the Contents write; link updates continue afterward with status `Moved: ... (updating links...)`
+- HTML preview: `%20` in links and asset paths is decoded; encoded absolute links open correctly
+- Unsaved drafts are flushed when leaving the page on every sign-in path, including a fresh GitHub sign-in
+- Mojibake (broken characters) introduced in `08b8abe` repaired
+- Pasting a full GitHub link (e.g. `https://github.com/owner/repo.git` from the address bar) into the Owner/Repository field no longer produces a broken `/repos/{owner}/https://github.com/...` API URL (surfaced by the browser as a "CORS policy" error): `onLoginClick()` now detects such a paste in either field and auto-splits it into owner + repo (`js/github-repo-url.js`, covered by `test/github-repo-url.test.js`)
 - Editor toolbar regrouped: Find·Wrap·Fold | Outline·Backlinks·Map | **PDF** | Save·Delete;
   duplicate filename removed from the toolbar (tabs show the name).
 - GitHub Actions README badge paths (`../../actions/workflows/…/badge.svg`) map to
@@ -100,13 +118,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Dragging a file into a folder that already contains a file with the same name failed with the raw GitHub API error `Invalid request. "sha" wasn't supplied.` — the Contents API requires the current `sha` of a file to update it, and `moveFile()` never sent one. Now the collision is detected up front from the file tree, `moveFile()` refuses to replace anything silently and accepts an explicit `{ overwrite: true }` (passing the destination's sha, with a retry on a stale sha), the UI asks for confirmation via `confirm()` and reports the replacement, and `renameFolder()` checks for collisions before moving the first file instead of failing halfway through (`js/file-mover.js`, `js/folder-manager.js`, `js/app.js`, regression tests in `test/file-mover.test.js`)
 - Dropping a file into the folder it is already in now says so in the status bar instead of silently doing nothing
 - The expand/collapse arrows next to folders in the file tree did nothing when clicked: the folder row's click handler explicitly bailed out on clicks inside `.folder-toggle`, so the arrow — the most obvious thing to click — was inert (only the folder name/icon worked). Now a click anywhere on the row toggles the folder, and the arrow additionally reacts to Enter/Space (`js/file-tree.js`, `css/app.css`, regression test in `test/file-tree.test.js`)
+
+### Security
+
+- **HTML in Preview and PDF is cleaned with DOMPurify 3.4.17.** A note could carry HTML with event handlers (`onerror=` and similar) that would run in the main page, where the GitHub token lives. Rendering now fails closed: if DOMPurify did not load, the preview shows an error instead of raw HTML (`js/sanitize-html.js`)
+
 ### Docs
 
 - `AGENTS.md` autosave state machine rewritten for the hybrid model.
 - `REGRESSION.md` checklist refreshed for Commit/Save, toolbar, badges, auth.
-
-
-- Pasting a full GitHub link (e.g. `https://github.com/owner/repo.git` from the address bar) into the Owner/Repository field no longer produces a broken `/repos/{owner}/https://github.com/...` API URL (surfaced by the browser as a "CORS policy" error): `onLoginClick()` now detects such a paste in either field and auto-splits it into owner + repo (`js/github-repo-url.js`, covered by `test/github-repo-url.test.js`)
+- `AGENTS.md`: ASCII-only mojibake check for PowerShell; reports must contain raw command output; new notes on fenced code blocks (`js/md-fences.js`), empty files, the search index version and the sidebar layout; rules 13-14 (never rewrite whole files, follow the RED -> GREEN step order).
+- `README.md` shortened to a one-screen overview.
 
 ## [2.2.0] - 2026-09-27
 
