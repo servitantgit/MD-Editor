@@ -367,6 +367,13 @@ with sync_playwright() as p:
     # The tree must be REPLACED by the results, not shown next to them.
     assert page.locator(".file-item.folder:visible").count() == 0, \
         "the file tree is still visible while search results are shown"
+    # ...and the results start right under the search box, with no empty band
+    # left by the hidden tree's wrapper (.folder-dropzone).
+    gap = page.evaluate(
+        "document.getElementById('search-results').getBoundingClientRect().top"
+        " - document.querySelector('.sidebar-search').getBoundingClientRect().bottom"
+    )
+    assert abs(gap) < 5, f"empty space between the search box and the results: {gap}px"
     # ...and the snippet highlights the term that was searched for.
     assert page.locator(".search-result-snippet mark").count() > 0, \
         "search result has no <mark> highlight in its snippet"

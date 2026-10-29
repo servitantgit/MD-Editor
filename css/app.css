@@ -269,6 +269,9 @@ button.secondary:hover { background: #21262d; }
   padding: 4px 0;
   font-size: 13px;
 }
+/* The tree lives inside .folder-dropzone (flex: 1). Hiding only the tree left
+   the wrapper taking half of the sidebar above the results, so hide it too. */
+.folder-dropzone:has(> .file-tree.hidden) { display: none; }
 .search-result {
   padding: 6px 12px;
   cursor: pointer;
