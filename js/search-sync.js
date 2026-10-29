@@ -106,10 +106,15 @@ export class SearchSync {
       try { this.onFileRemoved(path); } catch (_) {}
     }
 
-    const manifest = {};
-    files.forEach((f) => { manifest[f.path] = f.sha; });
-
+    // A path enters the manifest only once it no longer needs fetching: either
+    // it is unchanged, or this run has downloaded it. Batch persistence below
+    // saves this manifest, so an interrupted first sync (tab closed, repo
+    // switched) must not record files it never fetched.
     const pending = added.concat(changed);
+    const pendingSet = new Set(pending);
+    const shaByPath = new Map(files.map((f) => [f.path, f.sha]));
+    const manifest = {};
+    files.forEach((f) => { if (!pendingSet.has(f.path)) manifest[f.path] = f.sha; });
     if (!pending.length) {
       // Nothing to fetch, but removals still have to be persisted. This is the
       // common returning-login path, so it MUST also stamp lastSyncedAt —
@@ -139,12 +144,11 @@ export class SearchSync {
         ({ b64 } = await this.client.getFileB64(path));
         fetched = true;
       } catch (_) {
-        // Download failed (network, rate limit, 5xx, file gone): keep the path
-        // OUT of the manifest so the next sync retries it instead of skipping
-        // it forever.
-        delete manifest[path];
+        // Download failed (network, rate limit, 5xx, file gone): the path is
+        // simply not added to the manifest, so the next sync retries it.
       }
       if (fetched) {
+        manifest[path] = shaByPath.get(path);
         try {
           // b64ToUtf8 THROWS on content that is not valid UTF-8. That throw is the
           // signal to skip the file - a binary blob with a .md extension must not

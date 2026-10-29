@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import MiniSearch from 'minisearch';
 import { IDBFactory } from 'fake-indexeddb';
-import { SearchSync, FETCH_CONCURRENCY } from '../js/search-sync.js';
+import { SearchSync, FETCH_CONCURRENCY, BATCH_SIZE } from '../js/search-sync.js';
 import { SearchStore } from '../js/search-store.js';
 import { SearchIndex, createSearchIndex, diffTree, isMarkdownPath } from '../js/search-index.js';
 
@@ -427,4 +427,44 @@ test('search-sync: a file that is not valid UTF-8 is not re-downloaded on every 
   client.getFileCalls = [];
   await sync.run(SAMPLE_TREE);
   assert.deepEqual(client.getFileCalls, [], 'nothing is re-downloaded');
+});
+
+test('search-sync: an interrupted first sync does not mark unfetched files as indexed', async () => {
+  const N = BATCH_SIZE + 10;
+  const tree = Array.from({ length: N }, (_, i) => ({ path: `Bulk/f${i}.md`, sha: `sha-${i}` }));
+  const files = Object.fromEntries(
+    tree.map((f) => [f.path, { sha: f.sha, body: `# ${f.path}\n\nbody ${f.path}` }])
+  );
+
+  // First session: the first BATCH_SIZE files download, the rest hang (tab about to close).
+  const client = new FakeGitHubClient({ tree, files });
+  let release;
+  const gate = new Promise((resolve) => { release = resolve; });
+  const realGet = client.getFileB64.bind(client);
+  client.getFileB64 = async (path) => {
+    if (Number(path.match(/f(\d+)\.md$/)[1]) >= BATCH_SIZE) await gate;
+    return realGet(path);
+  };
+
+  const store = newStore();
+  let persisted;
+  const firstPut = new Promise((resolve) => { persisted = resolve; });
+  const realPut = store.put.bind(store);
+  store.put = async (record) => { await realPut(record); persisted(); };
+
+  const first = newSync({ client, store });
+  await first.hydrate();
+  const runPromise = first.run(tree);
+  await firstPut; // the batch save happened
+  first.destroy(); // the tab is closed
+  release();
+  await runPromise;
+
+  // Second session on the same store: the missing files must be fetched now.
+  const client2 = new FakeGitHubClient({ tree, files });
+  const second = newSync({ client: client2, store });
+  await second.hydrate();
+  await second.run(tree);
+  assert.equal(second.index.size, N, 'every note must end up searchable');
+  assert.ok(client2.getFileCalls.length < N, 'files saved in the first session are not fetched again');
 });
