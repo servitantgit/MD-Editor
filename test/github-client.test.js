@@ -61,3 +61,42 @@ test('getTree keeps only blobs and maps them to {path, sha}', async () => {
   const files = await client.getTree('main');
   assert.deepEqual(files, [{ path: 'a.md', sha: 'sha-a' }]);
 });
+
+function mockContentsFetch(contents, blob) {
+  const calls = [];
+  globalThis.fetch = async (url) => {
+    calls.push(String(url));
+    const body = String(url).includes('/git/blobs/') ? blob : contents;
+    return { ok: true, status: 200, json: async () => body };
+  };
+  return calls;
+}
+
+test('getFileB64 returns empty content for a 0-byte file without a blob request', async () => {
+  const calls = mockContentsFetch(
+    { content: '', size: 0, sha: 'e69de29bb2d1d6434b8b29ae775ad8c2e48c5391' },
+    { content: '' }
+  );
+  const client = new GitHubClient({ token: 't', owner: 'o', repo: 'r' });
+  const out = await client.getFileB64('Docs/.gitkeep');
+  assert.deepEqual(out, { b64: '', sha: 'e69de29bb2d1d6434b8b29ae775ad8c2e48c5391' });
+  assert.equal(calls.length, 1, `expected 1 request, got: ${calls.join(', ')}`);
+});
+
+test('getFileB64 still falls back to the blob API for a large file', async () => {
+  const calls = mockContentsFetch(
+    { content: '', size: 2000000, sha: 'sha-big' },
+    { content: 'aGVs\nbG8=', sha: 'sha-big' }
+  );
+  const client = new GitHubClient({ token: 't', owner: 'o', repo: 'r' });
+  const out = await client.getFileB64('big.md');
+  assert.deepEqual(out, { b64: 'aGVsbG8=', sha: 'sha-big' });
+  assert.equal(calls.length, 2);
+  assert.match(calls[1], /\/git\/blobs\/sha-big$/);
+});
+
+test('getFileB64 still throws when content is missing and size is unknown', async () => {
+  mockContentsFetch({ content: '', sha: 'sha-x' }, { content: '' });
+  const client = new GitHubClient({ token: 't', owner: 'o', repo: 'r' });
+  await assert.rejects(client.getFileB64('x.md'), /Empty contents/);
+});

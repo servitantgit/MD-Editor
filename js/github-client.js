@@ -94,6 +94,7 @@ export class GitHubClient {
     const res = await this.request(`/repos/${this.owner}/${this.repo}/contents/${encodePathForApi(path)}`);
     if (!res.ok) throw await this._error(res, path);
     const data = await res.json();
+    if (data.size === 0) return { b64: '', sha: data.sha };
     let b64 = data.content;
     if (!b64 && data.sha) {
       const blobRes = await this.request(`/repos/${this.owner}/${this.repo}/git/blobs/${data.sha}`);
