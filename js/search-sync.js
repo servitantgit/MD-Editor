@@ -133,18 +133,30 @@ export class SearchSync {
 
     await this._pool(pending, FETCH_CONCURRENCY, async (path) => {
       if (this.destroyed) return;
+      let fetched = false;
+      let b64;
       try {
-        const { b64 } = await this.client.getFileB64(path);
-        // b64ToUtf8 THROWS on content that is not valid UTF-8. That throw is the
-        // signal to skip the file — a binary blob with a .md extension must not
-        // be indexed as a string of U+FFFD replacement characters.
-        const body = b64ToUtf8(b64);
-        this.index.add(path, body);
-        try { this.onFileIndexed(path, body); } catch (_) {}
-        done++;
+        ({ b64 } = await this.client.getFileB64(path));
+        fetched = true;
       } catch (_) {
-        // A skipped file stays absent from the index, but it is still listed in
-        // the manifest below so we do not re-fetch it on every single sync.
+        // Download failed (network, rate limit, 5xx, file gone): keep the path
+        // OUT of the manifest so the next sync retries it instead of skipping
+        // it forever.
+        delete manifest[path];
+      }
+      if (fetched) {
+        try {
+          // b64ToUtf8 THROWS on content that is not valid UTF-8. That throw is the
+          // signal to skip the file - a binary blob with a .md extension must not
+          // be indexed as a string of U+FFFD replacement characters.
+          const body = b64ToUtf8(b64);
+          this.index.add(path, body);
+          try { this.onFileIndexed(path, body); } catch (_) {}
+          done++;
+        } catch (_) {
+          // Not valid UTF-8: stays absent from the index but listed in the
+          // manifest, so we do not re-download it on every single sync.
+        }
       }
 
       processed++;

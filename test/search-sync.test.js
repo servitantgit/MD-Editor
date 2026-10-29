@@ -366,3 +366,65 @@ test('search-sync: removed and changed paths are removed from index before new v
   assert.equal(sync.index.query('Original').length, 0, 'old content should be gone');
   assert.ok(sync.index.query('New').length > 0, 'new content should be indexed');
 });
+
+test('search-sync: a file that failed to download is retried on the next sync', async () => {
+  const client = new FakeGitHubClient({
+    tree: SAMPLE_TREE,
+    files: SAMPLE_FILES,
+    shouldFail: new Set(['Notes/b.md']),
+  });
+  const store = newStore();
+  const sync = newSync({ client, store });
+
+  await sync.hydrate();
+  await sync.run(SAMPLE_TREE);
+  assert.equal(sync.manifest['Notes/b.md'], undefined, 'a failed download must not be marked as indexed');
+
+  client.shouldFail = new Set();
+  client.getFileCalls = [];
+  await sync.run(SAMPLE_TREE);
+  assert.deepEqual(client.getFileCalls, ['Notes/b.md'], 'only the failed file is fetched again');
+  assert.ok(sync.index.query('waffles').length > 0, 'the retried file is now searchable');
+});
+
+test('search-sync: the retry survives a reload (failed path is not persisted)', async () => {
+  const client = new FakeGitHubClient({
+    tree: SAMPLE_TREE,
+    files: SAMPLE_FILES,
+    shouldFail: new Set(['Notes/b.md']),
+  });
+  const store = newStore();
+  const first = newSync({ client, store });
+  await first.hydrate();
+  await first.run(SAMPLE_TREE);
+
+  client.shouldFail = new Set();
+  client.getFileCalls = [];
+  const second = newSync({ client, store });
+  await second.hydrate();
+  await second.run(SAMPLE_TREE);
+  assert.deepEqual(client.getFileCalls, ['Notes/b.md']);
+  assert.ok(second.index.query('waffles').length > 0);
+});
+
+test('search-sync: a file that is not valid UTF-8 is not re-downloaded on every sync', async () => {
+  const client = new FakeGitHubClient({ tree: SAMPLE_TREE, files: SAMPLE_FILES });
+  const realGet = client.getFileB64.bind(client);
+  client.getFileB64 = async (path) => {
+    if (path === 'Notes/b.md') {
+      client.getFileCalls.push(path);
+      return { b64: Buffer.from([0xff, 0xfe, 0xfd]).toString('base64'), sha: 'sha-b' };
+    }
+    return realGet(path);
+  };
+  const store = newStore();
+  const sync = newSync({ client, store });
+
+  await sync.hydrate();
+  await sync.run(SAMPLE_TREE);
+  assert.equal(sync.manifest['Notes/b.md'], 'sha-b', 'a non-text file stays in the manifest');
+
+  client.getFileCalls = [];
+  await sync.run(SAMPLE_TREE);
+  assert.deepEqual(client.getFileCalls, [], 'nothing is re-downloaded');
+});
