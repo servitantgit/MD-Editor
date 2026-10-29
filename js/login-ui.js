@@ -56,11 +56,11 @@ import { parseGitHubOwnerRepo } from './github-repo-url.js';
  *
  * @returns {{ bootstrap: () => Promise<boolean>, setStatus: (msg: string, isError: boolean) => void }}
  *   bootstrap() returns true when this module finished the login itself (fresh
- *   OAuth or demo started — the caller must do nothing further and, to preserve
- *   current behavior, must NOT attach the visibilitychange/beforeunload
- *   listeners). Returns false when it fell through (a session was restored, or
- *   the sign-in screen is showing) — the caller attaches the lifecycle
- *   listeners in that case. setStatus() lets the caller write to the sign-in
+ *   OAuth or demo started - the caller must do nothing further). Returns false
+ *   when it fell through (a session was restored, or the sign-in screen is
+ *   showing). Lifecycle listeners do not depend on this: setupAutosaveUI() in
+ *   app.js binds them on every login path (js/lifecycle.js). setStatus() lets
+ *   the caller write to the sign-in
  *   status line (used by showApp's CDN-failure path and the init() CDN guard).
  */
 export function createLoginUI(deps) {
@@ -454,13 +454,10 @@ export function createLoginUI(deps) {
     }
     setupRepoSwitcher();
 
-    // NOTE (known quirk, preserved verbatim): when this returns true the caller
-    // must NOT attach the visibilitychange/beforeunload listeners. In the old
-    // app.js, the fresh-OAuth and demo paths early-returned from init(), so those
-    // listeners were never attached in those cases — only on the session-restore
-    // and sign-in-screen paths below. The app is shown in all paths, so the
-    // listeners arguably *should* attach uniformly; that looks like a latent bug,
-    // but extraction is behavior-preserving. Investigate separately.
+    // bootstrap() returns true when it finished the login itself (fresh OAuth or
+    // demo start). The visibilitychange/beforeunload listeners do NOT depend on
+    // this any more: setupAutosaveUI() in app.js binds them on every login path
+    // (js/lifecycle.js). The old early-return quirk noted here has been fixed.
     try {
       if (await consumeOAuthRedirect()) return true;
     } catch (e) {

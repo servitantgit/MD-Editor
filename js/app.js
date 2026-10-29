@@ -17,6 +17,7 @@ import { SearchStore } from './search-store.js';
 import { SearchSync } from './search-sync.js';
 import { createSearchUI, formatAge } from './search-ui.js';
 import { DraftStore } from './draft-store.js';
+import { bindLifecycleListeners } from './lifecycle.js';
 import { Autosave } from './autosave.js';
 import { createTabsSession } from './tabs-session.js';
 import { WorkingTree } from './working-tree.js';
@@ -366,32 +367,11 @@ async function init() {
   // tab that still holds a session — two editors, two ResizeObservers, two paste
   // handlers, with the first one nobody can reach to tear down.
   //
-  // `terminal` is true for fresh OAuth or demo start — the old code returned
-  // early in those cases and did NOT attach the listeners below. Preserved
-  // verbatim; see the matching note in js/login-ui.js bootstrap().
+  // `terminal` is true for fresh OAuth or demo start: the app is already shown.
+  // Lifecycle listeners do not depend on this - setupAutosaveUI() binds them
+  // on every login path (js/lifecycle.js).
   const terminal = await loginUI.bootstrap();
   if (terminal) return;
-
-  // Switching tabs is the natural checkpoint Google Docs uses too: commit a
-  // dirty draft immediately instead of making the user wait out the 10s window.
-  // beforeunload is NOT the place for this — a fetch started there is cancelled
-  // by the browser, so all it can do is ask the user to confirm.
-  document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'hidden' && autosave) autosave.onVisibilityChange(true);
-  });
-  // In the hybrid model, hasUnsavedDraft() is true for anything not on GitHub —
-  // even for a safely-written IndexedDB draft. Prompt anyway: IndexedDB can be
-  // cleared (private mode, "clear site data"), and work inside the 400ms debounce
-  // window exists only in JS memory. "On GitHub or nothing" is the right prompt
-  // threshold here. Do NOT narrow this to DIRTY_LOCAL — a draft is not durable
-  // enough to count as "safe to close".
-  window.addEventListener('beforeunload', (e) => {
-    if (!autosave || !autosave.hasUnsavedDraft()) return;
-    // The draft is already in IndexedDB by now; this is only the courtesy
-    // prompt users expect. Nothing is fetched here — it would not survive.
-    e.preventDefault();
-    e.returnValue = '';
-  });
 }
 
 // Informational statuses ("Moved: ...", "Saved ✓") must not stay on screen forever —
@@ -860,6 +840,12 @@ function ensureCommitHistoryUI() {
 
 function setupAutosaveUI(owner, repo) {
   autosave = createAutosave(owner, repo);
+
+  // visibilitychange + beforeunload: bound once per page on EVERY login path
+  // (session restore, fresh OAuth, demo). They used to live in init() after the
+  // early return for fresh OAuth, so a tab signed in via GitHub had no "unsaved
+  // changes" prompt until it was reloaded.
+  bindLifecycleListeners({ win: window, doc: document, getAutosave: () => autosave });
 
   // Best-effort: persist the in-memory draft before the tab goes away so a
   // reload within the 400ms debounce window still recovers the text.
