@@ -27,7 +27,7 @@ export async function createFolder(client, folderPath) {
  * @param {{path:string, sha:string}[]} allFiles
  * @param {string} oldFolderPath
  * @param {string} newFolderPath
- * @returns {Promise<{moved: string[], updatedFiles: string[]}>}
+ * @returns {Promise<{moved: string[], updatedFiles: string[], failedFiles: string[]}>}
  */
 export async function renameFolder(client, allFiles, oldFolderPath, newFolderPath, options = {}) {
   // options.onPhase1Done({ moved, mapping, oldClean, newClean }) — after all put+delete
@@ -99,40 +99,52 @@ export async function renameFolder(client, allFiles, oldFolderPath, newFolderPat
   // instead of N×M. Moved files are scanned under their NEW paths — root-absolute
   // links they still carry to old paths get fixed here too.
   const allUpdated = [];
+  const allFailed = [];
   const mdFiles = snapshot.filter((f) => extOf(f.path) === 'md');
 
   let linkDone = 0;
   const linkTotal = mdFiles.length;
   for (const f of mdFiles) {
-    try {
-      if (typeof options.onProgress === 'function') {
-        try { await options.onProgress({ phase: 'links', done: linkDone, total: linkTotal, path: f.path }); } catch (_) {}
-      }
-      const { b64, sha } = await client.getFileB64(f.path);
-      const text = b64ToUtf8(b64);
-      const fileDir = dirnameOf(f.path);
-      let currentText = text;
-      let changed = false;
-
-      for (const [oldPath, newPath] of mapping) {
-        const { changed: c, text: newText } = updateReferencesInFile(currentText, fileDir, oldPath, newPath);
-        if (c) {
-          changed = true;
-          currentText = newText;
-        }
-      }
-
-      if (changed) {
-        await client.putFile(f.path, utf8ToB64(currentText), `Update links after renaming folder ${oldClean} to ${newClean}`, sha);
-        allUpdated.push(f.path);
-      }
-    } catch (e) {
-      console.warn('Failed to update links in', f.path, e);
+    if (typeof options.onProgress === 'function') {
+      try { await options.onProgress({ phase: 'links', done: linkDone, total: linkTotal, path: f.path }); } catch (_) {}
     }
     linkDone += 1;
+    let b64;
+    let sha;
+    try {
+      ({ b64, sha } = await client.getFileB64(f.path));
+    } catch (e) {
+      console.warn('Failed to read for link update:', f.path, e);
+      allFailed.push(f.path);
+      continue;
+    }
+    let text;
+    try {
+      text = b64ToUtf8(b64);
+    } catch (_) {
+      continue; // not valid UTF-8 (binary under .md): nothing to rewrite, not a failure
+    }
+    const fileDir = dirnameOf(f.path);
+    let currentText = text;
+    let changed = false;
+    for (const [oldPath, newPath] of mapping) {
+      const { changed: c, text: newText } = updateReferencesInFile(currentText, fileDir, oldPath, newPath);
+      if (c) {
+        changed = true;
+        currentText = newText;
+      }
+    }
+    if (!changed) continue;
+    try {
+      await client.putFile(f.path, utf8ToB64(currentText), `Update links after renaming folder ${oldClean} to ${newClean}`, sha);
+      allUpdated.push(f.path);
+    } catch (e) {
+      console.warn('Failed to update links in', f.path, e);
+      allFailed.push(f.path);
+    }
   }
 
-  return { moved, updatedFiles: [...new Set(allUpdated)] };
+  return { moved, updatedFiles: [...new Set(allUpdated)], failedFiles: [...new Set(allFailed)] };
 }
 
 /**

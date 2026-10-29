@@ -20,7 +20,7 @@ import { rewriteOwnRelativeLinks, updateReferencesInFile } from './reference-rew
  *   overwrite = true allows replacing a file
  *   that already exists at the destination (GitHub requires its `sha` for updates,
  *   and answers 422 "sha" wasn't supplied" without it).
- * @returns {Promise<{newPath: string, updatedFiles: string[], skipped: boolean, overwritten: boolean}>}
+ * @returns {Promise<{newPath: string, updatedFiles: string[], failedFiles?: string[], skipped: boolean, overwritten: boolean}>}
  */
 /**
  * Validates a single path segment (a file/folder NAME, not a path).
@@ -50,7 +50,7 @@ function validateName(name) {
  *   skipReferenceRewrite = true skips the repo-wide reference scan after the move.
  *   Used by renameFolder() so all files are moved first and references are
  *   rewritten in a single pass instead of one N×M pass per moved file.
- * @returns {Promise<{newPath: string, updatedFiles: string[], skipped: boolean, overwritten: boolean}>}
+ * @returns {Promise<{newPath: string, updatedFiles: string[], failedFiles?: string[], skipped: boolean, overwritten: boolean}>}
  */
 export async function moveToPath(client, allFiles, oldPath, newPath, options = {}) {
   if (newPath === oldPath) return { newPath, updatedFiles: [], skipped: true, overwritten: false };
@@ -98,11 +98,14 @@ export async function moveToPath(client, allFiles, oldPath, newPath, options = {
     }
   }
 
+  // failedFiles: notes whose links could not be rewritten (read/write error) - the
+  // UI must report them instead of claiming success.
+  const failedFiles = [];
   const updatedFiles = options.skipReferenceRewrite
     ? []
-    : await updateReferencesEverywhere(client, allFiles, oldPath, newPath);
+    : await updateReferencesEverywhere(client, allFiles, oldPath, newPath, failedFiles);
 
-  return { newPath, updatedFiles, skipped: false, overwritten: Boolean(clash) };
+  return { newPath, updatedFiles, failedFiles, skipped: false, overwritten: Boolean(clash) };
 }
 
 /**
@@ -132,20 +135,36 @@ export async function renameFile(client, allFiles, oldPath, newName, options = {
  * links that actually pointed at oldPath.
  * @returns {Promise<string[]>} paths of the files that were changed
  */
-export async function updateReferencesEverywhere(client, allFiles, oldPath, newPath) {
+export async function updateReferencesEverywhere(client, allFiles, oldPath, newPath, failed = null) {
   const updated = [];
-  const mdFiles = allFiles.filter((f) => extOf(f.path) === 'md' && f.path !== newPath);
+  // oldPath is skipped too: it was deleted before this pass, so reading it can
+  // only 404 - which would otherwise be reported as a failed update.
+  const mdFiles = allFiles.filter((f) => extOf(f.path) === 'md' && f.path !== newPath && f.path !== oldPath);
 
   for (const f of mdFiles) {
+    let b64;
+    let sha;
     try {
-      const { b64, sha } = await client.getFileB64(f.path);
-      const text = b64ToUtf8(b64);
-      const { changed, text: newText } = updateReferencesInFile(text, dirnameOf(f.path), oldPath, newPath);
-      if (!changed) continue;
+      ({ b64, sha } = await client.getFileB64(f.path));
+    } catch (e) {
+      console.warn('Failed to read for link update:', f.path, e);
+      if (failed) failed.push(f.path);
+      continue;
+    }
+    let text;
+    try {
+      text = b64ToUtf8(b64);
+    } catch (_) {
+      continue; // not valid UTF-8 (binary under .md): nothing to rewrite, not a failure
+    }
+    const { changed, text: newText } = updateReferencesInFile(text, dirnameOf(f.path), oldPath, newPath);
+    if (!changed) continue;
+    try {
       await client.putFile(f.path, utf8ToB64(newText), `Update links after moving ${oldPath} to ${newPath}`, sha);
       updated.push(f.path);
     } catch (e) {
       console.warn('Failed to update links in', f.path, e);
+      if (failed) failed.push(f.path);
     }
   }
   return updated;

@@ -168,7 +168,7 @@ export function createFileOps(deps) {
         });
       }
 
-      const { newPath, updatedFiles, skipped, overwritten } = result;
+      const { newPath, updatedFiles, skipped, overwritten, failedFiles } = result;
       if (skipped) {
         deps.setSaveStatus(`${oldPath} is already in that folder`, false);
         return;
@@ -185,6 +185,7 @@ export function createFileOps(deps) {
           (updatedFiles.length ? ` (updated links in ${updatedFiles.length} file(s))` : ''),
         false
       );
+      reportLinkFailures(failedFiles);
     } catch (e) {
       deps.setSaveStatus('Move error: ' + e.message, true);
     }
@@ -239,6 +240,17 @@ export function createFileOps(deps) {
       }
     }
     return Array.from(out);
+  }
+
+  /**
+   * Link rewrites that failed (network, 409, rate limit) must be visible: the
+   * status used to report success while those notes kept links to the old path.
+   * An error status stays on screen (errors are not auto-cleared).
+   */
+  function reportLinkFailures(failedFiles) {
+    if (!failedFiles || failedFiles.length === 0) return;
+    const shown = failedFiles.slice(0, 3).join(', ') + (failedFiles.length > 3 ? ', ...' : '');
+    deps.setSaveStatus(`Done, but links in ${failedFiles.length} file(s) could not be updated: ${shown}. Fix them manually.`, true);
   }
 
   async function onDeleteFile() {
@@ -629,7 +641,7 @@ export function createFileOps(deps) {
       const result = await renameFile(deps.getState().client, deps.getState().allFiles, path, trimmed, {
         onMoved: afterPhysicalMove,
       });
-      const { newPath, updatedFiles, skipped } = result;
+      const { newPath, updatedFiles, skipped, failedFiles } = result;
       if (skipped) return;
 
       if (updatedFiles && updatedFiles.length) {
@@ -641,6 +653,7 @@ export function createFileOps(deps) {
           (updatedFiles.length ? ` (updated links in ${updatedFiles.length} file(s))` : ''),
         false
       );
+      reportLinkFailures(failedFiles);
     } catch (e) {
       deps.setSaveStatus('Rename error: ' + e.message, true);
     }
@@ -767,7 +780,7 @@ export function createFileOps(deps) {
     try {
       deps.setSaveStatus(`Renaming ${folderPath}…`, false, { sticky: true });
       let phase1UiDone = false;
-      const { moved, updatedFiles } = await renameFolder(
+      const { moved, updatedFiles, failedFiles } = await renameFolder(
         deps.getState().client,
         deps.getState().allFiles,
         folderPath,
@@ -799,6 +812,7 @@ export function createFileOps(deps) {
           ')',
         false
       );
+      reportLinkFailures(failedFiles);
     } catch (e) {
       deps.setSaveStatus('Error: ' + e.message, true);
     }
@@ -865,7 +879,7 @@ export function createFileOps(deps) {
     try {
       deps.setSaveStatus(`Moving ${oldPath} → ${newPath}…`, false, { sticky: true });
       let phase1UiDone = false;
-      const { moved, updatedFiles } = await renameFolder(
+      const { moved, updatedFiles, failedFiles } = await renameFolder(
         deps.getState().client,
         deps.getState().allFiles,
         oldPath,
@@ -897,6 +911,7 @@ export function createFileOps(deps) {
           ')',
         false
       );
+      reportLinkFailures(failedFiles);
     } catch (e) {
       deps.setSaveStatus('Move error: ' + e.message, true);
     }
