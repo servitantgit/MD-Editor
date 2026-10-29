@@ -12,6 +12,7 @@ import {
   isExternalOrAnchor,
 } from './paths.js';
 import { REF_TOKEN_RE, classifyRefMatch, rebuildRefToken } from './markdown-tokens.js';
+import { replaceOutsideFences } from './md-fences.js';
 
 /**
  * The file ITSELF moves from oldDir to newDir: recalculates its OWN relative
@@ -21,7 +22,7 @@ import { REF_TOKEN_RE, classifyRefMatch, rebuildRefToken } from './markdown-toke
  */
 export function rewriteOwnRelativeLinks(text, oldDir, newDir) {
   if (oldDir === newDir) return text;
-  return text.replace(REF_TOKEN_RE, (full, g1, g2, g3, g4, g5, g6) => {
+  return replaceOutsideFences(text, REF_TOKEN_RE, (full, g1, g2, g3, g4, g5, g6) => {
     const parsed = classifyRefMatch(full, g1, g2, g3, g4, g5, g6);
     const target = parsed.target;
     if (isExternalOrAnchor(target) || target.startsWith('/')) return full;
@@ -40,7 +41,7 @@ export function rewriteOwnRelativeLinks(text, oldDir, newDir) {
  */
 export function updateReferencesInFile(text, fileDir, oldPath, newPath) {
   let changed = false;
-  const newText = text.replace(REF_TOKEN_RE, (full, g1, g2, g3, g4, g5, g6) => {
+  const newText = replaceOutsideFences(text, REF_TOKEN_RE, (full, g1, g2, g3, g4, g5, g6) => {
     const parsed = classifyRefMatch(full, g1, g2, g3, g4, g5, g6);
     const target = parsed.target;
     if (isExternalOrAnchor(target)) return full;

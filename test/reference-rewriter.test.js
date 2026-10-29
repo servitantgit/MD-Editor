@@ -67,3 +67,48 @@ test('updateReferencesInFile fixes a plain markdown link pointing at a moved .md
   assert.equal(changed, true);
   assert.match(out, /BOBAM\/sub\/BOBAM%20ON-OFF\.md/);
 });
+
+test('rewriteOwnRelativeLinks leaves links inside fenced code blocks untouched', () => {
+  const text = [
+    '![a](../Asset/x.jpg)',
+    '```',
+    '![a](../Asset/x.jpg)',
+    '[n](../BOBAM/README.md)',
+    '```',
+    '~~~',
+    '[n](../BOBAM/README.md)',
+    '~~~',
+    '',
+  ].join('\n');
+  const expected = [
+    '![a](../../Asset/x.jpg)',
+    '```',
+    '![a](../Asset/x.jpg)',
+    '[n](../BOBAM/README.md)',
+    '```',
+    '~~~',
+    '[n](../BOBAM/README.md)',
+    '~~~',
+    '',
+  ].join('\n');
+  assert.equal(rewriteOwnRelativeLinks(text, 'a/b', 'a/b/c'), expected);
+});
+
+test('updateReferencesInFile rewrites a link outside fenced code but not the same link inside it', () => {
+  const text = ['![img](/Asset/old.jpg)', '```', '![img](/Asset/old.jpg)', '```', ''].join('\n');
+  const { changed, text: out } = updateReferencesInFile(text, 'docs', 'Asset/old.jpg', 'Asset/new.jpg');
+  assert.equal(changed, true);
+  assert.equal(out, ['![img](/Asset/new.jpg)', '```', '![img](/Asset/old.jpg)', '```', ''].join('\n'));
+});
+
+test('updateReferencesInFile reports no change when the only matching link is inside fenced code', () => {
+  const text = 'Example:\n~~~\n[note](../BOBAM/README.md)\n~~~\n';
+  const { changed, text: out } = updateReferencesInFile(
+    text,
+    'AI corrected/Other',
+    'AI corrected/BOBAM/README.md',
+    'AI corrected/BOBAM/sub/README.md'
+  );
+  assert.equal(changed, false);
+  assert.equal(out, text);
+});
