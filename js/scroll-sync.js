@@ -79,8 +79,15 @@ export function createScrollSync(cm, opts = {}) {
   const getPreviewEl = typeof opts.getPreviewEl === 'function' ? opts.getPreviewEl : () => null;
   const isActive = typeof opts.isActive === 'function' ? opts.isActive : () => true;
   let boundPv = null;
-  let expectCm = null;
-  let expectPv = null;
+  const writtenCm = [];
+  const writtenPv = [];
+  const GLIDE_FRACTION = 0.35;
+  let glide = null; // { pane: 'pv' | 'cm', target }
+  let frame = 0;
+  const raf = typeof opts.raf === 'function' ? opts.raf
+    : typeof requestAnimationFrame === 'function' ? (f) => requestAnimationFrame(f) : (f) => setTimeout(f, 16);
+  const caf = typeof opts.caf === 'function' ? opts.caf
+    : typeof cancelAnimationFrame === 'function' ? (id) => cancelAnimationFrame(id) : (id) => clearTimeout(id);
   let lastSrcMax = 0;
   let lastPvMax = 0;
   let headingsKey = null;
@@ -101,7 +108,7 @@ export function createScrollSync(cm, opts = {}) {
     if (el === boundPv) return;
     if (boundPv) boundPv.removeEventListener('scroll', onPv);
     boundPv = el;
-    expectPv = null;
+    writtenPv.length = 0;
     if (boundPv) boundPv.addEventListener('scroll', onPv, { passive: true });
   }
 
@@ -147,6 +154,66 @@ export function createScrollSync(cm, opts = {}) {
     return out;
   }
 
+  // The FOLLOWING pane glides: each frame it moves GLIDE_FRACTION of the
+  // remaining distance (at least 1px) instead of leaping. An image is one line
+  // in Source but hundreds of pixels in Preview, so a leap was a visible jolt.
+  // Every position we write is remembered: its scroll event is our own echo,
+  // any other position is the user, who takes over at once.
+  function glideTo(pane, target, current) {
+    if (Math.abs(target - current) <= 1) {
+      if (glide && glide.pane === pane) glide = null;
+      return;
+    }
+    glide = { pane, target };
+    if (!frame) frame = raf(step);
+  }
+
+  function stopGlide() {
+    glide = null;
+    if (frame) {
+      try { caf(frame); } catch (_) { /* already ran */ }
+      frame = 0;
+    }
+  }
+
+  function step() {
+    frame = 0;
+    if (destroyed || !glide) return;
+    const pv = boundPv;
+    if (!isActive() || (glide.pane === 'pv' && !pv)) { glide = null; return; }
+    const onPvPane = glide.pane === 'pv';
+    const cur = onPvPane ? pv.scrollTop : cm.getScrollInfo().top;
+    const rest = glide.target - cur;
+    const done = Math.abs(rest) <= 1;
+    const move = rest * GLIDE_FRACTION;
+    const next = done ? glide.target : cur + (Math.abs(move) < 1 ? Math.sign(rest) : move);
+    let after;
+    if (onPvPane) {
+      pv.scrollTop = next;
+      after = pv.scrollTop;
+      remember(writtenPv, after);
+    } else {
+      cm.scrollTo(null, next);
+      after = cm.getScrollInfo().top;
+      remember(writtenCm, after);
+    }
+    if (done || Math.abs(after - cur) < 0.5) { glide = null; return; }
+    frame = raf(step);
+  }
+
+  function remember(list, pos) {
+    list.push(pos);
+    if (list.length > 4) list.shift();
+  }
+
+  // True when `pos` is one of our recent writes; drops it and anything older.
+  function isEcho(list, pos) {
+    const i = list.findIndex((v) => Math.abs(pos - v) <= 1);
+    if (i < 0) return false;
+    list.splice(0, i + 1);
+    return true;
+  }
+
   function sync(from) {
     if (destroyed || !isActive()) return;
     bind();
@@ -164,34 +231,19 @@ export function createScrollSync(cm, opts = {}) {
     lastSrcMax = srcMax;
     lastPvMax = pvMax;
     const pairs = buildScrollPairs(anchors(pv), srcMax, pvMax);
-    if (from === 'src') {
-      const target = mapScroll(pairs, info.top, 'src', 'pv');
-      if (Math.abs(target - pv.scrollTop) <= 1) return;
-      pv.scrollTop = target;
-      expectPv = pv.scrollTop;
-    } else {
-      const target = mapScroll(pairs, pv.scrollTop, 'pv', 'src');
-      if (Math.abs(target - info.top) <= 1) return;
-      cm.scrollTo(null, target);
-      expectCm = cm.getScrollInfo().top;
-    }
+    if (from === 'src') glideTo('pv', mapScroll(pairs, info.top, 'src', 'pv'), pv.scrollTop);
+    else glideTo('cm', mapScroll(pairs, pv.scrollTop, 'pv', 'src'), info.top);
   }
 
   function onCm() {
-    if (expectCm !== null) {
-      const e = expectCm;
-      expectCm = null;
-      if (Math.abs(cm.getScrollInfo().top - e) <= 1) return;
-    }
+    if (isEcho(writtenCm, cm.getScrollInfo().top)) return;
+    if (glide && glide.pane === 'cm') glide = null;
     sync('src');
   }
 
   function onPv() {
-    if (expectPv !== null && boundPv) {
-      const e = expectPv;
-      expectPv = null;
-      if (Math.abs(boundPv.scrollTop - e) <= 1) return;
-    }
+    if (boundPv && isEcho(writtenPv, boundPv.scrollTop)) return;
+    if (glide && glide.pane === 'pv') glide = null;
     sync('pv');
   }
 
@@ -200,14 +252,16 @@ export function createScrollSync(cm, opts = {}) {
 
   return {
     refresh() {
-      expectCm = null;
-      expectPv = null;
+      stopGlide();
+      writtenCm.length = 0;
+      writtenPv.length = 0;
       lastSrcMax = 0;
       lastPvMax = 0;
       bind();
     },
     destroy() {
       destroyed = true;
+      stopGlide();
       try { cm.off('scroll', onCm); } catch (_) { /* editor already gone */ }
       if (boundPv) boundPv.removeEventListener('scroll', onPv);
       boundPv = null;
