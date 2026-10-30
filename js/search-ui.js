@@ -20,6 +20,12 @@ export function formatAge(ms) {
   return `${Math.round(seconds / 86400)}d ago`;
 }
 
+/** "1 result" / "12 results" / "50 of 73 results" (when the list was capped). */
+export function formatResultCount(shown, total) {
+  const word = total === 1 ? 'result' : 'results';
+  return shown < total ? `${shown} of ${total} ${word}` : `${total} ${word}`;
+}
+
 /**
  * @param {object} deps
  * @param {HTMLInputElement} deps.inputEl
@@ -67,7 +73,7 @@ export function createSearchUI(deps) {
     if (!sync || !sync.index) return;
 
     const generation = ++renderGeneration;
-    const hits = sync.index.query(query);
+    const { hits, total } = sync.index.queryWithTotal(query);
     showResults();
 
     resultsEl.innerHTML = '';
@@ -78,6 +84,11 @@ export function createSearchUI(deps) {
       resultsEl.appendChild(empty);
       return;
     }
+
+    const countEl = document.createElement('div');
+    countEl.className = 'search-count';
+    countEl.textContent = formatResultCount(hits.length, total);
+    resultsEl.appendChild(countEl);
 
     hits.forEach((hit) => {
       const row = document.createElement('div');

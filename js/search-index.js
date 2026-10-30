@@ -251,12 +251,22 @@ export class SearchIndex {
   }
 
   /**
+   * @returns {{hits: Array<{path: string, title: string, score: number}>, total: number}}
+   *   hits ordered by MiniSearch score and capped at `limit`; total is the
+   *   number of matches before the cap, so the UI can say "50 of 73".
+   */
+  queryWithTotal(text, { limit = MAX_RESULTS } = {}) {
+    if (!String(text || '').trim()) return { hits: [], total: 0 };
+    const all = this.searcher.search(text);
+    return { hits: all.slice(0, limit).map(toResult), total: all.length };
+  }
+
+  /**
    * @returns {Array<{path: string, title: string, score: number}>} ordered by
    *   MiniSearch score, capped at MAX_RESULTS.
    */
   query(text, { limit = MAX_RESULTS } = {}) {
-    if (!String(text || '').trim()) return [];
-    return this.searcher.search(text).slice(0, limit).map(toResult);
+    return this.queryWithTotal(text, { limit }).hits;
   }
 
   clear() {

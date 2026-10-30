@@ -412,3 +412,21 @@ test('extractTitle skips headings inside tilde fences too', () => {
   const body = '~~~\n# not a title\n~~~\n# Real\n';
   assert.equal(extractTitle('a.md', body), 'Real');
 });
+
+test('queryWithTotal reports the full match count when the list is capped', () => {
+  const index = newIndex();
+  index.addAll([
+    { path: 'a.md', body: 'walrus one' },
+    { path: 'b.md', body: 'walrus two' },
+    { path: 'c.md', body: 'walrus three' },
+  ]);
+  const { hits, total } = index.queryWithTotal('walrus', { limit: 2 });
+  assert.equal(hits.length, 2);
+  assert.equal(total, 3);
+  assert.deepEqual(index.query('walrus', { limit: 2 }).map((h) => h.path), hits.map((h) => h.path));
+});
+
+test('queryWithTotal returns nothing for an empty query', () => {
+  const index = populated();
+  assert.deepEqual(index.queryWithTotal('   '), { hits: [], total: 0 });
+});

@@ -364,6 +364,11 @@ with sync_playwright() as p:
     result_paths = page.eval_on_selector_all(".search-result", "els => els.map(e => e.dataset.path)")
     assert "Notes/Test note.md" in result_paths, \
         f"search did not find the note: {result_paths}"
+    # ...and the count line above the hits matches the number of rows shown.
+    count_text = page.inner_text(".search-count")
+    expected_count = f"{len(result_paths)} result" + ("" if len(result_paths) == 1 else "s")
+    assert count_text == expected_count, \
+        f"result count line {count_text!r} does not match {len(result_paths)} rows"
     # The tree must be REPLACED by the results, not shown next to them.
     assert page.locator(".file-item.folder:visible").count() == 0, \
         "the file tree is still visible while search results are shown"

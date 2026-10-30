@@ -300,6 +300,7 @@ button.secondary:hover { background: #21262d; }
   border-radius: 2px;
 }
 .search-empty { padding: 12px; color: var(--muted); }
+.search-count { padding: 2px 12px 4px; font-size: 11px; color: var(--muted); }
 
 /* ===== File tree ===== */
 .file-tree {
