@@ -100,3 +100,21 @@ test('getFileB64 still throws when content is missing and size is unknown', asyn
   const client = new GitHubClient({ token: 't', owner: 'o', repo: 'r' });
   await assert.rejects(client.getFileB64('x.md'), /Empty contents/);
 });
+
+test('getBlobB64 returns empty content for a 0-byte blob without throwing', async () => {
+  // An empty file version in history (e.g. a .gitkeep) comes back as content '' and size 0.
+  const calls = mockContentsFetch(
+    { content: '' },
+    { content: '', size: 0, sha: 'e69de29bb2d1d6434b8b29ae775ad8c2e48c5391', encoding: 'base64' }
+  );
+  const client = new GitHubClient({ token: 't', owner: 'o', repo: 'r' });
+  const out = await client.getBlobB64('e69de29bb2d1d6434b8b29ae775ad8c2e48c5391');
+  assert.deepEqual(out, { b64: '', sha: 'e69de29bb2d1d6434b8b29ae775ad8c2e48c5391', encoding: 'base64' });
+  assert.equal(calls.length, 1, `expected 1 request, got: ${calls.join(', ')}`);
+});
+
+test('getBlobB64 still throws when content is missing and size is unknown', async () => {
+  mockContentsFetch({ content: '' }, { content: '', sha: 'sha-x' });
+  const client = new GitHubClient({ token: 't', owner: 'o', repo: 'r' });
+  await assert.rejects(client.getBlobB64('sha-x'), /Empty blob/);
+});

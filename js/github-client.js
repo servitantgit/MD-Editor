@@ -164,6 +164,7 @@ export class GitHubClient {
     const res = await this.request(`/repos/${this.owner}/${this.repo}/git/blobs/${sha}`);
     if (!res.ok) throw await this._error(res, sha);
     const data = await res.json();
+    if (data.size === 0) return { b64: '', sha: data.sha, encoding: data.encoding || 'base64' };
     if (!data.content) throw new GitHubApiError(`Empty blob (${sha})`, res.status);
     return { b64: String(data.content).replace(/\n/g, ''), sha: data.sha, encoding: data.encoding };
   }
