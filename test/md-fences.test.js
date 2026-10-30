@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { splitByFences, replaceOutsideFences } from '../js/md-fences.js';
+import * as fences from '../js/md-fences.js';
 
 const parts = (text) => splitByFences(text).map((s) => [s.code, s.text]);
 
@@ -95,4 +96,18 @@ test('splitByFences reports the start offset of every segment', () => {
 test('replaceOutsideFences applies the replacement only outside fenced code', () => {
   const text = 'x1\n```\nx2\n```\nx3\n';
   assert.equal(replaceOutsideFences(text, /x\d/g, (m) => m.toUpperCase()), 'X1\n```\nx2\n```\nX3\n');
+});
+
+test('findCodeSpans finds single and double backtick code spans', () => {
+  const text = 'a `x` b ``y`z`` c';
+  assert.deepEqual(fences.findCodeSpans(text).map(([s, e]) => text.slice(s, e)), ['`x`', '``y`z``']);
+});
+
+test('findCodeSpans ignores an unmatched backtick and backticks in different paragraphs', () => {
+  assert.deepEqual(fences.findCodeSpans('a ` b'), []);
+  assert.deepEqual(fences.findCodeSpans('a `\n\nb `'), []);
+});
+
+test('replaceOutsideFences skips matches that start inside inline code', () => {
+  assert.equal(fences.replaceOutsideFences('`x1` x2 ``x3`` x4', /x\d/g, (m) => m.toUpperCase()), '`x1` X2 ``x3`` X4');
 });

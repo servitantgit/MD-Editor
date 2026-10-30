@@ -11,6 +11,8 @@
 //   followed only by spaces/tabs;
 // * an unclosed fence runs to the end of the text;
 // * fence lines themselves belong to the code segment.
+// findCodeSpans() finds inline code (`x`, ``x``); replaceOutsideFences() also
+// skips every match that starts inside inline code.
 
 const OPEN_RE = /^[ \t]*(`{3,}|~{3,})(.*)$/;
 const CLOSE_RE = /^[ \t]*(`{3,}|~{3,})[ \t]*$/;
@@ -64,7 +66,55 @@ export function mapOutsideFences(text, fn) {
     .join('');
 }
 
-/** Same as text.replace(re, replacer), but fenced code blocks are left untouched. */
+/**
+ * Inline code spans as [start, end) offsets.
+ * A run of N backticks is closed by the next run of exactly N backticks;
+ * an unmatched run is literal text, and a span never crosses a blank line.
+ * Backslash-escaped backticks are not special-cased.
+ * @param {string} text
+ * @returns {Array<[number, number]>}
+ */
+export function findCodeSpans(text) {
+  const src = String(text ?? '');
+  const spans = [];
+  const runRe = /`+/g;
+  let m;
+  while ((m = runRe.exec(src)) !== null) {
+    const len = m[0].length;
+    const from = m.index + len;
+    const closeRe = /`+/g;
+    closeRe.lastIndex = from;
+    let c;
+    let end = -1;
+    while ((c = closeRe.exec(src)) !== null) {
+      if (c[0].length === len) {
+        end = c.index + len;
+        break;
+      }
+    }
+    if (end < 0) continue;
+    if (/\n[ \t]*\r?\n/.test(src.slice(from, end - len))) continue;
+    spans.push([m.index, end]);
+    runRe.lastIndex = end;
+  }
+  return spans;
+}
+
+/**
+ * Same as text.replace(re, replacer), but fenced code blocks are left untouched,
+ * and so is every match that STARTS inside inline code. A link whose text holds
+ * code, such as [`a.md`](a.md), starts outside it and is still replaced.
+ */
 export function replaceOutsideFences(text, re, replacer) {
-  return mapOutsideFences(text, (chunk) => chunk.replace(re, replacer));
+  return mapOutsideFences(text, (chunk) => {
+    const spans = findCodeSpans(chunk);
+    if (!spans.length) return chunk.replace(re, replacer);
+    return chunk.replace(re, (...args) => {
+      // replace() passes (match, ...groups, offset, string[, namedGroups]).
+      const last = args[args.length - 1];
+      const offset = args[args.length - (typeof last === 'object' && last !== null ? 3 : 2)];
+      if (spans.some(([s, e]) => offset >= s && offset < e)) return args[0];
+      return replacer(...args);
+    });
+  });
 }

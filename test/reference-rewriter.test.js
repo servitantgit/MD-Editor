@@ -112,3 +112,33 @@ test('updateReferencesInFile reports no change when the only matching link is in
   assert.equal(changed, false);
   assert.equal(out, text);
 });
+
+test('updateReferencesInFile leaves links inside inline code untouched', () => {
+  for (const text of ['See `[a](b.md)` here\n', 'x ``[a](b.md)`` y\n']) {
+    const { changed, text: out } = updateReferencesInFile(text, '', 'b.md', 'x/b.md');
+    assert.equal(changed, false, text);
+    assert.equal(out, text);
+  }
+});
+
+test('updateReferencesInFile rewrites a real link next to inline code but not the code', () => {
+  const { changed, text: out } = updateReferencesInFile('`[a](b.md)` and [c](b.md)\n', '', 'b.md', 'x/b.md');
+  assert.equal(changed, true);
+  assert.equal(out, '`[a](b.md)` and [c](x/b.md)\n');
+});
+
+test('rewriteOwnRelativeLinks leaves an image inside inline code untouched', () => {
+  const out = rewriteOwnRelativeLinks('`![i](../a.png)` ![j](../a.png)\n', 'd', 'd/e');
+  assert.equal(out, '`![i](../a.png)` ![j](../../a.png)\n');
+});
+
+test('links with code in the text, lone backticks and backticks across paragraphs are still rewritten', () => {
+  const cases = [
+    ['[`b.md`](b.md)\n', '[`b.md`](x/b.md)\n'],
+    ['a ` b [a](b.md)\n', 'a ` b [a](x/b.md)\n'],
+    ['a `\n\n[a](b.md) `\n', 'a `\n\n[a](x/b.md) `\n'],
+  ];
+  for (const [text, expected] of cases) {
+    assert.equal(updateReferencesInFile(text, '', 'b.md', 'x/b.md').text, expected, text);
+  }
+});
