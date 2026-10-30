@@ -22,6 +22,10 @@ Prefer automated coverage in `test/*.test.js` and `e2e_smoke_test.py` when pract
 - [ ] Inline images: Space/Backspace near an image keep the caret local (no jump to end).
 - [ ] Preview shows `![x](pic.png)` inside a fenced code block as code, not as an image.
 - [ ] Clicking a checkbox in Preview ticks the matching line, also after a code block that contains a ```` ```js ```` line.
+- [ ] Live, minimap closed: the wheel over Source moves Preview, and the wheel over Preview moves Source.
+- [ ] Moving the mouse from one pane to the other while scrolling: the panes do not fight; the wheel acts on the pane under the mouse.
+- [ ] Near an image the top of Preview shows the same image as the line at the top of Source; Preview glides, no jolts.
+- [ ] Live, minimap open: clicking and dragging on the map moves both panes.
 - [ ] External images (`https://…`, shields.io) render; GitHub Actions badge paths like `../../actions/workflows/….yml/badge.svg` resolve to `https://github.com/{owner}/{repo}/actions/...`.
 - [ ] HTML files: Live/Preview show content in iframe; fullscreen stays in the current layout mode.
 - [ ] Open a large HTML file (>1MB srcdoc) in Live layout on first open — must render, no toggle needed.

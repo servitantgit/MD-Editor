@@ -71,6 +71,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Live layout: Source and Preview scrolled out of step.** The sync lived inside the minimap, so with the map closed the panes scrolled on their own (and a mouse wheel kept driving the pane where the gesture started). It now has its own module, works with the map open or closed, maps the position by content (images and headings line up, not percentages) and the following pane glides instead of leaping across tall images (`js/scroll-sync.js`, `js/minimap.js`, `js/app.js`)
 - **Clicking a checkbox in Preview could tick the wrong line** in a note with a ```` ```js ```` line inside a code block or an inline ```` ```x``` ```` line. Checkboxes now use the same code-block rules as the rest of the app (`js/markdown-commands.js`)
 - **Links inside inline code were rewritten on move/rename.** An example such as `` `[a](b.md)` `` is left as it is now; a link whose text holds code, such as ``[`b.md`](b.md)``, is still updated (`js/md-fences.js`)
 - **Restoring an empty file version from History failed with "Empty blob".** A 0-byte blob (for example a `.gitkeep`) is now read as empty content (`js/github-client.js`)

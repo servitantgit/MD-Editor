@@ -55,8 +55,8 @@ export function createEditor(textareaEl, deps) {
     // (scrollHeight - clientHeight) with NO zero guard, so during relayout
     // (cm.refresh() when the minimap opens) ratio = top/0 = Infinity and the
     // pane is thrown to the end. Its boolean flags also invert under async
-    // event bursts. Each pane then scrolls on its own; the minimap only
-    // repaints its viewport rectangle and never writes scrollTop.
+    // event bursts. Pane sync lives in js/scroll-sync.js instead (by content,
+    // independent of the minimap); the minimap only paints and handles clicks.
     syncSideBySidePreviewScroll: false,
     placeholder: 'Start writing…',
     // Layout (Source / Live / Preview) is owned by the app header — do NOT put
