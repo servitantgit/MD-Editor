@@ -19,7 +19,7 @@ export const BODY_CACHE_LIMIT = 200;
  * the searcher fields/options). A stored index with a different version is
  * dropped on load and rebuilt in the background.
  */
-export const INDEX_VERSION = 2;
+export const INDEX_VERSION = 3;
 
 /** Characters of context kept before / after the highlighted term. */
 export const SNIPPET_BEFORE = 15;

@@ -11,11 +11,26 @@
 //   followed only by spaces/tabs;
 // * an unclosed fence runs to the end of the text;
 // * fence lines themselves belong to the code segment.
+// * a fence may sit inside a blockquote ("> ```"); it is closed by a fence at
+//   the same quote depth, or when the quote ends (fewer '>' or a blank line).
 // findCodeSpans() finds inline code (`x`, ``x``); replaceOutsideFences() also
 // skips every match that starts inside inline code.
 
 const OPEN_RE = /^[ \t]*(`{3,}|~{3,})(.*)$/;
 const CLOSE_RE = /^[ \t]*(`{3,}|~{3,})[ \t]*$/;
+const QUOTE_RE = /^[ \t]*>[ \t]?/;
+
+/** Strips blockquote markers: "> > x" -> { depth: 2, rest: "x" }. */
+function unquote(line) {
+  let depth = 0;
+  let rest = line;
+  let m;
+  while ((m = QUOTE_RE.exec(rest)) !== null) {
+    depth++;
+    rest = rest.slice(m[0].length);
+  }
+  return { depth, rest };
+}
 
 /**
  * @param {string} text
@@ -25,6 +40,7 @@ export function splitByFences(text) {
   const src = String(text ?? '');
   const out = [];
   let fence = null;
+  let fenceDepth = 0;
   let pos = 0;
   let buf = '';
   let bufStart = 0;
@@ -36,14 +52,18 @@ export function splitByFences(text) {
   for (const raw of src.split(/(?<=\n)/)) {
     const line = raw.replace(/\n$/, '').replace(/\r$/, '');
     let isCode = false;
+    const q = unquote(line);
+    // The quote that held the fence has ended, and so has the fence.
+    if (fence && q.depth < fenceDepth) fence = null;
     if (fence) {
       isCode = true;
-      const m = CLOSE_RE.exec(line);
+      const m = q.depth === fenceDepth ? CLOSE_RE.exec(q.rest) : null;
       if (m && m[1][0] === fence[0] && m[1].length >= fence.length) fence = null;
     } else {
-      const m = OPEN_RE.exec(line);
+      const m = OPEN_RE.exec(q.rest);
       if (m && !(m[1][0] === '`' && m[2].includes('`'))) {
         fence = m[1];
+        fenceDepth = q.depth;
         isCode = true;
       }
     }

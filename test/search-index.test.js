@@ -446,5 +446,9 @@ test('stripMarkdown: an inline ```x``` line does not hide the text below it', ()
 
 test('INDEX_VERSION was bumped for the shared fence rules in stripMarkdown', () => {
   // Stored indexes built with the old rules must be rebuilt in every browser.
-  assert.equal(INDEX_VERSION, 2);
+  assert.equal(INDEX_VERSION, 3);
+});
+
+test('stripMarkdown: code in a fence inside a blockquote does not leak into the index', () => {
+  assert.equal(stripMarkdown('> intro\n> ```\n> QUOTECODE\n> ```\nafter words'), 'intro after words');
 });

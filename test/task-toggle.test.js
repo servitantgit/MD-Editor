@@ -64,3 +64,9 @@ test('task toggle: an inline ```x``` line does not open a fence', () => {
     { line: 1, ch: 3, checked: false },
   ]);
 });
+
+test('task toggle: a task inside a fence inside a blockquote is not counted', () => {
+  assert.deepEqual(findTaskLines('> ```\n> - [ ] fake\n> ```\n\n- [ ] real'), [
+    { line: 4, ch: 3, checked: false },
+  ]);
+});

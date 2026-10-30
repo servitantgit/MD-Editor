@@ -111,3 +111,32 @@ test('findCodeSpans ignores an unmatched backtick and backticks in different par
 test('replaceOutsideFences skips matches that start inside inline code', () => {
   assert.equal(fences.replaceOutsideFences('`x1` x2 ``x3`` x4', /x\d/g, (m) => m.toUpperCase()), '`x1` X2 ``x3`` X4');
 });
+
+const fencedLines = (text) => {
+  const out = [];
+  let line = 0;
+  for (const s of splitByFences(text)) {
+    const n = (s.text.match(/\n/g) || []).length + (s.text.endsWith('\n') ? 0 : 1);
+    if (s.code) for (let i = line; i < line + n; i++) out.push(i);
+    line += n;
+  }
+  return out;
+};
+
+test('splitByFences recognizes a fence inside a blockquote', () => {
+  const text = '> intro\n> ```bash\n> # install\n> code\n> ```\n\nafter\n';
+  assert.deepEqual(fencedLines(text), [1, 2, 3, 4]);
+  assert.equal(splitByFences(text).map((s) => s.text).join(''), text);
+});
+
+test('splitByFences recognizes a fence inside a nested blockquote', () => {
+  assert.deepEqual(fencedLines('>> ```\n> > code\n>> ```\nafter'), [0, 1, 2]);
+});
+
+test('splitByFences: the end of a blockquote also ends a fence opened inside it', () => {
+  assert.deepEqual(fencedLines('> ```\n> code\nplain text\n'), [0, 1]);
+});
+
+test('splitByFences: a quote marker inside a plain fence is just code', () => {
+  assert.deepEqual(fencedLines('```\n> ```\nstill code\n```\nafter'), [0, 1, 2, 3]);
+});
