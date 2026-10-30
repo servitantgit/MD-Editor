@@ -122,10 +122,10 @@ export class SearchStore {
   }
 
   /**
-   * Runs `fn(store)` inside one transaction. The returned promise settles with
-   * whatever the request assigned to `request.onsuccess`'s `result` holder —
-   * reading a value requires waiting for the request, so the caller stashes it
-   * on `this._result` rather than returning it from a synchronous callback.
+   * Runs `fn(store, setResult)` inside one transaction. The returned promise
+   * settles with whatever the callback passed to `setResult` — reading a
+   * value requires waiting for the request, so the callback stashes it instead
+   * of returning it from a synchronous function.
    */
   _tx(mode, fn) {
     return new Promise((resolve, reject) => {
@@ -136,12 +136,15 @@ export class SearchStore {
         reject(err);
         return;
       }
-      tx.oncomplete = () => resolve(this._result);
+      // Local holder, not a field: two overlapping transactions would otherwise
+      // overwrite each other's result (get(A) resolving with record B, all()
+      // resolving with a single record instead of an array).
+      let result;
+      tx.oncomplete = () => resolve(result);
       tx.onerror = () => reject(tx.error || new Error('transaction failed'));
       tx.onabort = () => reject(tx.error || new Error('transaction aborted'));
-      this._result = undefined;
       try {
-        fn(tx.objectStore(STORE_NAME), (value) => { this._result = value; });
+        fn(tx.objectStore(STORE_NAME), (value) => { result = value; });
       } catch (err) {
         try { tx.abort(); } catch (_) { /* already finishing */ }
         reject(err);

@@ -281,6 +281,32 @@ test('open() is idempotent and concurrent callers share one open', async () => {
   assert.equal(await store.open(), true, 'a second call must not reopen');
 });
 
+test('overlapping get() calls each resolve with their own record', async () => {
+  // Every transaction used to share one this._result field: the second
+  // request's onsuccess overwrote the first one's value before it completed.
+  const store = newStore();
+  await store.put({ key: KEY, serializedIndex: 'MINE' });
+  await store.put({ key: OTHER_KEY, serializedIndex: 'THEIRS' });
+
+  const [mine, theirs] = await Promise.all([store.get(KEY), store.get(OTHER_KEY)]);
+
+  assert.equal(mine && mine.key, KEY, 'get(KEY) must not resolve with another record');
+  assert.equal(theirs && theirs.key, OTHER_KEY);
+});
+
+test('all() overlapping a get() still resolves with an array', async () => {
+  // evictExpired/evictOldest call records.filter(); a non-array here degrades the session.
+  const store = newStore();
+  await store.put({ key: KEY, serializedIndex: 'MINE' });
+  await store.put({ key: OTHER_KEY, serializedIndex: 'THEIRS' });
+
+  const [records, theirs] = await Promise.all([store.all(), store.get(OTHER_KEY)]);
+
+  assert.ok(Array.isArray(records), 'all() must resolve with an array, got ' + JSON.stringify(records));
+  assert.equal(records.length, 2);
+  assert.equal(theirs && theirs.key, OTHER_KEY);
+});
+
 test('a record whose manifest is empty still round-trips', async () => {
   // The diff produces exactly this when a repo has no .md files at all.
   const store = newStore();
