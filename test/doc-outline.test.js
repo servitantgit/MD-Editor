@@ -49,3 +49,15 @@ test('empty headings and hash-only lines are skipped', () => {
     { line: 2, level: 1, text: 'Real' },
   ]);
 });
+
+test('a ```js line does not close an open fence', () => {
+  assert.deepEqual(parseHeadingOutline('```\n```js\n# inside\n```\n# after'), [
+    { line: 4, level: 1, text: 'after' },
+  ]);
+});
+
+test('an inline ```x``` line does not open a fence', () => {
+  assert.deepEqual(parseHeadingOutline('```x``` inline\n# real'), [
+    { line: 1, level: 1, text: 'real' },
+  ]);
+});
