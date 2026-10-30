@@ -20,6 +20,7 @@ Prefer automated coverage in `test/*.test.js` and `e2e_smoke_test.py` when pract
 - [ ] Source / Live / Preview layouts: Preview is full width with source hidden; Live is 50/50; Source is editor only.
 - [ ] Preview follows the active tab after a switch (no stale document).
 - [ ] Inline images: Space/Backspace near an image keep the caret local (no jump to end).
+- [ ] Preview shows `![x](pic.png)` inside a fenced code block as code, not as an image.
 - [ ] External images (`https://…`, shields.io) render; GitHub Actions badge paths like `../../actions/workflows/….yml/badge.svg` resolve to `https://github.com/{owner}/{repo}/actions/...`.
 - [ ] HTML files: Live/Preview show content in iframe; fullscreen stays in the current layout mode.
 - [ ] Open a large HTML file (>1MB srcdoc) in Live layout on first open — must render, no toggle needed.
@@ -45,12 +46,17 @@ Prefer automated coverage in `test/*.test.js` and `e2e_smoke_test.py` when pract
 - [ ] Repo switcher in the header can change owner/repo without a full re-login.
 - [ ] Sign-in is GitHub-first; repo picker after OAuth (no mandatory owner/repo before login).
 - [ ] No PWA manifest / standalone (OAuth + sessionStorage isolation); responsive CSS remains.
+- [ ] Moving a folder created in the editor (it holds an empty `.gitkeep`) works - no "Empty contents" error.
+- [ ] Moving or renaming a note does not change links or images inside fenced code blocks.
 
 ## Search / backlinks / history
 
 - [ ] Search replaces the tree with hits; clear restores the tree.
 - [ ] Backlinks panel lists notes that link to the current file.
 - [ ] History panel toggles open/closed; does not leave a stuck open state after Escape.
+- [ ] Search results start right under the search box (no empty gap above them).
+- [ ] A `# comment` inside a code block does not become the note title in search results.
+- [ ] History: Restore of an empty file version (e.g. `.gitkeep`) loads an empty file - no "Empty blob" error.
 
 ## PDF / export
 
@@ -60,5 +66,5 @@ Prefer automated coverage in `test/*.test.js` and `e2e_smoke_test.py` when pract
 
 ```bash
 npm test
-python3 e2e_smoke_test.py
+python e2e_smoke_test.py   # python3 on macOS/Linux
 ```

@@ -70,6 +70,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Restoring an empty file version from History failed with "Empty blob".** A 0-byte blob (for example a `.gitkeep`) is now read as empty content (`js/github-client.js`)
+- **Search storage: two reads at the same time could return each other's result** - in the worst case the stored index of another repository or branch, or a needless fall-back to the session-only index. Each transaction now keeps its own result (`js/search-store.js`)
 - **Moving a folder created in the editor failed with "Empty contents or file too large".** Every such folder has an empty `.gitkeep`, and an empty file was treated as "content missing". 0-byte files are now read as empty content (`js/github-client.js`)
 - **Links and images inside code blocks were rewritten on move/rename.** An example such as `![x](pic.png)` inside a fenced code block was changed and committed like a real link. Code blocks are now skipped (`js/md-fences.js`, `js/reference-rewriter.js`)
 - **Notes whose links could not be updated after a move are now reported** instead of being skipped silently
@@ -199,7 +201,3 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Initial prototype (single-file implementation)
 - Basic markdown editing
 - Simple file listing
-
-[2.2.0]: https://github.com/USER/MD-Editor/compare/v2.1.0...v2.2.0
-[2.1.0]: https://github.com/USER/MD-Editor/compare/v2.0.0...v2.1.0
-[2.0.0]: https://github.com/USER/MD-Editor/releases/tag/v2.0.0
