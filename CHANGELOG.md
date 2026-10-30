@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Search shows how many results it found** - "12 results", or "50 of 73 results" when the list is capped at 50 (`js/search-index.js`, `js/search-ui.js`)
 - **More toolbar buttons:** strikethrough, task list, inline code, table, horizontal line
 - **Clickable checkboxes in Preview** - ticking a task in the preview changes `[ ]` / `[x]` in the text
 - **Pasted and dropped images are compressed** before upload: at most 1920 px wide, and screenshots without transparency are saved as JPEG
@@ -70,6 +71,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Clicking a checkbox in Preview could tick the wrong line** in a note with a ```` ```js ```` line inside a code block or an inline ```` ```x``` ```` line. Checkboxes now use the same code-block rules as the rest of the app (`js/markdown-commands.js`)
+- **Links inside inline code were rewritten on move/rename.** An example such as `` `[a](b.md)` `` is left as it is now; a link whose text holds code, such as ``[`b.md`](b.md)``, is still updated (`js/md-fences.js`)
 - **Restoring an empty file version from History failed with "Empty blob".** A 0-byte blob (for example a `.gitkeep`) is now read as empty content (`js/github-client.js`)
 - **Search storage: two reads at the same time could return each other's result** - in the worst case the stored index of another repository or branch, or a needless fall-back to the session-only index. Each transaction now keeps its own result (`js/search-store.js`)
 - **Moving a folder created in the editor failed with "Empty contents or file too large".** Every such folder has an empty `.gitkeep`, and an empty file was treated as "content missing". 0-byte files are now read as empty content (`js/github-client.js`)
