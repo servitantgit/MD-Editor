@@ -19,7 +19,7 @@ export const BODY_CACHE_LIMIT = 200;
  * the searcher fields/options). A stored index with a different version is
  * dropped on load and rebuilt in the background.
  */
-export const INDEX_VERSION = 1;
+export const INDEX_VERSION = 2;
 
 /** Characters of context kept before / after the highlighted term. */
 export const SNIPPET_BEFORE = 15;
@@ -75,9 +75,12 @@ export function extractTitle(path, body) {
  * which is precisely why buildSnippet() must escape its output.
  */
 export function stripMarkdown(body) {
-  return String(body || '')
-    .replace(/```[\s\S]*?```/g, ' ') // fenced code
-    .replace(/~~~[\s\S]*?~~~/g, ' ') // alternative fence
+  // Fenced code goes first, by the shared rules of md-fences.js (a ```js line
+  // does not close a block, an unclosed fence runs to the end of the note).
+  const prose = splitByFences(String(body || ''))
+    .map((seg) => (seg.code ? ' ' : seg.text))
+    .join('');
+  return prose
     .replace(/`[^`\n]*`/g, ' ') // inline code
     .replace(/!\[[^\]]*\]\([^)]*\)/g, ' ') // images (whole)
     .replace(/!\[[^\]]*\]\[[^\]]*\]/g, ' ')

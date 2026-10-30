@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import MiniSearch from 'minisearch';
 import {
+  INDEX_VERSION,
   SearchIndex,
   buildDocument,
   buildSnippet,
@@ -429,4 +430,21 @@ test('queryWithTotal reports the full match count when the list is capped', () =
 test('queryWithTotal returns nothing for an empty query', () => {
   const index = populated();
   assert.deepEqual(index.queryWithTotal('   '), { hits: [], total: 0 });
+});
+
+test('stripMarkdown: a ```js line inside an open fence does not leak code into the index', () => {
+  assert.equal(stripMarkdown('```\n```js\nSECRETCODE\n```\nafter words'), 'after words');
+});
+
+test('stripMarkdown: an unclosed fence does not leak code into the index', () => {
+  assert.equal(stripMarkdown('top words\n```\nUNCLOSED'), 'top words');
+});
+
+test('stripMarkdown: an inline ```x``` line does not hide the text below it', () => {
+  assert.equal(stripMarkdown('```x``` inline\nreal words below'), 'inline real words below');
+});
+
+test('INDEX_VERSION was bumped for the shared fence rules in stripMarkdown', () => {
+  // Stored indexes built with the old rules must be rebuilt in every browser.
+  assert.equal(INDEX_VERSION, 2);
 });
