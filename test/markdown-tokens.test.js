@@ -90,3 +90,27 @@ test('markdownToCanonicalHtml renders an image inside a fenced block as code, no
   assert.match(html, /<pre><code>!\[a\]\(x\.jpg\)/);
   assert.doesNotMatch(html, /md-img-wrap/);
 });
+
+// Imported inside each test: until findMarkdownImages exists every test fails
+// on its own (TypeError) instead of the whole file failing to load.
+const loadTokens = () => import('../js/markdown-tokens.js');
+const imageSrcs = async (text) => (await loadTokens()).findMarkdownImages(text).map((m) => m.src);
+
+test('findMarkdownImages: finds an image outside code with exact positions', async () => {
+  const { findMarkdownImages } = await loadTokens();
+  assert.deepEqual(findMarkdownImages('a ![x](p.png) b'), [
+    { fromIndex: 2, toIndex: 13, alt: 'x', src: 'p.png', raw: '![x](p.png)' },
+  ]);
+});
+
+test('findMarkdownImages: skips an image inside a fenced code block', async () => {
+  assert.deepEqual(await imageSrcs('```\n![a](a.png)\n```\n![b](b.png)'), ['b.png']);
+});
+
+test('findMarkdownImages: skips an image inside a fence inside a blockquote', async () => {
+  assert.deepEqual(await imageSrcs('> ```\n> ![a](a.png)\n> ```\n\n![b](b.png)'), ['b.png']);
+});
+
+test('findMarkdownImages: skips an image inside inline code', async () => {
+  assert.deepEqual(await imageSrcs('see `![a](a.png)` and ![b](b.png)'), ['b.png']);
+});

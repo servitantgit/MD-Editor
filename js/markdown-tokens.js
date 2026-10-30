@@ -4,7 +4,7 @@
 // so this module can be unit-tested in Node without jsdom.
 
 import { escapeAttr } from './paths.js';
-import { mapOutsideFences } from './md-fences.js';
+import { mapOutsideFences, splitByFences, findCodeSpans } from './md-fences.js';
 
 /** Transparent 1x1 GIF — placeholder until the real image source is loaded. */
 export const TRANSPARENT_PIXEL =
@@ -112,4 +112,35 @@ export function setImageAttrsInLine(line, occIndex, { src, alt, width }) {
     return `<img src="${escapeAttr(src)}" alt="${escapeAttr(alt)}"${widthAttr}>`;
   });
   return newLine;
+}
+
+const MD_IMAGE_RE = /!\[([^\]]*)\]\(\s*(\S+?)(?:\s+"([^"]*)")?\s*\)/g;
+
+/**
+ * Markdown images ![alt](src) with their offsets in `text`. Images inside
+ * fenced code (also inside blockquotes) or starting inside inline code are
+ * examples, not images, and are skipped. Used for the Source link widgets.
+ * @param {string} text
+ * @returns {Array<{fromIndex: number, toIndex: number, alt: string, src: string, raw: string}>}
+ */
+export function findMarkdownImages(text) {
+  const out = [];
+  for (const seg of splitByFences(String(text ?? ''))) {
+    if (seg.code) continue;
+    const spans = findCodeSpans(seg.text);
+    const re = new RegExp(MD_IMAGE_RE.source, 'g');
+    let m;
+    while ((m = re.exec(seg.text)) !== null) {
+      const off = m.index;
+      if (spans.some(([s, e]) => off >= s && off < e)) continue;
+      out.push({
+        fromIndex: seg.start + off,
+        toIndex: seg.start + off + m[0].length,
+        alt: m[1] || '',
+        src: m[2],
+        raw: m[0],
+      });
+    }
+  }
+  return out;
 }

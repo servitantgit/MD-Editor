@@ -10,6 +10,7 @@ import { attachResizeHandles, resolveAllImages } from './image-preview.js';
 import { kindFromPath } from './file-kind.js';
 import { dirnameOf, basenameOf, resolveRelativePath, isExternalOrAnchor, isImagePath, decodeUriSafe } from './paths.js';
 import { applyTaskList, findTaskLines } from './markdown-commands.js';
+import { findMarkdownImages } from './markdown-tokens.js';
 import { buildHtmlSrcdoc } from './html-preview.js';
 
 /**
@@ -486,19 +487,9 @@ export function createEditor(textareaEl, deps) {
       return;
     }
 
-    const text = cm.getValue();
-    const re = /!\[([^\]]*)\]\(\s*(\S+?)(?:\s+"([^"]*)")?\s*\)/g;
-    const matches = [];
-    let match;
-    while ((match = re.exec(text))) {
-      matches.push({
-        fromIndex: match.index,
-        toIndex: match.index + match[0].length,
-        alt: match[1] || '',
-        src: match[2],
-        raw: match[0],
-      });
-    }
+    // Images inside fenced or inline code are examples, not images: no widget
+    // (an atomic mark would also hide that code and make it uneditable).
+    const matches = findMarkdownImages(cm.getValue());
 
     // Key by image *content*, not absolute indices. CodeMirror marks already
     // track document edits; rebuilding on every Space/Backspace (index shift)

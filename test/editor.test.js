@@ -564,4 +564,28 @@ test('height handshake: md-editor-frame-height sizes the HTML iframe (single pan
   handle.destroy();
 });
 
-
+test('Source draws no image widget for an image inside a code block', async () => {
+  const dom = new JSDOM('<!doctype html><body></body>');
+  const DOC = 'intro\n\n```md\n![code](a.png)\n```\n\n![real](b.png)\n';
+  let currentPath = null;
+  const { codemirror } = installEnvironment(dom, { text: () => DOC });
+  const widgets = [];
+  codemirror.posFromIndex = (i) => ({ line: 0, ch: i });
+  codemirror.markText = (from, to, opts) => {
+    if (opts && opts.replacedWith) widgets.push(opts.replacedWith);
+    return { clear() {}, find() { return true; } };
+  };
+  const { createEditor } = await import('../js/editor.js');
+  const handle = createEditor(dom.window.document.createElement('textarea'), {
+    marked: {},
+    imageResolver: { resolve: async () => 'data:image/png;base64,QUJD' },
+    getCurrentPath: () => currentPath,
+    onImageUploadRequest: () => {},
+    onImagePaste: () => {},
+  });
+  currentPath = 'notes/a.md';
+  handle.refreshInlineImages();
+  await new Promise((r) => setTimeout(r, 0));
+  assert.equal(widgets.length, 1, 'only the image outside the code block gets a widget');
+  assert.equal(widgets[0].querySelector('.cm-inline-image-filename').textContent, 'b.png');
+});
