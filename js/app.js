@@ -27,6 +27,7 @@ import { parseHeadingOutline } from './doc-outline.js';
 import { createBacklinkIndex } from './backlinks.js';
 import { buildHtmlSrcdoc } from './html-preview.js';
 import { createMinimap } from './minimap.js';
+import { createScrollSync } from './scroll-sync.js';
 
 const els = {
   loginScreen: document.getElementById('login-screen'),
@@ -575,7 +576,7 @@ function showApp(owner, repo) {
   // CodeMirror 'change' handler, and re-wrapping an already-wrapped textarea
   // stacks a second editor. Tear the previous one down before building again.
   if (editorHandle) {
-    destroyMinimap(); editorHandle.destroy();
+    destroyMinimap(); destroyScrollSync(); editorHandle.destroy();
     editorHandle = null;
   }
   // Same reason: an in-flight sync holds a GitHubClient and an index belonging to
@@ -707,6 +708,9 @@ function showApp(owner, repo) {
   if (els.minimapWrap && !els.minimapWrap.classList.contains('hidden')) {
     ensureMinimap();
   }
+  // Scroll sync lives with the editor, not with the minimap: closing the map
+  // must not leave the Live panes scrolling on their own.
+  try { ensureScrollSync(); } catch (e) { console.warn(e); }
   ensureCommitHistoryUI().setup();
   workingTree.clearAll();
   ensureCommitHistoryUI().refreshBadge();
@@ -1562,6 +1566,27 @@ function ensureMinimap() {
   });
 }
 
+/** Live-layout scroll sync between CodeMirror and the preview pane (js/scroll-sync.js). */
+let scrollSyncHandle = null;
+
+function destroyScrollSync() {
+  if (scrollSyncHandle) {
+    try { scrollSyncHandle.destroy(); } catch (_) {}
+    scrollSyncHandle = null;
+  }
+}
+
+function ensureScrollSync() {
+  if (!editorHandle) return;
+  destroyScrollSync();
+  scrollSyncHandle = createScrollSync(editorHandle.easyMDE.codemirror, {
+    getPreviewEl: () => document.querySelector('.editor-area .EasyMDEContainer .editor-preview-side')
+      || document.querySelector('.editor-preview-side'),
+    // Source hides the preview, Preview hides CodeMirror: only Live has two panes.
+    isActive: () => layoutMode === 'split',
+  });
+}
+
 function setupMinimap() {
   if (!els.btnMinimap || els.btnMinimap.dataset.bound) return;
   els.btnMinimap.dataset.bound = '1';
@@ -1915,6 +1940,9 @@ function applyLayoutMode(mode) {
   // in Preview (hidden editor reads 0) — re-bind on every mode switch.
   if (minimapHandle) {
     try { minimapHandle.refresh(); } catch (_) {}
+  }
+  if (scrollSyncHandle) {
+    try { scrollSyncHandle.refresh(); } catch (_) {}
   }
 }
 

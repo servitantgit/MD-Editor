@@ -1161,6 +1161,34 @@ with sync_playwright() as p:
     assert img_src.startswith("data:image/"), f"unexpected img src: {img_src[:60]}"
     print("✓ preview image renders (real data: URL, not a stuck placeholder)")
 
+    # --- 3b. Live layout keeps both panes in step with the minimap CLOSED ---
+    # The sync used to live inside the minimap, so closing the map left the
+    # panes scrolling on their own (js/scroll-sync.js owns it now).
+    PV_SIDE = "document.querySelector('.editor-area .EasyMDEContainer .editor-preview-side')"
+    map_was_open = page.locator("#minimap-wrap:not(.hidden)").count() > 0
+    if map_was_open:
+        page.click("#btn-minimap")
+    page.click('#layout-toggle .layout-btn[data-mode="split"]')
+    page.wait_for_function(
+        "() => { const pv = " + PV_SIDE + "; return !!pv && !!pv.querySelector('.md-img-wrap')"
+        " && !pv.querySelector('.md-img-wrap.loading') && pv.scrollHeight > pv.clientHeight + 200; }",
+        timeout=8000,
+    )
+    page.evaluate("document.querySelector('.CodeMirror').CodeMirror.scrollTo(null, 1000)")
+    page.wait_for_timeout(200)
+    page.evaluate("document.querySelector('.CodeMirror').CodeMirror.scrollTo(null, 1600)")
+    page.wait_for_function("() => " + PV_SIDE + ".scrollTop > 100", timeout=3000)
+    pv_top = page.evaluate("() => " + PV_SIDE + ".scrollTop")
+    page.evaluate("() => { " + PV_SIDE + ".scrollTop = 0; }")
+    page.wait_for_function(
+        "() => document.querySelector('.CodeMirror').CodeMirror.getScrollInfo().top < 50",
+        timeout=3000,
+    )
+    print(f"✓ Live with the minimap closed: Source moves Preview (to {pv_top}px) and Preview moves Source back")
+    if map_was_open:
+        page.click("#btn-minimap")
+    page.click('#layout-toggle .layout-btn[data-mode="preview"]')
+
 
     # --- History drawer toggle ---
     page.click("#btn-history")
