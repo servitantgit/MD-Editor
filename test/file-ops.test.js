@@ -611,6 +611,55 @@ test('a failed delete keeps the unsaved edits and the draft (guard)', async () =
   assert.deepEqual(draftStore.deleted, []);
 });
 
+// The badge must be refreshed AFTER the deleted paths left the working tree:
+// each stub records how many changes were left at the moment it was called.
+test('deleting a file from the tree refreshes the Commit badge after the edits are forgotten', async () => {
+  const client = new FakeClient({ 'Notes/a.md': '# a' });
+  const allFiles = [{ path: 'Notes/a.md', sha: 'sha-Notes/a.md' }];
+  const workingTree = new WorkingTree();
+  workingTree.setDirty('Notes/a.md', '# unsaved', 'sha-Notes/a.md');
+  const { deps } = makeDeps({ client, allFiles, currentPath: null, currentSha: null, workingTree, draftStore: fakeDraftStore() });
+  const seen = [];
+  deps.refreshCommitBadge = () => seen.push(workingTree.getChangeCount());
+  const ops = createFileOps(deps);
+  await ops.onDeleteFileAt('Notes/a.md');
+  assert.deepEqual(client.deletes, ['Notes/a.md']);
+  assert.ok(seen.length > 0, 'the Commit badge was not refreshed');
+  assert.equal(seen[seen.length - 1], 0, 'the badge was refreshed before the edits were forgotten');
+});
+
+test('deleting the open file refreshes the Commit badge after the edits are forgotten', async () => {
+  const client = new FakeClient({ 'Notes/a.md': '# a' });
+  const allFiles = [{ path: 'Notes/a.md', sha: 'sha-Notes/a.md' }];
+  const workingTree = new WorkingTree();
+  workingTree.setDirty('Notes/a.md', '# unsaved', 'sha-Notes/a.md');
+  const { deps } = makeDeps({ client, allFiles, workingTree, draftStore: fakeDraftStore() });
+  deps.els.btnDelete = { disabled: false };
+  deps.els.btnSave = { disabled: false };
+  const seen = [];
+  deps.refreshCommitBadge = () => seen.push(workingTree.getChangeCount());
+  const ops = createFileOps(deps);
+  await ops.onDeleteFile();
+  assert.deepEqual(client.deletes, ['Notes/a.md']);
+  assert.ok(seen.length > 0, 'the Commit badge was not refreshed');
+  assert.equal(seen[seen.length - 1], 0, 'the badge was refreshed before the edits were forgotten');
+});
+
+test('deleting a folder refreshes the Commit badge after the edits are forgotten', async () => {
+  const client = new FakeClient({ 'Docs/a.md': '# a' });
+  const allFiles = [{ path: 'Docs/a.md', sha: 'sha-Docs/a.md' }];
+  const workingTree = new WorkingTree();
+  workingTree.setDirty('Docs/a.md', '# unsaved', 'sha-Docs/a.md');
+  workingTree.setDirty('Docs/new.md', '# never committed', null);
+  const { deps } = makeDeps({ client, allFiles, currentPath: null, currentSha: null, workingTree, draftStore: fakeDraftStore() });
+  const seen = [];
+  deps.refreshCommitBadge = () => seen.push(workingTree.getChangeCount());
+  const ops = createFileOps(deps);
+  await ops.onDeleteFolder('Docs');
+  assert.ok(seen.length > 0, 'the Commit badge was not refreshed');
+  assert.equal(seen[seen.length - 1], 0, 'the badge was refreshed before the edits were forgotten');
+});
+
 test('the delete confirm warns only when the file has unsaved edits', async () => {
   const client = new FakeClient({ 'Notes/a.md': '# a', 'Notes/b.md': '# b' });
   const allFiles = [{ path: 'Notes/a.md', sha: 'sha-Notes/a.md' }, { path: 'Notes/b.md', sha: 'sha-Notes/b.md' }];
