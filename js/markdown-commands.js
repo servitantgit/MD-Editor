@@ -2,6 +2,8 @@
 // Small editing commands for the toolbar. Pure line logic is kept separate from
 // CodeMirror so it can be unit-tested without a browser.
 
+import { splitByFences } from './md-fences.js';
+
 const TASK_RE = /^(\s*)[-*+] \[[ xX]\] /;
 const LIST_RE = /^(\s*)(?:[-*+]|\d+[.)]) /;
 const TASK_ITEM_RE = /^((?:[ \t]*>)*[ \t]*(?:[-*+]|\d+[.)])[ \t]+)\[([ xX])\](?=\s|$)/;
@@ -60,27 +62,29 @@ export function applyTaskList(cm) {
   });
   cm.focus();
 }
-const FENCE_RE = /^[ \t]*(`{3,}|~{3,})/;
 
 /**
  * Find task list items in markdown text, in document order, skipping fenced code.
- * The order matches the checkboxes marked renders in the preview.
+ * The order matches the checkboxes marked renders in the preview. Fences are
+ * recognised by md-fences.js, the same rules the rest of the app uses: a ```js
+ * line does not close an open block, and inline ```x``` does not open one.
  * @param {string} text
  * @returns {{line: number, ch: number, checked: boolean}[]} ch = column of the mark between [ ]
  */
 export function findTaskLines(text) {
-  const lines = String(text || '').split('\n');
+  const src = String(text || '');
+  const lines = src.split('\n');
+  const inFence = new Array(lines.length).fill(false);
+  let lineNo = 0;
+  for (const seg of splitByFences(src)) {
+    const count = (seg.text.match(/\n/g) || []).length + (seg.text.endsWith('\n') ? 0 : 1);
+    if (seg.code) for (let i = lineNo; i < lineNo + count; i++) inFence[i] = true;
+    lineNo += count;
+  }
   const out = [];
-  let fence = null;
   for (let i = 0; i < lines.length; i++) {
-    const line = lines[i].replace(/\r$/, '');
-    const f = line.match(FENCE_RE);
-    if (fence) {
-      if (f && f[1][0] === fence[0] && f[1].length >= fence.length) fence = null;
-      continue;
-    }
-    if (f) { fence = f[1]; continue; }
-    const m = line.match(TASK_ITEM_RE);
+    if (inFence[i]) continue;
+    const m = lines[i].replace(/\r$/, '').match(TASK_ITEM_RE);
     if (m) out.push({ line: i, ch: m[1].length + 1, checked: m[2] !== ' ' });
   }
   return out;

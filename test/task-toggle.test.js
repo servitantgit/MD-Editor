@@ -52,3 +52,15 @@ test('task toggle: ch always points at the mark character itself', () => {
     assert.equal(mark === ' ' ? false : true, t.checked);
   }
 });
+
+test('task toggle: a ```js line does not close an open fence', () => {
+  assert.deepEqual(findTaskLines('```\n```js\n- [ ] inside\n```\n- [ ] after'), [
+    { line: 4, ch: 3, checked: false },
+  ]);
+});
+
+test('task toggle: an inline ```x``` line does not open a fence', () => {
+  assert.deepEqual(findTaskLines('```x``` inline\n- [ ] real'), [
+    { line: 1, ch: 3, checked: false },
+  ]);
+});
