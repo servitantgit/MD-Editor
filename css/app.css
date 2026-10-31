@@ -403,6 +403,10 @@ button.secondary:hover { background: #21262d; }
 .folder-context-menu button:hover { background: #21262d; }
 .folder-context-menu button.danger { color: #ff7b72; }
 .folder-context-menu button.danger:hover { background: #2d1214; }
+.link-suggest-menu { max-height: 260px; overflow-y: auto; min-width: 260px; max-width: 480px; }
+.link-suggest-menu .link-suggest-item { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; }
+.link-suggest-menu .link-suggest-item.active { background: #21262d; }
+.link-suggest-path { font-size: 11px; color: var(--muted); }
 
 /* ===== Tabs: one per open file, above the toolbar ===== */
 .tab-bar {

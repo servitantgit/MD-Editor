@@ -28,6 +28,7 @@ import { createBacklinkIndex } from './backlinks.js';
 import { buildHtmlSrcdoc } from './html-preview.js';
 import { createMinimap } from './minimap.js';
 import { createScrollSync } from './scroll-sync.js';
+import { createLinkSuggest } from './link-suggest.js';
 
 const els = {
   loginScreen: document.getElementById('login-screen'),
@@ -576,7 +577,7 @@ function showApp(owner, repo) {
   // CodeMirror 'change' handler, and re-wrapping an already-wrapped textarea
   // stacks a second editor. Tear the previous one down before building again.
   if (editorHandle) {
-    destroyMinimap(); destroyScrollSync(); editorHandle.destroy();
+    destroyMinimap(); destroyScrollSync(); destroyLinkSuggest(); editorHandle.destroy();
     editorHandle = null;
   }
   // Same reason: an in-flight sync holds a GitHubClient and an index belonging to
@@ -711,6 +712,7 @@ function showApp(owner, repo) {
   // Scroll sync lives with the editor, not with the minimap: closing the map
   // must not leave the Live panes scrolling on their own.
   try { ensureScrollSync(); } catch (e) { console.warn(e); }
+  try { ensureLinkSuggest(); } catch (e) { console.warn(e); }
   ensureCommitHistoryUI().setup();
   workingTree.clearAll();
   ensureCommitHistoryUI().refreshBadge();
@@ -1584,6 +1586,25 @@ function ensureScrollSync() {
       || document.querySelector('.editor-preview-side'),
     // Source hides the preview, Preview hides CodeMirror: only Live has two panes.
     isActive: () => layoutMode === 'split',
+  });
+}
+
+/** Note suggestions while typing [[ in the editor (js/link-suggest.js). */
+let linkSuggestHandle = null;
+
+function destroyLinkSuggest() {
+  if (linkSuggestHandle) {
+    try { linkSuggestHandle.destroy(); } catch (_) {}
+    linkSuggestHandle = null;
+  }
+}
+
+function ensureLinkSuggest() {
+  if (!editorHandle) return;
+  destroyLinkSuggest();
+  // Read the file list at typing time, so new and moved files show up at once.
+  linkSuggestHandle = createLinkSuggest(editorHandle.easyMDE.codemirror, {
+    getFiles: () => state.allFiles || [],
   });
 }
 

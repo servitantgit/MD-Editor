@@ -1303,6 +1303,24 @@ with sync_playwright() as p:
     print("\u2713 Preview checkbox below code blocks ticks its own line")
     page.click('#layout-toggle .layout-btn[data-mode="source"]')
 
+    # --- Link suggestions: typing [[ offers notes, Enter inserts a root-absolute link ---
+    page.click(".CodeMirror")
+    page.evaluate("""() => {
+      const cm = document.querySelector('.CodeMirror').CodeMirror;
+      cm.setValue('');
+      cm.focus();
+    }""")
+    page.keyboard.type("see [[Test")
+    page.wait_for_selector(".link-suggest-menu .link-suggest-item", timeout=5000)
+    first = page.get_attribute(".link-suggest-menu .link-suggest-item", "data-path")
+    assert first == "Notes/Test note.md", f"unexpected first suggestion: {first!r}"
+    page.keyboard.press("Enter")
+    wait_until(lambda: "</Notes/Test note.md>" in editor_text(), seconds=5, what="Enter to insert the suggested link")
+    link_line = editor_text().split("\n")[0]
+    assert link_line == "see [Test note](</Notes/Test note.md>)", f"unexpected text after picking a suggestion: {link_line!r}"
+    assert page.locator(".link-suggest-menu").count() == 0, "the suggestion menu stayed open"
+    print("\u2713 typing [[ suggests notes and Enter inserts a link")
+
     # --- H. Switching repository IN-APP must not leak the previous session's
     # listeners. showApp() runs again on a switch with NO page reload, and the
     # upload/mobile listeners used to be re-attached every time while keeping the
