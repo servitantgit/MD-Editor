@@ -114,3 +114,23 @@ test('findMarkdownImages: skips an image inside a fence inside a blockquote', as
 test('findMarkdownImages: skips an image inside inline code', async () => {
   assert.deepEqual(await imageSrcs('see `![a](a.png)` and ![b](b.png)'), ['b.png']);
 });
+
+test('injectCanonicalImageTags: an image inside inline code stays text', async () => {
+  const { injectCanonicalImageTags } = await loadTokens();
+  const src = 'see `![a](a.png)` here';
+  assert.equal(injectCanonicalImageTags(src), src);
+});
+
+test('injectCanonicalImageTags: a raw <img> inside inline code stays text', async () => {
+  const { injectCanonicalImageTags } = await loadTokens();
+  const src = 'tag `<img src="x.png">` here';
+  assert.equal(injectCanonicalImageTags(src), src);
+});
+
+test('injectCanonicalImageTags: an image after a code example on the same line keeps its occurrence index', async () => {
+  // setImageAttrsInLine counts every image on the line, code examples included.
+  const { injectCanonicalImageTags } = await loadTokens();
+  const out = injectCanonicalImageTags('see `![a](a.png)` then ![b](b.png)');
+  assert.ok(out.includes('`![a](a.png)`'), 'the code example must stay text: ' + out);
+  assert.ok(out.includes('data-md-occ="1" data-md-src="b.png"'), 'b.png must be occurrence 1: ' + out);
+});

@@ -61,13 +61,18 @@ export function rebuildRefToken(parsed, newTarget, fullOriginal) {
  */
 export function injectCanonicalImageTags(text) {
   const lineOcc = {};
-  return mapOutsideFences(text, (chunk, start) => chunk.replace(IMG_TOKEN_RE, (full, altG, srcG, titleG, offset) => {
+  return mapOutsideFences(text, (chunk, start) => {
+    const spans = findCodeSpans(chunk);
+    return chunk.replace(IMG_TOKEN_RE, (full, altG, srcG, titleG, offset) => {
     const isMdImg = srcG !== undefined;
     const attrs = isMdImg ? { src: srcG, alt: altG || '', width: '' } : parseImgTagAttrs(full);
 
     const ln = (text.slice(0, start + offset).match(/\n/g) || []).length;
     const occ = lineOcc[ln] || 0;
     lineOcc[ln] = occ + 1;
+    // Inline code holds an example, not an image. It still counts for occ,
+    // exactly like setImageAttrsInLine, so width edits hit the right image.
+    if (spans.some(([s, e]) => offset >= s && offset < e)) return full;
 
     const widthNum = parseInt(attrs.width, 10);
     const widthPart = attrs.width && !Number.isNaN(widthNum)
@@ -83,7 +88,8 @@ export function injectCanonicalImageTags(text) {
       `<span class="md-img-placeholder-text">⏳ ${escapeAttr(attrs.src)}</span>` +
       `</span>`
     );
-  }));
+    });
+  });
 }
 
 /**
