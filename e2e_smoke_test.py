@@ -1280,6 +1280,29 @@ with sync_playwright() as p:
     assert "X" in pos["text"], f"typed character missing after Space near image: {pos}"
     print(f"✓ Space near inline image keeps caret local (line={pos['line']}, ch={pos['ch']})")
 
+    # --- Preview checkbox: a click ticks the matching line, also below code blocks ---
+    # findTaskLines (js/markdown-commands.js) and marked must agree on which lines
+    # are tasks: a task inside a code block (also inside a quote) is code.
+    page.evaluate("""() => {
+      const cm = document.querySelector('.CodeMirror').CodeMirror;
+      const F = String.fromCharCode(96).repeat(3);
+      cm.setValue(['- [ ] first', '> ' + F, '> - [ ] fake', '> ' + F, '', F + 'js', '- [ ] also fake', F, '', '- [ ] last', ''].join('\\n'));
+    }""")
+    page.click('#layout-toggle .layout-btn[data-mode="preview"]')
+    page.wait_for_function(
+        "() => { const pv = document.querySelector('.editor-area .EasyMDEContainer .editor-preview-side');"
+        " if (!pv) return false; const b = pv.querySelectorAll('input[type=checkbox]');"
+        " return b.length === 2 && !b[1].disabled; }",
+        timeout=8000,
+    )
+    page.click('.editor-area .EasyMDEContainer .editor-preview-side input[type=checkbox] >> nth=1')
+    wait_until(lambda: '- [x] last' in editor_text(), seconds=5, what="the second Preview checkbox to tick '- [x] last'")
+    task_text = editor_text()
+    assert '- [ ] first' in task_text and '> - [ ] fake' in task_text and '- [ ] also fake' in task_text, \
+        f"a Preview checkbox click changed the wrong line: {task_text!r}"
+    print("\u2713 Preview checkbox below code blocks ticks its own line")
+    page.click('#layout-toggle .layout-btn[data-mode="source"]')
+
     # --- H. Switching repository IN-APP must not leak the previous session's
     # listeners. showApp() runs again on a switch with NO page reload, and the
     # upload/mobile listeners used to be re-attached every time while keeping the
