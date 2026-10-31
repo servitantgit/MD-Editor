@@ -4,6 +4,7 @@
 //
 // Lower-level helpers stay in file-mover.js, folder-manager.js, paths.js.
 
+import { buildFileLink } from './link-suggest.js';
 import { utf8ToB64 } from './github-client.js';
 import { moveFile, renameFile } from './file-mover.js';
 import { createFolder, renameFolder, deleteFolder, getFolders, isFolderEmpty } from './folder-manager.js';
@@ -697,26 +698,8 @@ export function createFileOps(deps) {
    */
   async function onCopyLinkToFile(targetPath) {
     const basename = basenameOf(targetPath);
-    const displayName = basename.replace(/\.md$/i, '');
-
-    // Always a repo-root absolute link. The leading slash is a convention
-    // the editor already understands (see reference-rewriter.js).
-    const linkPath = '/' + targetPath;
-    // DO NOT percent-encode here. marked (the markdown renderer) captures the
-    // link URL verbatim and percent-encodes it once at HTML serialization — so a
-    // pre-encoded %20 would come back out as %20 and then be re-encoded to %25 by
-    // encodePathForApi on the way to GitHub (a 404). The raw path with real
-    // spaces/unicode is the correct wire format for markdown link syntax —
-    // GitHub, Obsidian and VS Code all accept and prefer this.
-    //
-    // Markdown has one real escaping concern: parentheses terminate link syntax,
-    // and a bare space inside (...) is not parsed as a link at all. Wrap the URL
-    // in <...> when it contains spaces or parens — the standard markdown escape
-    // for arbitrary URLs. marked strips the angle brackets and encodes the
-    // spaces into the href, and the click handler decodes them back.
-    const needsAngleBrackets = /[()\s]/.test(linkPath);
-    const urlPart = needsAngleBrackets ? `<${linkPath}>` : linkPath;
-    const markdown = `[${displayName}](${urlPart})`;
+    // One link format for the whole app: see buildFileLink() in js/link-suggest.js.
+    const markdown = buildFileLink(targetPath);
 
     try {
       if (navigator.clipboard && navigator.clipboard.writeText) {
