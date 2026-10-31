@@ -30,6 +30,9 @@ Prefer automated coverage in `test/*.test.js` and `e2e_smoke_test.py` when pract
 - [ ] Moving the mouse from one pane to the other while scrolling: the panes do not fight; the wheel acts on the pane under the mouse.
 - [ ] Near an image the top of Preview shows the same image as the line at the top of Source; Preview glides, no jolts.
 - [ ] Live, minimap open: clicking and dragging on the map moves both panes.
+- [ ] Live, many images above the caret: typing does not make Preview flicker and does not move Source.
+- [ ] Typing `[[` and a few letters lists notes; Up/Down, Enter or Tab inserts `[name](/path)`, Esc closes; Enter outside the list still continues `- ` lists.
+- [ ] Discard is enabled only with unsaved changes; it asks first, restores the GitHub version and clears the dot and the Commit badge; Cancel changes nothing.
 - [ ] External images (`https://…`, shields.io) render; GitHub Actions badge paths like `../../actions/workflows/….yml/badge.svg` resolve to `https://github.com/{owner}/{repo}/actions/...`.
 - [ ] HTML files: Live/Preview show content in iframe; fullscreen stays in the current layout mode.
 - [ ] Open a large HTML file (>1MB srcdoc) in Live layout on first open — must render, no toggle needed.

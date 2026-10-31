@@ -974,6 +974,41 @@ an optional UI piece again; the minimap only paints and handles clicks.
 Pinned by `test/scroll-sync.test.js` (pure functions + jsdom with hand-driven
 frames) and the e2e check "Live with the minimap closed".
 
+## Link suggestions and the one link format: js/link-suggest.js
+
+`buildFileLink(path)` is the only place that builds a link to a repository file:
+`[name](/path)`, root-absolute, `.md` dropped from the name, `<...>` around a URL
+with spaces or parentheses, never percent-encoded. Copy as link (`file-ops.js`)
+and the `[[` suggestions both use it. `rankLinkSuggestions()` orders notes for a
+query. `createLinkSuggest()` is the popup: its key map (Up/Down/Enter/Tab/Esc) is
+added only while it is open, so Enter keeps continuing lists the rest of the time.
+It is built and destroyed with the editor in `showApp()`, next to the scroll sync.
+Wikilinks `[[...]]` are NOT rewritten on move (open task B1); the suggestions
+insert markdown links for that reason.
+
+## Preview re-render must keep loaded images (no placeholders while typing)
+
+EasyMDE rewrites the Preview `innerHTML` on every keystroke. Images used to come
+back as a 1x1 placeholder with `.md-img-wrap.loading` until the async resolve ran:
+the pane collapsed (10621 -> 3997 px on a real note), Preview flickered, the
+browser moved its scrollTop and the scroll sync dragged Source toward the end.
+`ImageResolver.cachedUrl()` reads the cache synchronously (same path rules as
+`resolve()`), and `renderMarkdownSafe(text, marked, purifier, { knownSrc })`
+writes known images resolved right away. Only new images show the placeholder.
+PDF export passes no `knownSrc`. Do not fix this kind of jump in scroll-sync.js:
+fix the height collapse. About 15 earlier commits patched the sync instead.
+Pinned by `test/image-resolver.test.js`, `test/markdown-tokens.test.js` and the
+e2e check 'typing in Live keeps loaded images, no height collapse'.
+
+## Discard: autosave.discardLocalChanges()
+
+The Discard button reverts the open note to its GitHub version: fresh read, draft
+deleted, state clean, nothing pushed. It shares `_reloadFromRemote()` with Reload
+in the conflict banner and does nothing while a save is in flight. The button is
+enabled exactly when the tab shows the unsaved dot (`setActiveFileUnsaved`), and
+`onReloadRemote` also drops the file from the working tree, so the Commit badge
+follows. A note that does not exist on GitHub yet cannot be discarded (open task).
+
 ## Sidebar: the file tree lives inside .folder-dropzone
 
 `.folder-dropzone` (flex: 1) wraps `#file-tree`; `#search-results` is its sibling

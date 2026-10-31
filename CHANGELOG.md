@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Link suggestions while typing `[[`.** A list of notes opens under the cursor and filters as you type; Up/Down, Enter or Tab inserts a root-absolute link `[name](/path)` (the same format as Copy as link), Esc closes it (`js/link-suggest.js`)
+- **Discard button** next to Save: reverts the open note to its GitHub version, deletes the local draft, clears the unsaved dot and the Commit badge, and pushes nothing (`js/autosave.js`, `js/app.js`)
+
+### Fixed
+- **Typing in Live made Preview flicker and dragged Source toward the end of the note.** Every keystroke re-rendered Preview with all images reset to a placeholder, so the pane collapsed and its scroll position jumped. Already loaded images are now written resolved from the cache, so the height stays the same (`js/image-resolver.js`, `js/markdown-tokens.js`, `js/editor.js`)
+- **Reload from GitHub in the conflict banner left the file in the Commit list.** The file now leaves the working tree and the badge drops (`js/app.js`)
+
 ## [2.3.0] - 2026-10-31
 
 ### Added
