@@ -1369,6 +1369,24 @@ with sync_playwright() as p:
     print(f"\u2713 typing in Live keeps loaded images, no height collapse ({watch})")
     page.click('#layout-toggle .layout-btn[data-mode="source"]')
 
+    # --- Discard button: drop local edits, take the GitHub version, push nothing ---
+    page.click(".CodeMirror")
+    page.keyboard.press("Control+End")
+    page.keyboard.type("DISCARD_ME")
+    page.wait_for_function("() => { const b = document.getElementById('btn-discard'); return !!b && !b.disabled; }", timeout=5000)
+    badge_before = page.evaluate("() => { const b = document.getElementById('commit-badge'); return b && !b.classList.contains('hidden') ? (parseInt(b.textContent, 10) || 0) : 0; }")
+    assert badge_before >= 1, f"the edit did not reach the Commit badge: {badge_before}"
+    page.evaluate("() => { window.__mdConfirm = window.confirm; window.confirm = () => true; }")
+    page.click("#btn-discard")
+    wait_until(lambda: "DISCARD_ME" not in editor_text(), seconds=5, what="Discard to restore the GitHub text")
+    page.evaluate("() => { window.confirm = window.__mdConfirm; }")
+    assert not [w for w in CONTENT_WRITES if w["method"] == "PUT" and "DISCARD_ME" in w["text"]], "Discard pushed the discarded text"
+    wait_until(lambda: page.locator("#tab-bar .tab.active.dirty").count() == 0, seconds=5, what="the unsaved dot to clear after Discard")
+    assert page.is_disabled("#btn-discard"), "Discard stays enabled on a clean file"
+    badge_after = page.evaluate("() => { const b = document.getElementById('commit-badge'); return b && !b.classList.contains('hidden') ? (parseInt(b.textContent, 10) || 0) : 0; }")
+    assert badge_after < badge_before, f"Commit badge did not drop after Discard: {badge_before} -> {badge_after}"
+    print(f"\u2713 Discard restores the GitHub version, pushes nothing, clears the dot and the badge ({badge_before} -> {badge_after})")
+
     # --- H. Switching repository IN-APP must not leak the previous session's
     # listeners. showApp() runs again on a switch with NO page reload, and the
     # upload/mobile listeners used to be re-attached every time while keeping the

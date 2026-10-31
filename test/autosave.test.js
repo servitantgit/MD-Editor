@@ -590,3 +590,45 @@ test('destroy() abandons an in-flight push without cleaning up (why release() ex
   assert.deepEqual(commits, []);
   assert.deepEqual(store.deletes, [], 'the stale draft stays behind');
 }));
+
+// The Discard button: throw the local edits away and take the GitHub version,
+// like Reload in the conflict banner but for ordinary unsaved work.
+test('discardLocalChanges reverts unsaved edits to the GitHub version and never pushes', withTimers(async () => {
+  const { autosave, store, client, reloads } = newAutosave();
+  await autosave.onOpen('a.md', 'REMOTE', 'sha-0');
+  autosave.onChange('MY-TEXT');
+  await advance(LOCAL_WRITE_DEBOUNCE_MS);
+  assert.equal(autosave.hasUnsavedDraft(), true);
+
+  await autosave.discardLocalChanges();
+  await drain();
+
+  assert.deepEqual(reloads, [{ path: 'a.md', text: 'REMOTE-TEXT', sha: 'sha-from-github' }]);
+  assert.equal(autosave.state, STATE.CLEAN);
+  assert.equal(autosave.hasUnsavedDraft(), false);
+  assert.ok(store.deletes.includes('a.md'), 'the local draft is deleted');
+  await advance(IDLE_MS + MAX_MS);
+  assert.equal(client.puts.length, 0, 'discarding must never commit anything');
+}));
+
+test('discardLocalChanges does nothing while a save is in flight', withTimers(async () => {
+  const { autosave, client, reloads } = newAutosave();
+  await autosave.onOpen('a.md', 'REMOTE', 'sha-0');
+  autosave.onChange('MY-TEXT');
+  let finish;
+  client.putFile = async () => {
+    await new Promise((resolve) => { finish = resolve; });
+    return { content: { sha: 'sha-landed' } };
+  };
+  const pending = autosave.saveNow();
+  for (let i = 0; i < 30 && typeof finish !== 'function'; i++) await Promise.resolve();
+  assert.equal(typeof finish, 'function', 'push must be in flight');
+
+  const res = await autosave.discardLocalChanges();
+
+  assert.equal(res, null, 'the text is already on its way to GitHub');
+  assert.deepEqual(reloads, []);
+  finish();
+  await pending;
+  await drain();
+}));

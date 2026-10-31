@@ -119,6 +119,7 @@ const els = {
   minimapWrap: document.getElementById('minimap-wrap'),
   minimapCanvas: document.getElementById('minimap'),
   btnSave: document.getElementById('btn-save'),
+  btnDiscard: document.getElementById('btn-discard'),
   btnMoreFile: document.getElementById('btn-more-file'),
   moreFileMenu: document.getElementById('more-file-menu'),
   btnExportPdf: document.getElementById('btn-export-pdf'),
@@ -253,6 +254,8 @@ function restoreChrome() { ensureTabsSession().restoreChrome(); }
 let activeFileUnsaved = false; // mirrored; writers also call setActiveFileUnsaved on session
 function setActiveFileUnsaved(v) {
   activeFileUnsaved = !!v;
+  // Discard is offered exactly when the tab shows the unsaved dot.
+  if (els.btnDiscard) els.btnDiscard.disabled = !activeFileUnsaved;
   if (tabsSession) tabsSession.setActiveFileUnsaved(v);
 }
 
@@ -349,6 +352,7 @@ async function init() {
   // event as `folderPath`, creating "[object PointerEvent]/name.md".
   ensureFileOps().setupToolbar();
   if (els.btnSave) els.btnSave.onclick = onSaveFile;
+  if (els.btnDiscard) els.btnDiscard.onclick = onDiscardFile;
   if (els.btnExportPdf) els.btnExportPdf.onclick = onExportPdf;
 
   // Only the editor core is fatal. Optional CDNs (html2pdf, highlight, minisearch)
@@ -503,6 +507,14 @@ function createAutosave(owner, repo) {
       if (tab) tab.sha = sha;
       setEditorValue(text);
       hideDraftBanner();
+      // The local edit is gone: forget it in the Commit list too (badge + tree mark).
+      try {
+        if (workingTree) {
+          workingTree.clear(path);
+          ensureCommitHistoryUI().refreshBadge();
+          if (fileTree) fileTree.setDirtyMap(workingTree.statusMap());
+        }
+      } catch (_) { /* best-effort, the text is already reloaded */ }
       setSaveStatus(`Reloaded from GitHub: ${path}`, false);
     },
   });
@@ -1123,6 +1135,21 @@ async function onSaveFile() {
   // ONLY way to save.
   if (!state.currentPath) return;
   await ensureAutosave().saveNow();
+}
+
+/** Discard button: throw the open file's local edits away and load the GitHub version. Never pushes. */
+async function onDiscardFile() {
+  const path = state.currentPath;
+  if (!path || !activeFileUnsaved) return;
+  if (!confirm('Discard unsaved changes in ' + path + ' and load the version from GitHub?')) return;
+  try {
+    const res = await ensureAutosave().discardLocalChanges();
+    if (!res && autosave && autosave.state === 'pushing') {
+      setSaveStatus('Nothing discarded: the file is being saved right now', true);
+    }
+  } catch (e) {
+    setSaveStatus('Discard failed: ' + e.message, true);
+  }
 }
 // After deletion (or when the last tab is closed) the editor must not keep the
 // file's contents: show an empty document, drop inline images, lock actions.

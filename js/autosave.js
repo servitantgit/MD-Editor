@@ -473,35 +473,47 @@ export class Autosave {
   /** The user's answer to the conflict dialog. */
   async resolveConflict(choice) {
     if (this.destroyed || !this.path || this.state !== STATE.ERROR) return null;
-    const path = this.path;
-
-    if (choice === 'reload') {
-      const fresh = await this.client.getFileB64(path);
-      let text;
-      try {
-        text = b64ToUtf8(fresh.b64);
-      } catch (_) {
-        // b64ToUtf8 THROWS on content that is not valid UTF-8, by design. Here
-        // that means the "remote" file is a binary blob wearing a .md name:
-        // do not decode it, do not overwrite it. Leave everything alone.
-        this._setStatus(STATUS.error('the file on GitHub is not valid UTF-8 — nothing was changed'));
-        return null;
-      }
-      await this.store.delete(this._draftRef(path));
-      this._backgroundErrors.delete(path);
-      this.baseSha = fresh.sha;
-      this._text = text;
-      this._clearTimers();
-      this.state = STATE.CLEAN;
-      this._setStatus(STATUS.saved);
-      this.onReloadRemote(path, text, fresh.sha);
-      return { reloaded: true, text };
-    }
+    if (choice === 'reload') return this._reloadFromRemote();
 
     // 'overwrite': take the fresh sha and put our text on top of it.
-    const fresh = await this.client.getFileB64(path);
+    const fresh = await this.client.getFileB64(this.path);
     this.baseSha = fresh.sha;
     return this._push('overwrite');
+  }
+
+  /**
+   * The Discard button: throw the local edits away and take the GitHub version.
+   * Works for ordinary unsaved work, not only after a conflict. Never pushes.
+   * Does nothing while a save is in flight: that text is already on its way.
+   */
+  async discardLocalChanges() {
+    if (this.destroyed || !this.path || this.state === STATE.PUSHING) return null;
+    return this._reloadFromRemote();
+  }
+
+  /** Reload (conflict banner) and Discard: fresh GitHub text, draft deleted. */
+  async _reloadFromRemote() {
+    const path = this.path;
+    const fresh = await this.client.getFileB64(path);
+    let text;
+    try {
+      text = b64ToUtf8(fresh.b64);
+    } catch (_) {
+      // b64ToUtf8 THROWS on content that is not valid UTF-8, by design. Here
+      // that means the "remote" file is a binary blob wearing a .md name:
+      // do not decode it, do not overwrite it. Leave everything alone.
+      this._setStatus(STATUS.error('the file on GitHub is not valid UTF-8 — nothing was changed'));
+      return null;
+    }
+    await this.store.delete(this._draftRef(path));
+    this._backgroundErrors.delete(path);
+    this.baseSha = fresh.sha;
+    this._text = text;
+    this._clearTimers();
+    this.state = STATE.CLEAN;
+    this._setStatus(STATUS.saved);
+    this.onReloadRemote(path, text, fresh.sha);
+    return { reloaded: true, text };
   }
 
   /**
