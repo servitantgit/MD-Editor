@@ -134,3 +134,23 @@ test('injectCanonicalImageTags: an image after a code example on the same line k
   assert.ok(out.includes('`![a](a.png)`'), 'the code example must stay text: ' + out);
   assert.ok(out.includes('data-md-occ="1" data-md-src="b.png"'), 'b.png must be occurrence 1: ' + out);
 });
+
+test('injectCanonicalImageTags: a known image is written resolved, without the loading placeholder', async () => {
+  const { injectCanonicalImageTags } = await loadTokens();
+  const out = injectCanonicalImageTags('![a](a.png)\n\n![b](b.png)', {
+    knownSrc: (src) => (src === 'a.png' ? 'data:image/png;base64,QUJD' : null),
+  });
+  const [a, b] = out.split('\n\n');
+  assert.ok(a.includes('src="data:image/png;base64,QUJD"'), a);
+  assert.ok(!a.includes('md-img-wrap loading'), 'a known image must not collapse to a placeholder: ' + a);
+  assert.ok(b.includes('md-img-wrap loading') && b.includes('data:image/gif;base64,'), 'an unknown image still loads: ' + b);
+});
+
+test('renderMarkdownSafe passes knownSrc down to the canonical image tags', async () => {
+  const { renderMarkdownSafe } = await import('../js/sanitize-html.js');
+  const html = renderMarkdownSafe('![a](a.png)', { parse: (t) => t }, { sanitize: (h) => h }, {
+    knownSrc: () => 'data:image/png;base64,QUJD',
+  });
+  assert.ok(html.includes('src="data:image/png;base64,QUJD"'), html);
+  assert.ok(!html.includes('md-img-wrap loading'), html);
+});

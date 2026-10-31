@@ -168,7 +168,12 @@ export function createEditor(textareaEl, deps) {
       // Markdown (default)
       let html;
       try {
-        html = renderMarkdownSafe(plainText, deps.marked, deps.purifier);
+        // Already loaded images are written resolved, so the pane keeps its height
+        // on every keystroke (no 1x1 placeholders, no scrollTop jump in Live).
+        const resolver = deps.imageResolver;
+        html = renderMarkdownSafe(plainText, deps.marked, deps.purifier, {
+          knownSrc: (src) => (resolver && typeof resolver.cachedUrl === 'function' ? resolver.cachedUrl(src, path) : null),
+        });
       } catch (e) {
         console.error('Preview render error:', e);
         return `<div class="render-error"><strong>⚠ Preview render error</strong><br>${escapeHtml(e.message)}</div>`;

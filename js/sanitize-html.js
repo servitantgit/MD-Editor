@@ -35,6 +35,6 @@ export function sanitizeHtmlDocument(html, purifier) {
 }
 
 /** Markdown -> canonical HTML -> sanitized HTML. Use this for anything that reaches innerHTML. */
-export function renderMarkdownSafe(text, renderer, purifier) {
-  return sanitizeHtml(markdownToCanonicalHtml(text, renderer), purifier);
+export function renderMarkdownSafe(text, renderer, purifier, opts) {
+  return sanitizeHtml(markdownToCanonicalHtml(text, renderer, opts), purifier);
 }

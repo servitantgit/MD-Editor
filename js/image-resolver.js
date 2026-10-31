@@ -65,4 +65,23 @@ export class ImageResolver {
     this.cache.set(path, dataUrl);
     return dataUrl;
   }
+
+  /**
+   * Synchronous cache read with the same path rules as resolve(): the resolved
+   * URL when it is already known, otherwise null. Never goes to the network.
+   * Preview uses it on every re-render so loaded images keep their size instead
+   * of collapsing to a 1x1 placeholder (that moved scrollTop while typing).
+   * @param {string} origSrc
+   * @param {string} currentFilePath
+   * @returns {string|null}
+   */
+  cachedUrl(origSrc, currentFilePath) {
+    if (!origSrc) return null;
+    if (isExternalOrAnchor(origSrc)) return origSrc;
+    if (origSrc.startsWith('//')) return 'https:' + origSrc;
+    const path = origSrc.startsWith('/')
+      ? origSrc.slice(1)
+      : resolveRelativePath(dirnameOf(currentFilePath || ''), origSrc);
+    return this.cache.has(path) ? this.cache.get(path) : null;
+  }
 }

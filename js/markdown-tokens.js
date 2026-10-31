@@ -59,7 +59,10 @@ export function rebuildRefToken(parsed, newTarget, fullOriginal) {
  * @param {string} text
  * @returns {string} text ready to pass into marked.parse(...)
  */
-export function injectCanonicalImageTags(text) {
+// opts.knownSrc(src) -> resolved URL or null. A known image is written resolved
+// right away: re-rendering on every keystroke must not collapse loaded images
+// to a 1x1 placeholder (the pane shrank and the browser moved its scrollTop).
+export function injectCanonicalImageTags(text, opts = {}) {
   const lineOcc = {};
   return mapOutsideFences(text, (chunk, start) => {
     const spans = findCodeSpans(chunk);
@@ -79,10 +82,12 @@ export function injectCanonicalImageTags(text) {
       ? ` width="${escapeAttr(attrs.width)}" style="width:${widthNum}px;height:auto;"`
       : '';
 
+    let known = null;
+    try { known = typeof opts.knownSrc === 'function' ? opts.knownSrc(attrs.src) : null; } catch (_) { known = null; }
     return (
-      `<span class="md-img-wrap loading">` +
+      `<span class="md-img-wrap${known ? '' : ' loading'}">` +
       `<img data-md-line="${ln}" data-md-occ="${occ}" data-md-src="${escapeAttr(attrs.src)}" ` +
-      `alt="${escapeAttr(attrs.alt)}"${widthPart} src="${TRANSPARENT_PIXEL}">` +
+      `alt="${escapeAttr(attrs.alt)}"${widthPart} src="${known ? escapeAttr(known) : TRANSPARENT_PIXEL}">` +
       `<span class="md-img-resize-handle"></span>` +
       `<span class="md-img-size-badge"></span>` +
       `<span class="md-img-placeholder-text">⏳ ${escapeAttr(attrs.src)}</span>` +
@@ -100,11 +105,11 @@ export function injectCanonicalImageTags(text) {
  */
 // UNSANITIZED output. Anything that reaches innerHTML must use renderMarkdownSafe()
 // from js/sanitize-html.js instead (the main page holds the GitHub token).
-export function markdownToCanonicalHtml(text, renderer) {
+export function markdownToCanonicalHtml(text, renderer, opts) {
   if (!renderer || typeof renderer.parse !== 'function') {
     throw new Error('No markdown renderer provided (expected an object with a .parse method)');
   }
-  const withCanonicalImages = injectCanonicalImageTags(text);
+  const withCanonicalImages = injectCanonicalImageTags(text, opts);
   return renderer.parse(withCanonicalImages, { gfm: true, breaks: false });
 }
 

@@ -1179,6 +1179,19 @@ with sync_playwright() as p:
     page.evaluate("document.querySelector('.CodeMirror').CodeMirror.scrollTo(null, 1600)")
     page.wait_for_function("() => " + PV_SIDE + ".scrollTop > 100", timeout=3000)
     pv_top = page.evaluate("() => " + PV_SIDE + ".scrollTop")
+    # Let the glide finish first: a glide frame still running can overwrite the
+    # scrollTop write below before its scroll event is delivered (that made 3b flaky).
+    page.evaluate("""() => new Promise((done) => {
+      const pv = document.querySelector('.editor-area .EasyMDEContainer .editor-preview-side');
+      let last = -1, same = 0;
+      const tick = () => {
+        const t = pv.scrollTop;
+        same = t === last ? same + 1 : 0;
+        last = t;
+        if (same >= 5) done(); else requestAnimationFrame(tick);
+      };
+      requestAnimationFrame(tick);
+    })""")
     page.evaluate("() => { " + PV_SIDE + ".scrollTop = 0; }")
     page.wait_for_function(
         "() => document.querySelector('.CodeMirror').CodeMirror.getScrollInfo().top < 50",
@@ -1320,6 +1333,41 @@ with sync_playwright() as p:
     assert link_line == "see [Test note](</Notes/Test note.md>)", f"unexpected text after picking a suggestion: {link_line!r}"
     assert page.locator(".link-suggest-menu").count() == 0, "the suggestion menu stayed open"
     print("\u2713 typing [[ suggests notes and Enter inserts a link")
+
+    # --- Typing in Live keeps loaded images: no collapse of the Preview height ---
+    # Every keystroke re-renders Preview. Resetting loaded images to a 1x1
+    # placeholder collapsed the pane, the browser moved its scrollTop and the
+    # scroll sync dragged Source toward the end of the note.
+    page.evaluate("(t) => { document.querySelector('.CodeMirror').CodeMirror.setValue(t); }", MD_CONTENT)
+    page.click('#layout-toggle .layout-btn[data-mode="split"]')
+    page.wait_for_function(
+        "() => { const pv = document.querySelector('.editor-area .EasyMDEContainer .editor-preview-side');"
+        " return !!pv && pv.querySelectorAll('.md-img-wrap').length >= 2"
+        " && !pv.querySelector('.md-img-wrap.loading') && pv.scrollHeight > pv.clientHeight + 200; }",
+        timeout=8000,
+    )
+    page.evaluate("""() => {
+      const cm = document.querySelector('.CodeMirror').CodeMirror;
+      const line = cm.getValue().split('\\n').findIndex((l) => l.startsWith('Line 300 '));
+      cm.setCursor({ line, ch: 0 });
+      cm.focus();
+      const pv = document.querySelector('.editor-area .EasyMDEContainer .editor-preview-side');
+      window.__pvWatch = { h0: pv.scrollHeight, minH: pv.scrollHeight, maxLoading: 0 };
+      window.__pvObs = new MutationObserver(() => {
+        const w = window.__pvWatch;
+        w.minH = Math.min(w.minH, pv.scrollHeight);
+        w.maxLoading = Math.max(w.maxLoading, pv.querySelectorAll('.md-img-wrap.loading').length);
+      });
+      window.__pvObs.observe(pv, { childList: true, subtree: true });
+    }""")
+    page.keyboard.type("Q")
+    page.wait_for_timeout(800)
+    watch = page.evaluate("() => { window.__pvObs.disconnect(); return window.__pvWatch; }")
+    assert "Q" in editor_text(), "the typed text did not reach the editor"
+    assert watch["maxLoading"] == 0 and watch["minH"] >= watch["h0"] * 0.9, \
+        f"typing re-rendered Preview with image placeholders (height collapse): {watch}"
+    print(f"\u2713 typing in Live keeps loaded images, no height collapse ({watch})")
+    page.click('#layout-toggle .layout-btn[data-mode="source"]')
 
     # --- H. Switching repository IN-APP must not leak the previous session's
     # listeners. showApp() runs again on a switch with NO page reload, and the
