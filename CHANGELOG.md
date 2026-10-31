@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.3.0] - 2026-10-31
+
 ### Added
 - **Search shows how many results it found** - "12 results", or "50 of 73 results" when the list is capped at 50 (`js/search-index.js`, `js/search-ui.js`)
 - **More toolbar buttons:** strikethrough, task list, inline code, table, horizontal line
@@ -71,6 +73,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Code blocks inside quotes were treated as text.** A fence inside a block quote (a line such as `> ~~~`) was not recognised: a checkbox below it could tick a line inside the code, words from the code were indexed for search, and Preview showed raw HTML for an image in it. Fences inside quotes now use the shared code-block rules; the search index is rebuilt once (`INDEX_VERSION` 3) (`js/md-fences.js`)
+- **Source hid code examples behind image links.** An image such as `![x](pic.png)` inside a code block or inline code was replaced by a link widget in Source, so the example was invisible and could not be edited. Images inside code are left as text (`js/markdown-tokens.js`, `js/editor.js`)
+- **Preview showed raw HTML for an image inside inline code.** `` `![x](pic.png)` `` now renders as code; the image numbering used for width edits still counts it, so resizing the real image next to it hits the right one (`js/markdown-tokens.js`)
 - **Outline listed the wrong headings** after a code block containing a ```` ```js ```` line or an inline ```` ```x``` ```` line: a `# comment` inside code showed up, real headings below went missing (and dropped out of the scroll-sync anchors). Headings now use the shared code-block rules (`js/doc-outline.js`)
 - **Search indexed code** when a code block contained a ```` ```js ```` line or was never closed: words from code were found and snippets showed stray `js` and backticks. Indexing now uses the shared code-block rules; the stored index is rebuilt once in the background (`INDEX_VERSION` 2) (`js/search-index.js`)
 - **Live layout: Source and Preview scrolled out of step.** The sync lived inside the minimap, so with the map closed the panes scrolled on their own (and a mouse wheel kept driving the pane where the gesture started). It now has its own module, works with the map open or closed, maps the position by content (images and headings line up, not percentages) and the following pane glides instead of leaping across tall images (`js/scroll-sync.js`, `js/minimap.js`, `js/app.js`)
