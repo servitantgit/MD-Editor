@@ -517,8 +517,11 @@ guard avoids building DOM that would be discarded, the post-await guard also
 covers the `catch` branch, and `mark.find() == null` additionally covers a mark
 cleared by a rebuild while the await was still in flight.
 
-Known gap: the Source widget is also drawn for image syntax inside fenced code
-blocks (display only, the text is not changed) - open task.
+Images inside code are skipped: `renderInlineImages()` takes its matches from
+`findMarkdownImages()` in `js/markdown-tokens.js`, which skips fenced code (also
+inside block quotes) and any match that starts inside inline code. An atomic
+mark on such an example used to hide the code and make it uneditable. Do not go
+back to one raw regex over the whole document.
 
 ## createEditor() owns global resources and now has to be destroyed
 
@@ -687,6 +690,9 @@ everything. Changing `extractTitle`, `stripMarkdown` or the searcher
 fields/options without a bump leaves old titles/bodies in every browser until a
 manual rebuild. Never keep a manifest next to an index that failed to load: the
 sync then believes everything is indexed and search stays empty.
+Current value: 3 (2 = shared fence rules in `stripMarkdown`, 3 = fences inside
+block quotes). A change in `js/md-fences.js` changes what gets indexed, so it
+needs a bump as well. A test pins the number (`test/search-index.test.js`).
 
 **Teardown**: `showApp()` destroys the in-flight sync alongside the editor
 handle, for the same reason — a re-login must not leave the old indexer fetching
@@ -917,10 +923,56 @@ word on one line are inline code); the closing fence uses the same character, is
 at least as long, and has nothing after it; an unclosed fence runs to the end of
 the text. Pinned by `test/md-fences.test.js`.
 
-Known places that still use their own fence logic (open tasks, not precedents):
-`doc-outline.js`, `markdown-commands.js` (task checkboxes), `stripMarkdown()` in
-`search-index.js`. Inline code with a link inside and fences inside block quotes
-are not handled yet.
+Every caller uses these helpers now: links on move (`reference-rewriter.js`),
+Preview/PDF images and Source image widgets (`markdown-tokens.js`), search
+(`extractTitle`, `stripMarkdown`), task checkboxes (`markdown-commands.js`), the
+outline (`doc-outline.js`) and the scroll-sync heading anchors. Do not add a
+second fence regex anywhere; extend `md-fences.js` and its tests instead.
+
+Rules beyond plain fences:
+- A fence may sit inside a block quote (`> ~~~`, `>>`): it closes on a fence at
+  the same quote depth or where the quote ends (fewer `>` or a blank line).
+- Inline code: `findCodeSpans()` (a run of N backticks closed by the next run of
+  exactly N, never across a blank line). A match is skipped only when it STARTS
+  inside inline code, so a link whose text is code still counts.
+- Image numbering on a line (`data-md-occ`) still counts inline-code examples,
+  the way `setImageAttrsInLine()` does, so width edits hit the right image.
+- Not handled on purpose: lazy blockquote continuation (a quoted line without
+  `>`) and backslash-escaped backticks.
+
+## Live scroll sync: js/scroll-sync.js owns it, not the minimap
+
+Source and Preview are kept in step by `createScrollSync()` in
+`js/scroll-sync.js`. `showApp()` builds it with the editor (whether the minimap is
+open or not), destroys it with the editor, and `applyLayoutMode()` refreshes it
+(EasyMDE replaces the preview element on layout switches). It is active only in
+Live (`layoutMode === 'split'`). EasyMDE's own sync stays off
+(`syncSideBySidePreviewScroll: false`).
+
+History: the sync used to live inside `minimap.js`, so closing the map destroyed
+it. That showed up only with a mouse: Chrome keeps a wheel gesture on the pane
+where it started, so the other pane looked stuck or the wrong pane moved. A
+touchpad reports where a gesture ends and did not show it. Never tie the sync to
+an optional UI piece again; the minimap only paints and handles clicks.
+
+- Position by content, not percentage: an image is one line in Source but
+  hundreds of pixels in Preview. Anchors are pairs of offsets: each image gives
+  top of its line <-> top of `.md-img-wrap` and bottom of the line <-> bottom of
+  the image; headings join only when Source and Preview have the same count.
+  Without anchors it falls back to a percentage (`buildScrollPairs`,
+  `mapScroll`, pure and unit-tested).
+- The following pane glides (`GLIDE_FRACTION` of the remaining distance per
+  frame) instead of leaping across tall images. Scrolling the following pane
+  mid-glide cancels the glide and makes that pane the leader.
+- Echo guard by VALUE: the last 4 written positions are remembered; a scroll
+  event at one of them is our own echo. No timers and no flags released by
+  `setTimeout` (the old 120 ms flags dropped real input). Do not use
+  `scrollTo({ behavior: 'smooth' })`: its intermediate frames look like the user.
+- A range jump of more than 10% means a re-render (an image loaded): skip one
+  step.
+
+Pinned by `test/scroll-sync.test.js` (pure functions + jsdom with hand-driven
+frames) and the e2e check "Live with the minimap closed".
 
 ## Sidebar: the file tree lives inside .folder-dropzone
 

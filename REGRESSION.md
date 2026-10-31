@@ -22,6 +22,10 @@ Prefer automated coverage in `test/*.test.js` and `e2e_smoke_test.py` when pract
 - [ ] Inline images: Space/Backspace near an image keep the caret local (no jump to end).
 - [ ] Preview shows `![x](pic.png)` inside a fenced code block as code, not as an image.
 - [ ] Clicking a checkbox in Preview ticks the matching line, also after a code block that contains a ```` ```js ```` line.
+- [ ] A checkbox below a code block inside a quote (`> ~~~`) ticks its own line, not a line inside the code.
+- [ ] Outline does not list a `# comment` from a code block.
+- [ ] Source: `![x](pic.png)` inside a code block or inline code stays plain editable text, no link widget.
+- [ ] Preview shows `` `![x](pic.png)` `` in inline code as code, not as raw HTML.
 - [ ] Live, minimap closed: the wheel over Source moves Preview, and the wheel over Preview moves Source.
 - [ ] Moving the mouse from one pane to the other while scrolling: the panes do not fight; the wheel acts on the pane under the mouse.
 - [ ] Near an image the top of Preview shows the same image as the line at the top of Source; Preview glides, no jolts.
@@ -63,6 +67,7 @@ Prefer automated coverage in `test/*.test.js` and `e2e_smoke_test.py` when pract
 - [ ] Search results start right under the search box (no empty gap above them).
 - [ ] A search shows the result count above the hits; "50 of N results" when the list is capped.
 - [ ] A `# comment` inside a code block does not become the note title in search results.
+- [ ] After the index rebuild, words that appear only inside code blocks (also inside quotes) are not found by search.
 - [ ] History: Restore of an empty file version (e.g. `.gitkeep`) loads an empty file - no "Empty blob" error.
 
 ## PDF / export
