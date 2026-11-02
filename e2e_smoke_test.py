@@ -49,6 +49,13 @@ SECOND_TREE = [
 # starts, so "exactly ONE PUT and it went to repo X" is checkable.
 PUT_URLS = []
 
+# Git Data API traffic (commitTreeChanges): every POSTed tree with its entries,
+# every new blob and every branch-ref update. A folder move must be ONE commit:
+# one tree, one ref update, no per-file contents PUT/DELETE.
+GIT_TREES = []
+GIT_BLOBS = []
+GIT_REF_UPDATES = []
+
 # Repositories the switcher lists. Includes the one already open, because the
 # real UI marks it "· current" and clicking it is a no-op by design.
 USER_REPOS = [
@@ -169,6 +176,36 @@ def handle_github_api(route, request):
                 {"content": {"sha": f"sha-put-{len(CONTENT_WRITES)}"}, "commit": {"sha": "c"}}))
         else:
             route.fulfill(status=200, content_type="application/json", body=json.dumps({"commit": {"sha": "c"}}))
+        return
+    # Git Data API: the ONE atomic commit behind folder moves (commitTreeChanges):
+    # ref -> parent commit -> [blobs] -> tree -> commit -> ref update. The
+    # recursive tree GET (/git/trees/<ref>) is NOT handled here: it falls through.
+    git_path = url.split("?", 1)[0]
+    if "/git/" in git_path and (request.method != "GET" or "/git/ref/heads/" in git_path or "/git/commits/" in git_path):
+        body = {}
+        try:
+            body = json.loads(request.post_data or "{}")
+        except ValueError:
+            pass
+        if request.method == "GET" and "/git/ref/heads/" in git_path:
+            data = {"object": {"sha": f"c-head-{len(GIT_REF_UPDATES)}"}}
+        elif request.method == "GET":
+            data = {"sha": git_path.rsplit("/", 1)[-1], "tree": {"sha": "t-base"}}
+        elif request.method == "POST" and git_path.endswith("/git/blobs"):
+            GIT_BLOBS.append(url)
+            data = {"sha": f"b-new-{len(GIT_BLOBS)}"}
+        elif request.method == "POST" and git_path.endswith("/git/trees"):
+            GIT_TREES.append({"url": url, "base_tree": body.get("base_tree"), "tree": body.get("tree") or []})
+            data = {"sha": f"t-new-{len(GIT_TREES)}"}
+        elif request.method == "POST" and git_path.endswith("/git/commits"):
+            data = {"sha": f"c-new-{len(GIT_TREES)}", "tree": {"sha": body.get("tree")}}
+        elif request.method == "PATCH" and "/git/refs/heads/" in git_path:
+            GIT_REF_UPDATES.append({"url": url, "sha": body.get("sha")})
+            data = {"ref": "refs/heads/main", "object": {"sha": body.get("sha")}}
+        else:
+            route.fulfill(status=404, content_type="application/json", body=json.dumps({"message": "Not Found (mock git)"}))
+            return
+        route.fulfill(status=200, content_type="application/json", body=json.dumps(data))
         return
     if "/contents/" in url:
         FETCH_LOG.append(url)
@@ -1585,8 +1622,23 @@ with sync_playwright() as p:
         # the same drag via drag_and_drop returns the payload).
         page.drag_and_drop(f".file-item.folder[data-path='{src_path}']", target_selector)
 
-    def drop_writes(method, suffix):
-        return [w for w in CONTENT_WRITES if w["method"] == method and w["url"].endswith(suffix)]
+    def assert_one_move_commit(old_path, new_path, sha):
+        # The folder move is ONE atomic commit (Git Data API). Reverse check:
+        # the old per-file way (contents PUT + DELETE, no tree) fails every line.
+        assert len(GIT_TREES) == 1, f"expected ONE tree for the folder move, got {GIT_TREES}"
+        assert len(GIT_REF_UPDATES) == 1, f"expected ONE branch update, got {GIT_REF_UPDATES}"
+        assert SECOND_REPO in GIT_TREES[0]["url"], f"tree posted to the wrong repository: {GIT_TREES[0]['url']}"
+        entries = {e.get("path"): e.get("sha") for e in GIT_TREES[0]["tree"]}
+        assert entries == {new_path: sha, old_path: None}, f"unexpected tree entries: {GIT_TREES[0]['tree']}"
+        assert not GIT_BLOBS, f"a non-markdown file was re-uploaded as a blob: {GIT_BLOBS}"
+        assert not [w for w in CONTENT_WRITES if "move-me.txt" in w["url"]], \
+            f"the folder move still wrote file by file: {CONTENT_WRITES}"
+
+    def reset_write_logs():
+        CONTENT_WRITES.clear()
+        GIT_TREES.clear()
+        GIT_BLOBS.clear()
+        GIT_REF_UPDATES.clear()
 
     # Fixtures: a source folder and an empty target container. The DESTINATION
     # path must NOT be pre-seeded — onMoveFolder refuses to move onto an
@@ -1604,13 +1656,11 @@ with sync_playwright() as p:
         return page.locator("#active-folder-path").inner_text().strip()
 
     # I1 — DragSrc onto the DragTarget folder ROW.
-    CONTENT_WRITES.clear()
+    reset_write_logs()
     seen_dialogs.clear()
     drag_folder_onto(page, "DragSrc", ".file-item.folder[data-path='DragTarget']")
-    wait_until(lambda: drop_writes("PUT", "/contents/DragTarget/DragSrc/move-me.txt"),
-               seconds=15, what="the folder move to PUT the file under the target")
-    wait_until(lambda: drop_writes("DELETE", "/contents/DragSrc/move-me.txt"),
-               seconds=15, what="the folder move to DELETE the old path")
+    wait_until(lambda: GIT_REF_UPDATES, seconds=15, what="the folder move to land as one commit")
+    assert_one_move_commit("DragSrc/move-me.txt", "DragTarget/DragSrc/move-me.txt", "sha-mv1")
     assert any('Move "DragSrc"' in d for d in seen_dialogs), \
         f"folder drag did not ask for confirmation: {seen_dialogs}"
     # The post-move tree reload expanded the destination: expandFolderChain
@@ -1631,13 +1681,11 @@ with sync_playwright() as p:
 
     # I2 — DragTarget/DragSrc onto the "move to repository root" strip.
     SECOND_TREE[:] = [e for e in SECOND_TREE if e["path"] != "DragTarget/DragSrc/move-me.txt"]
-    CONTENT_WRITES.clear()
+    reset_write_logs()
     seen_dialogs.clear()
     drag_folder_onto(page, "DragTarget/DragSrc", ".tree-root-drop-root")
-    wait_until(lambda: drop_writes("PUT", "/contents/DragSrc/move-me.txt"),
-               seconds=15, what="the root move to PUT the file at the root")
-    wait_until(lambda: drop_writes("DELETE", "/contents/DragTarget/DragSrc/move-me.txt"),
-               seconds=15, what="the root move to DELETE the nested path")
+    wait_until(lambda: GIT_REF_UPDATES, seconds=15, what="the root move to land as one commit")
+    assert_one_move_commit("DragTarget/DragSrc/move-me.txt", "DragSrc/move-me.txt", "sha-mv2")
     assert any('Move "DragSrc"' in d and 'repository root' in d for d in seen_dialogs), \
         f"root-strip move did not confirm with the root as destination: {seen_dialogs}"
     wait_until(lambda: active_folder_text() == "DragSrc",

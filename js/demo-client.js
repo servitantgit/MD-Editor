@@ -938,6 +938,28 @@ export class DemoClient {
     return { sha, branch };
   }
 
+  // Same contract as GitHubClient.commitTreeChanges, in memory: every change or none.
+  async commitTreeChanges(branch, message, changes) {
+    const bySha = new Map();
+    for (const f of this._files.values()) bySha.set(f.sha, f);
+    const next = new Map(this._files);
+    for (const c of changes) if (c.sha === null || c.contentB64 === null) next.delete(c.path);
+    for (const c of changes) {
+      if (typeof c.contentB64 === 'string') {
+        const text = b64ToUtf8(c.contentB64);
+        next.set(c.path, { text, sha: shaOf(text + '|' + c.path + '|' + Date.now()) });
+      } else if (typeof c.sha === 'string') {
+        const src = bySha.get(c.sha);
+        if (!src) throw new Error('Unknown blob (' + c.sha + ')');
+        next.set(c.path, { ...src });
+      }
+    }
+    this._files = next;
+    const sha = shaOf(message + Date.now());
+    this._commits.unshift({ sha, commit: { message, author: { name: 'Demo', date: new Date().toISOString() } } });
+    return { sha, branch };
+  }
+
   async listCommits({ path, perPage = 30 } = {}) {
     let list = this._commits;
     if (path) list = list.filter((c) => !c.path || c.path === path);

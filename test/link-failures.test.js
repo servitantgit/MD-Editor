@@ -24,6 +24,21 @@ class Client {
     return { content: { sha: 'sha2-' + path } };
   }
   async deleteFile(path) { this.files.delete(path); }
+  // One atomic commit, like GitHubClient.commitTreeChanges: every change or none.
+  async commitTreeChanges(branch, message, changes) {
+    const bySha = new Map([...this.files.values()].map((f) => [f.sha, f]));
+    const next = new Map(this.files);
+    for (const c of changes) if (c.sha === null || c.contentB64 === null) next.delete(c.path);
+    for (const c of changes) {
+      if (typeof c.contentB64 === 'string') next.set(c.path, { text: Buffer.from(c.contentB64, 'base64').toString('utf-8'), sha: 'sha2-' + c.path });
+      else if (typeof c.sha === 'string') {
+        const src = bySha.get(c.sha);
+        if (!src) throw new Error('unknown blob ' + c.sha);
+        next.set(c.path, { text: src.text, sha: c.sha });
+      }
+    }
+    this.files = next;
+  }
 }
 
 const listOf = (files, raw = {}) => Object.keys(files).concat(Object.keys(raw)).map((p) => ({ path: p, sha: 'sha-' + p }));
@@ -56,7 +71,7 @@ test('link failures: no false failures for the moved file itself or a binary .md
 test('link failures: renameFolder reports notes whose links could not be updated', async () => {
   const files = { 'Docs/a.md': '# a', 'Notes/ref.md': '[a](../Docs/a.md)', 'Notes/ref2.md': '[a](/Docs/a.md)' };
   const client = new Client(files, { failGet: ['Notes/ref2.md'] });
-  const result = await renameFolder(client, listOf(files), 'Docs', 'Archive');
+  const result = await renameFolder(client, listOf(files), 'Docs', 'Archive', { branch: 'main' });
   assert.deepEqual(result.failedFiles, ['Notes/ref2.md']);
   assert.ok(result.updatedFiles.includes('Notes/ref.md'));
 });

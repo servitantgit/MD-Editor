@@ -4,8 +4,7 @@
 
 import { dirnameOf, basenameOf, extOf } from './paths.js';
 import { utf8ToB64, b64ToUtf8 } from './github-client.js';
-import { moveFile } from './file-mover.js';
-import { updateReferencesInFile } from './reference-rewriter.js';
+import { updateReferencesInFile, rewriteOwnRelativeLinks } from './reference-rewriter.js';
 
 /**
  * Creates a folder by adding a .gitkeep file.
@@ -30,61 +29,101 @@ export async function createFolder(client, folderPath) {
  * @returns {Promise<{moved: string[], updatedFiles: string[], failedFiles: string[]}>}
  */
 export async function renameFolder(client, allFiles, oldFolderPath, newFolderPath, options = {}) {
-  // options.onPhase1Done({ moved, mapping, oldClean, newClean }) — after all put+delete
-  // options.onProgress({ phase, done, total, path }) — optional status ticks
-
+  // ONE atomic commit (client.commitTreeChanges): every file move and every link
+  // update lands together, or nothing changes on GitHub. It used to be one commit
+  // per file, so a failure halfway left the folder split in two.
+  // options.branch (required), options.onProgress({ phase, done, total, path }),
+  // options.onPhase1Done({ moved, mapping, oldClean, newClean }) after the commit.
   const oldClean = oldFolderPath.replace(/^\/+|\/+$/g, '');
   const newClean = newFolderPath.replace(/^\/+|\/+$/g, '');
   if (!oldClean || !newClean) throw new Error('Paths cannot be empty');
-  if (oldClean === newClean) return { moved: [], updatedFiles: [] };
+  if (oldClean === newClean) return { moved: [], updatedFiles: [], failedFiles: [] };
+  if (!options.branch) throw new Error('renameFolder: options.branch is required');
 
   const filesInFolder = allFiles.filter((f) => f.path.startsWith(oldClean + '/'));
   if (!filesInFolder.length) throw new Error('Folder is empty or does not exist');
 
-  // Detect collisions BEFORE moving anything: GitHub needs the sha of an existing file
-  // to overwrite it, and failing halfway through would leave the rename half-done.
+  // Collisions are checked BEFORE anything is read or written.
+  const mapping = new Map(); // oldPath -> newPath for every moved file
   for (const file of filesInFolder) {
     const newPath = `${newClean}/${file.path.slice(oldClean.length + 1)}`;
     if (allFiles.some((other) => other.path === newPath)) {
-      throw new Error(`Folder "${newClean}" already contains "${basenameOf(file.path)}" — rename would overwrite it`);
+      throw new Error(`Folder "${newClean}" already contains "${basenameOf(file.path)}" - rename would overwrite it`);
     }
+    mapping.set(file.path, newPath);
   }
 
+  const progress = async (p) => {
+    if (typeof options.onProgress === 'function') { try { await options.onProgress(p); } catch (_) {} }
+  };
+  const applyMapping = (text, fileDir) => {
+    let t = text;
+    for (const [o, n] of mapping) {
+      const r = updateReferencesInFile(t, fileDir, o, n);
+      if (r.changed) t = r.text;
+    }
+    return t;
+  };
+
+  const changes = [];
   const moved = [];
-  const mapping = new Map(); // oldPath -> newPath for every moved file
+  const updated = [];
+  const failed = [];
 
-  // `moveFile` only READS allFiles, so the snapshot the caller handed us goes
-  // stale after the very first move: its entries still name files under oldClean
-  // that by then live under newClean. updateReferencesEverywhere() scans that
-  // list, so on the second iteration it looks for "Notes/a.md", 404s, and skips
-  // it — leaving root-absolute links in an already-moved file pointing at a
-  // folder that no longer exists. Keep a private copy in step with the moves.
-  //
-  // Shallow copies on purpose: the caller still owns allFiles and may reuse it,
-  // and filesInFolder below must keep yielding the original paths as we iterate.
-  const snapshot = allFiles.map((f) => ({ ...f }));
-
-  const total = filesInFolder.length;
+  // Files of the folder. A .md is read: its own relative links and links to its
+  // moved neighbours are rewritten; a read failure aborts BEFORE the commit.
+  // Anything else keeps its blob: same sha under the new path, never re-uploaded.
   let done = 0;
   for (const file of filesInFolder) {
-    const relPath = file.path.slice(oldClean.length + 1);
-    const newPath = `${newClean}/${relPath}`;
-    const result = await moveFile(client, snapshot, file.path, dirnameOf(newPath), { skipReferenceRewrite: true });
-    const entry = snapshot.find((f) => f.path === file.path);
-    if (entry) entry.path = newPath;
-    // `sha` is deliberately left stale: the reference pass below re-fetches it
-    // per file, and a clash sha is only read under { overwrite: true }, which
-    // a folder rename never passes.
-    moved.push(result.newPath);
-    mapping.set(file.path, newPath);
-    done += 1;
-    if (typeof options.onProgress === 'function') {
-      try { await options.onProgress({ phase: 'move', done, total, path: file.path }); } catch (_) {}
+    const newPath = mapping.get(file.path);
+    if (extOf(file.path) === 'md') {
+      const { b64, sha } = await client.getFileB64(file.path);
+      let text = null;
+      try { text = b64ToUtf8(b64); } catch (_) { text = null; } // binary under .md: keep the bytes
+      const next = text === null ? null
+        : applyMapping(rewriteOwnRelativeLinks(text, dirnameOf(file.path), dirnameOf(newPath)), dirnameOf(newPath));
+      if (text !== null && next !== text) {
+        changes.push({ path: newPath, contentB64: utf8ToB64(next) });
+        updated.push(newPath);
+      } else {
+        changes.push({ path: newPath, sha });
+      }
+    } else {
+      let sha = file.sha;
+      if (!sha) ({ sha } = await client.getFileB64(file.path));
+      changes.push({ path: newPath, sha });
     }
+    changes.push({ path: file.path, sha: null });
+    moved.push(newPath);
+    done += 1;
+    await progress({ phase: 'move', done, total: filesInFolder.length, path: file.path });
   }
 
-  // UI can refresh as soon as blobs live under the new prefix — do not wait for
-  // the link pass (same idea as onMoved for a single-file move).
+  // Notes outside the folder: links to the moved files. An unreadable note is
+  // reported (failedFiles) and does not stop the rename.
+  const outside = allFiles.filter((f) => extOf(f.path) === 'md' && !mapping.has(f.path));
+  let linkDone = 0;
+  for (const f of outside) {
+    await progress({ phase: 'links', done: linkDone, total: outside.length, path: f.path });
+    linkDone += 1;
+    let b64;
+    try {
+      ({ b64 } = await client.getFileB64(f.path));
+    } catch (e) {
+      console.warn('Failed to read for link update:', f.path, e);
+      failed.push(f.path);
+      continue;
+    }
+    let text;
+    try { text = b64ToUtf8(b64); } catch (_) { continue; } // not valid UTF-8: nothing to rewrite
+    const next = applyMapping(text, dirnameOf(f.path));
+    if (next === text) continue;
+    changes.push({ path: f.path, contentB64: utf8ToB64(next) });
+    updated.push(f.path);
+  }
+
+  await client.commitTreeChanges(options.branch, `Rename folder ${oldClean} to ${newClean}`, changes);
+
   if (typeof options.onPhase1Done === 'function') {
     try {
       await options.onPhase1Done({ moved: moved.slice(), mapping, oldClean, newClean });
@@ -92,81 +131,28 @@ export async function renameFolder(client, allFiles, oldFolderPath, newFolderPat
       console.warn('onPhase1Done failed', e);
     }
   }
-
-  // Phase 2: ONE reference-rewrite pass over the whole repo.
-  // Build all old→new mappings, then read each .md once, apply every mapping
-  // in memory, and PUT only if the text changed. ≈ M GETs + ≤ M PUTs total
-  // instead of N×M. Moved files are scanned under their NEW paths — root-absolute
-  // links they still carry to old paths get fixed here too.
-  const allUpdated = [];
-  const allFailed = [];
-  const mdFiles = snapshot.filter((f) => extOf(f.path) === 'md');
-
-  let linkDone = 0;
-  const linkTotal = mdFiles.length;
-  for (const f of mdFiles) {
-    if (typeof options.onProgress === 'function') {
-      try { await options.onProgress({ phase: 'links', done: linkDone, total: linkTotal, path: f.path }); } catch (_) {}
-    }
-    linkDone += 1;
-    let b64;
-    let sha;
-    try {
-      ({ b64, sha } = await client.getFileB64(f.path));
-    } catch (e) {
-      console.warn('Failed to read for link update:', f.path, e);
-      allFailed.push(f.path);
-      continue;
-    }
-    let text;
-    try {
-      text = b64ToUtf8(b64);
-    } catch (_) {
-      continue; // not valid UTF-8 (binary under .md): nothing to rewrite, not a failure
-    }
-    const fileDir = dirnameOf(f.path);
-    let currentText = text;
-    let changed = false;
-    for (const [oldPath, newPath] of mapping) {
-      const { changed: c, text: newText } = updateReferencesInFile(currentText, fileDir, oldPath, newPath);
-      if (c) {
-        changed = true;
-        currentText = newText;
-      }
-    }
-    if (!changed) continue;
-    try {
-      await client.putFile(f.path, utf8ToB64(currentText), `Update links after renaming folder ${oldClean} to ${newClean}`, sha);
-      allUpdated.push(f.path);
-    } catch (e) {
-      console.warn('Failed to update links in', f.path, e);
-      allFailed.push(f.path);
-    }
-  }
-
-  return { moved, updatedFiles: [...new Set(allUpdated)], failedFiles: [...new Set(allFailed)] };
+  return { moved, updatedFiles: [...new Set(updated)], failedFiles: [...new Set(failed)] };
 }
 
 /**
- * Deletes a folder: removes all files in it.
+ * Deletes a folder in ONE atomic commit (client.commitTreeChanges): every file
+ * goes, or none does. options.branch is required.
  * @param {import('./github-client.js').GitHubClient} client
  * @param {{path:string, sha:string}[]} allFiles
  * @param {string} folderPath
  * @returns {Promise<string[]>} paths of the deleted files
  */
-export async function deleteFolder(client, allFiles, folderPath) {
+export async function deleteFolder(client, allFiles, folderPath, options = {}) {
   const cleanPath = folderPath.replace(/^\/+|\/+$/g, '');
   if (!cleanPath) throw new Error('Folder path cannot be empty');
+  if (!options.branch) throw new Error('deleteFolder: options.branch is required');
 
   const filesInFolder = allFiles.filter((f) => f.path.startsWith(cleanPath + '/'));
   if (!filesInFolder.length) throw new Error('Folder is empty or does not exist');
 
-  const deleted = [];
-  for (const file of filesInFolder) {
-    await client.deleteFile(file.path, file.sha, `Delete ${file.path} (folder removal)`);
-    deleted.push(file.path);
-  }
-  return deleted;
+  await client.commitTreeChanges(options.branch, `Delete folder ${cleanPath}`,
+    filesInFolder.map((f) => ({ path: f.path, sha: null })));
+  return filesInFolder.map((f) => f.path);
 }
 
 /**

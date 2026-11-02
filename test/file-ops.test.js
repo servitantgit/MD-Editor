@@ -46,6 +46,22 @@ class FakeClient {
     this.files.delete(path);
     this.deletes.push(path);
   }
+  // One atomic commit, like GitHubClient.commitTreeChanges: every change or none.
+  async commitTreeChanges(branch, message, changes) {
+    (this.commits ||= []).push({ branch, message, changes });
+    const bySha = new Map([...this.files.values()].map((f) => [f.sha, f]));
+    const next = new Map(this.files);
+    for (const c of changes) if (c.sha === null || c.contentB64 === null) next.delete(c.path);
+    for (const c of changes) {
+      if (typeof c.contentB64 === 'string') next.set(c.path, { text: Buffer.from(c.contentB64, 'base64').toString('utf-8'), sha: 'sha-' + c.path });
+      else if (typeof c.sha === 'string') {
+        const src = bySha.get(c.sha);
+        if (!src) throw new Error('unknown blob ' + c.sha);
+        next.set(c.path, { text: src.text, sha: c.sha });
+      }
+    }
+    this.files = next;
+  }
 }
 
 /** Build a minimal deps object for createFileOps. */
@@ -199,8 +215,11 @@ test('onRenameFolder proceeds when no file inside is dirty', async () => {
     window.prompt = originalPrompt;
   }
 
-  assert.equal(client.puts.length, 2, 'one put per moved file');
-  assert.equal(client.deletes.length, 2, 'one delete per moved file');
+  assert.equal(client.puts.length, 0, 'no per-file PUT: the move is one commit');
+  assert.equal(client.deletes.length, 0, 'no per-file DELETE');
+  assert.equal((client.commits || []).length, 1, 'exactly one commit');
+  assert.equal(client.commits[0].branch, 'main', 'commit goes to the current branch');
+  assert.equal(client.commits[0].message, 'Rename folder Notes to Docs');
   assert.equal(client.files.has('Notes/a.md'), false);
   assert.equal(client.files.get('Docs/a.md').text, '# a');
   assert.equal(client.files.get('Docs/b.md').text, '# b');
@@ -386,8 +405,10 @@ test('onMoveFolder to the repository root moves the folder up (Notes/Sub → Sub
 
   await onMoveFolder('Notes/Sub', '');
 
-  assert.equal(client.puts.length, 1, 'one put for the moved file');
-  assert.equal(client.deletes.length, 1, 'one delete for the old path');
+  assert.equal(client.puts.length, 0, 'no per-file PUT: the move is one commit');
+  assert.equal(client.deletes.length, 0, 'no per-file DELETE');
+  assert.equal((client.commits || []).length, 1, 'exactly one commit');
+  assert.equal(client.commits[0].branch, 'main', 'commit goes to the current branch');
   assert.equal(client.files.has('Notes/Sub/a.md'), false, 'old path removed');
   assert.equal(client.files.get('Sub/a.md').text, '# a', 'file lands in the root-level folder');
   assert.match(status().msg, /Moved: Notes\/Sub → Sub/, 'status reports the landing spot');
@@ -423,10 +444,10 @@ test('a successful onMoveFolder renames tabs and working-tree entries to the new
   // The user types into the file WHILE the async pre-check has already run:
   // the move goes through (the check saw a clean tree), and the post-move
   // steps must still carry the freshly-created entry to the new path.
-  const realPut = client.putFile.bind(client);
-  client.putFile = async (path, b64, message, sha) => {
-    workingTree.setDirty('Notes/a.md', '# typed mid-move', sha || 'sha-a');
-    return realPut(path, b64, message, sha);
+  const realCommit = client.commitTreeChanges.bind(client);
+  client.commitTreeChanges = async (branch, message, changes) => {
+    workingTree.setDirty('Notes/a.md', '# typed mid-move', 'sha-a');
+    return realCommit(branch, message, changes);
   };
 
   const { deps, status } = makeDeps({ client, allFiles, workingTree });
@@ -448,8 +469,10 @@ test('a successful onMoveFolder renames tabs and working-tree entries to the new
   const { onMoveFolder } = createFileOps(deps);
   await onMoveFolder('Notes', 'Docs');
 
-  assert.equal(client.puts.length, 1, 'one put for the move');
-  assert.equal(client.deletes.length, 1, 'one delete for the move');
+  assert.equal(client.puts.length, 0, 'no per-file PUT: the move is one commit');
+  assert.equal(client.deletes.length, 0, 'no per-file DELETE');
+  assert.equal((client.commits || []).length, 1, 'exactly one commit');
+  assert.equal(client.commits[0].branch, 'main', 'commit goes to the current branch');
   assert.equal(client.files.has('Notes/a.md'), false, 'old path removed');
   assert.equal(client.files.get('Docs/Notes/a.md').text, '# a', 'file lands inside the target folder');
   assert.deepEqual(renameFolderCalls, [['Notes', 'Docs/Notes']], 'tabs model told about the folder rename');

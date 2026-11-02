@@ -769,6 +769,7 @@ export function createFileOps(deps) {
         folderPath,
         newPath,
         {
+          branch: deps.getState().branch,
           onProgress: ({ phase, done, total }) => {
             if (phase === 'move') {
               deps.setSaveStatus(`Renaming ${folderPath}… ${done}/${total} files`, false, { sticky: true });
@@ -868,6 +869,7 @@ export function createFileOps(deps) {
         oldPath,
         newPath,
         {
+          branch: deps.getState().branch,
           onProgress: ({ phase, done, total }) => {
             if (phase === 'move') {
               deps.setSaveStatus(`Moving ${oldPath}… ${done}/${total} files`, false, { sticky: true });
@@ -990,7 +992,7 @@ export function createFileOps(deps) {
       // Collected BEFORE the delete: allFiles still lists the folder, and the
       // working tree may also hold new (never committed) files under it.
       const folderPaths = pathsUnderFolder(folderPath);
-      await deleteFolder(deps.getState().client, deps.getState().allFiles, folderPath);
+      await deleteFolder(deps.getState().client, deps.getState().allFiles, folderPath, { branch: deps.getState().branch });
       await deps.dropTabs(deps.getTabs().paths.filter((p) => p.startsWith(folderPath + '/')));
       await forgetPaths(folderPaths);
       await deps.loadTree();
