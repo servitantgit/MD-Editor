@@ -118,3 +118,63 @@ test('getBlobB64 still throws when content is missing and size is unknown', asyn
   const client = new GitHubClient({ token: 't', owner: 'o', repo: 'r' });
   await assert.rejects(client.getBlobB64('sha-x'), /Empty blob/);
 });
+
+// ---- commitTreeChanges: one atomic commit through the Git Data API ----
+// A folder rename/delete used to be N separate commits; one failure halfway
+// left the repository half-changed.
+function mockGitData({ failTree = false } = {}) {
+  const calls = [];
+  const ok = (body) => ({ ok: true, status: 200, json: async () => body, text: async () => JSON.stringify(body), headers: { get: () => null } });
+  const bad = () => ({ ok: false, status: 422, json: async () => ({ message: 'tree failed (mock)' }), text: async () => 'tree failed (mock)', headers: { get: () => null } });
+  globalThis.fetch = async (url, options = {}) => {
+    const u = String(url);
+    const method = options.method || 'GET';
+    calls.push({ url: u, method, body: options.body ? JSON.parse(options.body) : null });
+    if (method === 'GET' && u.includes('/git/ref/heads/')) return ok({ object: { sha: 'parent-sha' } });
+    if (method === 'GET' && u.includes('/git/commits/')) return ok({ sha: 'parent-sha', tree: { sha: 'base-tree' } });
+    if (method === 'POST' && u.includes('/git/blobs')) return ok({ sha: 'blob-' + calls.length });
+    if (method === 'POST' && u.includes('/git/trees')) return failTree ? bad() : ok({ sha: 'new-tree' });
+    if (method === 'POST' && u.includes('/git/commits')) return ok({ sha: 'new-commit' });
+    if (method === 'PATCH' && u.includes('/git/refs/heads/')) return ok({ object: { sha: 'new-commit' } });
+    return { ok: false, status: 404, json: async () => ({ message: 'unexpected ' + method + ' ' + u }), text: async () => 'unexpected', headers: { get: () => null } };
+  };
+  return calls;
+}
+
+test('commitTreeChanges moves a file by reusing its blob sha, in one commit', async () => {
+  const calls = mockGitData();
+  const client = new GitHubClient({ token: 't', owner: 'o', repo: 'r' });
+  await client.commitTreeChanges('main', 'Rename folder Notes to Docs', [
+    { path: 'Docs/a.md', sha: 'sha-a' },
+    { path: 'Notes/a.md', sha: null },
+  ]);
+  assert.equal(calls.filter((c) => c.method === 'POST' && c.url.includes('/git/blobs')).length, 0, 'no blob for a move');
+  const tree = calls.find((c) => c.method === 'POST' && c.url.includes('/git/trees'));
+  assert.equal(tree.body.base_tree, 'base-tree');
+  assert.deepEqual(tree.body.tree.map((e) => [e.path, e.sha]), [['Docs/a.md', 'sha-a'], ['Notes/a.md', null]]);
+  const commit = calls.find((c) => c.method === 'POST' && c.url.includes('/git/commits'));
+  assert.equal(commit.body.tree, 'new-tree');
+  assert.deepEqual(commit.body.parents, ['parent-sha']);
+  const ref = calls.find((c) => c.method === 'PATCH');
+  assert.ok(ref, 'the branch must be updated');
+  assert.equal(ref.body.sha, 'new-commit');
+});
+
+test('commitTreeChanges creates a blob only for new content', async () => {
+  const calls = mockGitData();
+  const client = new GitHubClient({ token: 't', owner: 'o', repo: 'r' });
+  await client.commitTreeChanges('main', 'Update links', [{ path: 'Other/w.md', contentB64: 'eA==' }]);
+  const blobs = calls.filter((c) => c.method === 'POST' && c.url.includes('/git/blobs'));
+  assert.equal(blobs.length, 1);
+  const tree = calls.find((c) => c.method === 'POST' && c.url.includes('/git/trees'));
+  assert.equal(tree.body.tree.length, 1);
+  assert.match(String(tree.body.tree[0].sha), /^blob-/);
+});
+
+test('commitTreeChanges is atomic: a failed tree means no commit and no branch update', async () => {
+  const calls = mockGitData({ failTree: true });
+  const client = new GitHubClient({ token: 't', owner: 'o', repo: 'r' });
+  await assert.rejects(client.commitTreeChanges('main', 'Delete folder Docs', [{ path: 'Docs/a.md', sha: null }]));
+  assert.equal(calls.filter((c) => c.method === 'POST' && c.url.includes('/git/commits')).length, 0);
+  assert.equal(calls.filter((c) => c.method === 'PATCH').length, 0);
+});

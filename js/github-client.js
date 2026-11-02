@@ -238,28 +238,50 @@ export class GitHubClient {
    *   contentB64=null deletes the path
    */
   async commitFiles(branch, message, files) {
+    return this.commitTreeChanges(branch, message, files.map((f) => ({ path: f.path, contentB64: f.contentB64 })));
+  }
+
+  /**
+   * ONE atomic commit through the Git Data API: either every change lands or
+   * none does (the branch moves only after the tree and the commit exist).
+   * Each change is one of:
+   *   { path, contentB64: string }  new content (a blob is created)
+   *   { path, sha: string }         an existing blob under this path (a move,
+   *                                 no re-upload of the content)
+   *   { path, sha: null } or { path, contentB64: null }  delete the path
+   * A folder rename/delete used to be one commit per file: a failure halfway
+   * left the repository half-changed.
+   * @param {string} branch
+   * @param {string} message
+   * @param {Array<{path: string, contentB64?: string|null, sha?: string|null, mode?: string}>} changes
+   */
+  async commitTreeChanges(branch, message, changes) {
+    // Validate everything before the first request.
+    for (const c of changes) {
+      const ok = c && typeof c.path === 'string' && c.path !== ''
+        && (typeof c.contentB64 === 'string' || c.contentB64 === null || c.sha === null || typeof c.sha === 'string');
+      if (!ok) throw new Error('commitTreeChanges: invalid change ' + JSON.stringify(c));
+    }
     const parentSha = await this.getRefSha(branch);
     const parentCommit = await this.getCommit(parentSha);
     const baseTreeSha = parentCommit.tree.sha;
 
-    const changes = [];
-    for (const f of files) {
-      if (f.contentB64 === null) {
-        changes.push({ path: f.path, sha: null });
+    const entries = [];
+    for (const c of changes) {
+      if (typeof c.contentB64 === 'string') {
+        const blob = await this.createBlob(c.contentB64);
+        entries.push({ path: c.path, sha: blob.sha });
+      } else if (c.contentB64 === null || c.sha === null) {
+        entries.push({ path: c.path, sha: null });
       } else {
-        const blob = await this.createBlob(f.contentB64);
-        changes.push({ path: f.path, sha: blob.sha });
+        entries.push({ path: c.path, sha: c.sha, mode: c.mode });
       }
     }
 
-    const tree = await this.createTree(baseTreeSha, changes);
-    const commit = await this.createCommitObject({
-      message,
-      treeSha: tree.sha,
-      parentSha,
-    });
+    const tree = await this.createTree(baseTreeSha, entries);
+    const commit = await this.createCommitObject({ message, treeSha: tree.sha, parentSha });
     await this.updateRef(branch, commit.sha);
-    return { commit, files: changes };
+    return { commit, files: entries };
   }
 
   /** Recent commits on a branch (optionally filtered by path). */
