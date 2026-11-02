@@ -140,6 +140,11 @@ export async function updateReferencesEverywhere(client, allFiles, oldPath, newP
   // oldPath is skipped too: it was deleted before this pass, so reading it can
   // only 404 - which would otherwise be reported as a failed update.
   const mdFiles = allFiles.filter((f) => extOf(f.path) === 'md' && f.path !== newPath && f.path !== oldPath);
+  // [[Old name]] wiki links follow a RENAME only when the old name is unique:
+  // with two "Printer jam.md" in the repo the link could mean either one.
+  const oldBase = basenameOf(oldPath).toLowerCase();
+  const wikiName = oldBase !== basenameOf(newPath).toLowerCase()
+    && allFiles.filter((f) => basenameOf(f.path).toLowerCase() === oldBase).length === 1;
 
   for (const f of mdFiles) {
     let b64;
@@ -157,7 +162,7 @@ export async function updateReferencesEverywhere(client, allFiles, oldPath, newP
     } catch (_) {
       continue; // not valid UTF-8 (binary under .md): nothing to rewrite, not a failure
     }
-    const { changed, text: newText } = updateReferencesInFile(text, dirnameOf(f.path), oldPath, newPath);
+    const { changed, text: newText } = updateReferencesInFile(text, dirnameOf(f.path), oldPath, newPath, { wikiName });
     if (!changed) continue;
     try {
       await client.putFile(f.path, utf8ToB64(newText), `Update links after moving ${oldPath} to ${newPath}`, sha);

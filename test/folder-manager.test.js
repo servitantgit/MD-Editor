@@ -192,3 +192,11 @@ test('deleteFolder leaves every file in place when the commit fails', async () =
   await assert.rejects(deleteFolder(client, allFiles, 'Docs', { branch: 'main' }));
   assert.deepEqual([...client.files.keys()].sort(), ['Docs/a.md', 'Docs/b.md']);
 });
+
+test('renameFolder updates [[Folder/Note]] wiki links in other notes, in the same one commit', async () => {
+  const client = new FakeClient({ 'Notes/a.md': '# a\n', 'Outside/w.md': 'See [[Notes/a]] and [[Notes/a.md|alias]].\n' });
+  const allFiles = [...client.files.keys()].map((p) => ({ path: p, sha: 'sha-' + p }));
+  await renameFolder(client, allFiles, 'Notes', 'Docs', { branch: 'main' });
+  assert.equal(client.commits.length, 1, 'one commit');
+  assert.equal(client.files.get('Outside/w.md').text, 'See [[Docs/a]] and [[Docs/a.md|alias]].\n');
+});

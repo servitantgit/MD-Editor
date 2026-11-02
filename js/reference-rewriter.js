@@ -4,6 +4,7 @@
 // is done by file-mover.js, which uses these functions.
 
 import {
+  basenameOf,
   dirnameOf,
   resolveRelativePath,
   relativePathFromTo,
@@ -39,7 +40,7 @@ export function rewriteOwnRelativeLinks(text, oldDir, newDir) {
  * that actually point at oldPath — both relative and root-relative — to newPath.
  * Returns {changed, text}.
  */
-export function updateReferencesInFile(text, fileDir, oldPath, newPath) {
+export function updateReferencesInFile(text, fileDir, oldPath, newPath, options = {}) {
   let changed = false;
   const newText = replaceOutsideFences(text, REF_TOKEN_RE, (full, g1, g2, g3, g4, g5, g6) => {
     const parsed = classifyRefMatch(full, g1, g2, g3, g4, g5, g6);
@@ -57,7 +58,54 @@ export function updateReferencesInFile(text, fileDir, oldPath, newPath) {
       : encodeLinkPath(relativePathFromTo(fileDir, newPath));
     return rebuildRefToken(parsed, newTarget, full);
   });
-  return { changed, text: newText };
+  const wiki = rewriteWikiLinks(newText, fileDir, oldPath, newPath, options);
+  return { changed: changed || wiki.changed, text: wiki.text };
+}
+
+const WIKI_RE = /\[\[([^\]]+)\]\]/g;
+
+/**
+ * [[wiki links]] in ANOTHER note that point at oldPath -> newPath. Same rules
+ * as backlinks.js (Obsidian): [[./x]] / [[../x]] from the note folder, any
+ * other path ([[A/x]], [[/A/x]]) from the repository root, a bare name ([[x]])
+ * only when options.wikiName (the caller knows the name changed and the old
+ * name is unique). The written form is kept: .md or not, a leading slash,
+ * #heading, |alias, the ! of an embed. Code spans and fences are skipped.
+ */
+function rewriteWikiLinks(text, fileDir, oldPath, newPath, options) {
+  let changed = false;
+  const newNoExt = newPath.replace(/\.md$/i, '');
+  const pick = (p) => (p === oldPath ? newPath : (p + '.md' === oldPath ? newNoExt : null));
+  const out = replaceOutsideFences(text, WIKI_RE, (full, inner) => {
+    const pipe = inner.indexOf('|');
+    const head = pipe < 0 ? inner : inner.slice(0, pipe);
+    const alias = pipe < 0 ? '' : inner.slice(pipe);
+    const hash = head.indexOf('#');
+    const target = hash < 0 ? head : head.slice(0, hash);
+    const heading = hash < 0 ? '' : head.slice(hash);
+    const t = target.trim();
+    if (!t || /^(https?:|mailto:)/i.test(t)) return full;
+    let next = null;
+    if (/^\.\.?\//.test(t)) {
+      const hit = pick(resolveRelativePath(fileDir, t));
+      if (hit !== null) {
+        next = relativePathFromTo(fileDir, hit);
+        if (!next.startsWith('.')) next = './' + next; // stay relative, never turn into a bare name
+      }
+    } else if (t.includes('/')) {
+      const lead = t.startsWith('/') ? '/' : '';
+      const hit = pick(t.slice(lead.length));
+      if (hit !== null) next = lead + hit;
+    } else if (options && options.wikiName) {
+      const oldBase = basenameOf(oldPath);
+      if (t === oldBase) next = basenameOf(newPath);
+      else if (t + '.md' === oldBase) next = basenameOf(newPath).replace(/\.md$/i, '');
+    }
+    if (next === null || next === t) return full;
+    changed = true;
+    return '[[' + target.replace(t, () => next) + heading + alias + ']]';
+  });
+  return { changed, text: out };
 }
 
 /** Convenience helper: dirname of the new path when renaming/moving a file. */

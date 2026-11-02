@@ -142,3 +142,47 @@ test('links with code in the text, lone backticks and backticks across paragraph
     assert.equal(updateReferencesInFile(text, '', 'b.md', 'x/b.md').text, expected, text);
   }
 });
+
+// ---- [[wiki links]] follow a moved or renamed note (Obsidian rules, like backlinks.js) ----
+const MOVE = ['Notes/Printer jam.md', 'Archive/Printer jam.md'];
+const RENAME = ['Notes/Printer jam.md', 'Notes/Paper jam.md'];
+
+test('wiki links: [[Path/Note]] follows a moved note, spaces stay as they are', () => {
+  const r = updateReferencesInFile('See [[Notes/Printer jam]].\n', 'Other', ...MOVE);
+  assert.equal(r.changed, true);
+  assert.equal(r.text, 'See [[Archive/Printer jam]].\n');
+});
+
+test('wiki links: alias, heading, .md, a leading slash and an embed keep their form', () => {
+  const text = '[[Notes/Printer jam|the jam]] [[Notes/Printer jam#Fix]] [[Notes/Printer jam.md]] [[/Notes/Printer jam]] ![[Notes/Printer jam]]\n';
+  const out = updateReferencesInFile(text, 'Other', ...MOVE).text;
+  assert.equal(out, '[[Archive/Printer jam|the jam]] [[Archive/Printer jam#Fix]] [[Archive/Printer jam.md]] [[/Archive/Printer jam]] ![[Archive/Printer jam]]\n');
+});
+
+test('wiki links: [[../Path/Note]] is recalculated from the folder of the note', () => {
+  const r = updateReferencesInFile('See [[../Notes/Printer jam]].\n', 'Other', ...MOVE);
+  assert.equal(r.text, 'See [[../Archive/Printer jam]].\n');
+});
+
+test('wiki links: [[Note name]] is left alone unless the caller allows name links', () => {
+  const text = 'See [[Printer jam]].\n';
+  assert.deepEqual(updateReferencesInFile(text, 'Other', ...RENAME), { changed: false, text });
+  assert.deepEqual(updateReferencesInFile(text, 'Other', ...MOVE, { wikiName: true }), { changed: false, text }, 'a move keeps the name');
+});
+
+test('wiki links: with wikiName a renamed note updates [[Old name]], [[Old name|alias]] and [[Old name.md]]', () => {
+  const r = updateReferencesInFile('[[Printer jam]] [[Printer jam|x]] [[Printer jam.md]]\n', 'Other', ...RENAME, { wikiName: true });
+  assert.equal(r.changed, true);
+  assert.equal(r.text, '[[Paper jam]] [[Paper jam|x]] [[Paper jam.md]]\n');
+});
+
+test('wiki links: inline code and fenced code are left untouched', () => {
+  const text = 'Real [[Notes/Printer jam]] and `[[Notes/Printer jam]]`.\n\n```\n[[Notes/Printer jam]]\n```\n';
+  const out = updateReferencesInFile(text, 'Other', ...MOVE).text;
+  assert.equal(out, 'Real [[Archive/Printer jam]] and `[[Notes/Printer jam]]`.\n\n```\n[[Notes/Printer jam]]\n```\n');
+});
+
+test('wiki links: links to other notes are not touched', () => {
+  const text = 'See [[Notes/Other note]] and [[Other note]].\n';
+  assert.deepEqual(updateReferencesInFile(text, 'Other', ...RENAME, { wikiName: true }), { changed: false, text });
+});

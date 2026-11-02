@@ -187,3 +187,28 @@ test('moveToPath leaves a .md file that is not valid UTF-8 byte-for-byte untouch
   assert.equal(writes.length, 1, 'the move itself must still happen');
   assert.equal(writes[0].b64, notUtf8, 'content must be written back unchanged');
 });
+
+// ---- [[wiki links]] follow a renamed or moved note ----
+const wikiFiles = (files) => Object.keys(files).map((path) => ({ path, sha: 'sha-' + path }));
+
+test('renameFile updates [[Old name]] and [[Path/Old name|alias]] in other notes when the name is unique', async () => {
+  const files = { 'Notes/Printer jam.md': '# jam\n', 'Other/ref.md': 'See [[Printer jam]] and [[Notes/Printer jam|x]].\n' };
+  const client = new FakeClient(files);
+  await renameFile(client, wikiFiles(files), 'Notes/Printer jam.md', 'Paper jam.md');
+  assert.equal(client.files.get('Other/ref.md').text, 'See [[Paper jam]] and [[Notes/Paper jam|x]].\n');
+});
+
+test('renameFile leaves [[Old name]] alone when another note has the same name', async () => {
+  const files = { 'Notes/Printer jam.md': '# jam\n', 'Archive/Printer jam.md': '# other jam\n', 'Other/ref.md': 'See [[Printer jam]].\n' };
+  const client = new FakeClient(files);
+  await renameFile(client, wikiFiles(files), 'Notes/Printer jam.md', 'Paper jam.md');
+  assert.equal(client.files.has('Notes/Paper jam.md'), true, 'the rename itself happened');
+  assert.equal(client.files.get('Other/ref.md').text, 'See [[Printer jam]].\n', 'an ambiguous name link is not guessed');
+});
+
+test('moveFile keeps [[Name]] (same name) and updates [[Path/Name]]', async () => {
+  const files = { 'Notes/Printer jam.md': '# jam\n', 'Other/ref.md': 'See [[Printer jam]] and [[Notes/Printer jam]].\n' };
+  const client = new FakeClient(files);
+  await moveFile(client, wikiFiles(files), 'Notes/Printer jam.md', 'Archive');
+  assert.equal(client.files.get('Other/ref.md').text, 'See [[Printer jam]] and [[Archive/Printer jam]].\n');
+});
