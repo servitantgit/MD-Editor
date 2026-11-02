@@ -1,4 +1,4 @@
-﻿import { test, mock } from 'node:test';
+import { test, mock } from 'node:test';
 import assert from 'node:assert/strict';
 import { utf8ToB64, b64ToUtf8 } from '../js/github-client.js';
 import { Autosave, IDLE_MS, MAX_MS, LOCAL_WRITE_DEBOUNCE_MS, STATE, STATUS } from '../js/autosave.js';
