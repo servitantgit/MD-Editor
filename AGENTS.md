@@ -315,36 +315,52 @@ resulting `/contents/...` request URL contains no `object`/`PointerEvent`
 **and** points at the tree's active folder. That second assertion is what makes
 the check meaningful: verified to fail if the file lands in the root instead.
 
-## renameFolder: the file snapshot must track the moves it makes
+## Folder operations: ONE atomic commit (commitTreeChanges)
 
-`moveFile`/`moveToPath` only ever READ `allFiles` — they never update it. So a
-loop that moves several files through the same snapshot (only `renameFolder`
-does) is walking a list that goes stale under it. After the first move the
-entries still name files under the **old** folder while the files themselves now
-live under the new one.
+`renameFolder` and `deleteFolder` (`js/folder-manager.js`) never write file by
+file. They used to: one PUT + DELETE commit per file, so an error halfway
+(network, rate limit, 409) left the folder split in two or half-deleted, the
+links not rewritten, and the editor still holding tabs and drafts of deleted
+files. Now both collect every change first and send it as ONE commit through
+`client.commitTreeChanges(branch, message, changes)` (`js/github-client.js`:
+ref -> parent commit -> blobs for new content -> tree -> commit -> ref update).
+The branch moves only after the tree and the commit exist: all or nothing.
+`onRenameFolder` and `onMoveFolder` both go through `renameFolder`. Moving or
+renaming a single FILE still uses the Contents API (`moveToPath`: PUT + DELETE,
+then a link pass); only folder operations are atomic.
 
-`updateReferencesEverywhere()` scans that list, so on the second iteration it
-asks for `Notes/a.md`, gets a 404, hits its `catch`, and skips the file — the
-root-absolute links inside that already-moved file keep pointing at a folder
-that no longer exists. Verified in `test/folder-manager.test.js`, which fails
-without the fix: `Docs/a.md` kept `[b](/Notes/b.md)` instead of `[b](/Docs/b.md)`.
+Rules:
 
-The failure is easy to miss because it only shows up for **root-absolute** links
-(`/Notes/b.md`). Relative links between files of the same folder survive on
-their own — they keep pointing at the same relative position once the whole
-folder travels together — so a fixture built only from relative links passes
-either way and proves nothing.
+- `options.branch` is required (`file-ops.js` passes `deps.getState().branch`);
+  without it both functions throw before any request.
+- Read before write. A `.md` inside the folder is read, and its own relative
+  links plus links to its moved neighbours are rewritten
+  (`rewriteOwnRelativeLinks` + `updateReferencesInFile`); a read failure there
+  aborts BEFORE the commit, so GitHub is untouched.
+- Any other file (pictures, `.gitkeep`) is NOT read: it moves as
+  `{ path: newPath, sha }` with the sha from the tree, no re-upload.
+- Notes outside the folder are read for links; an unreadable one goes to
+  `failedFiles` and does not stop the rename.
+- Change shapes: `{ path, contentB64 }` new content, `{ path, sha }` an existing
+  blob under a new path, `{ path, sha: null }` delete.
+- The demo client (`js/demo-client.js`) has an in-memory `commitTreeChanges`
+  with the same contract. Keep it in step, or folder operations break in demo mode.
 
-Keep a **private** copy (`allFiles.map((f) => ({ ...f }))`) and repoint the
-entry after each move. Two reasons it must be a copy, not an in-place edit:
+The old stale-snapshot problem (a loop of `moveFile` calls reading an `allFiles`
+list that no longer matched GitHub) is gone with the loop: the old -> new path
+mapping is built once, before anything is read or written, and name collisions
+are checked from it.
 
-- the caller still owns `allFiles` and reuses it for the tree refresh afterwards;
-- `filesInFolder` holds references to the same objects, so mutating them in
-  place would corrupt the loop's own iteration source.
-
-The `sha` is deliberately left stale there: `updateReferencesEverywhere()`
-re-fetches it per file, and a clash sha is only read under `{ overwrite: true }`,
-which a folder rename never passes.
+Tests: `test/folder-manager.test.js` (one commit on the given branch, a picture
+moves by its sha and is not read, a read failure changes nothing, a failed
+delete commit leaves every file), `test/github-client.test.js` (blob reuse, a
+blob only for new content, a failed tree means no branch update), and the fake
+clients in `test/file-ops.test.js` and `test/link-failures.test.js`.
+`e2e_smoke_test.py` answers the Git Data API (`GIT_TREES`, `GIT_BLOBS`,
+`GIT_REF_UPDATES`); scenario I asserts one tree, one ref update, the exact tree
+entries (new path with the old sha, old path with `null`), no new blob and no
+contents PUT/DELETE. The old per-file way fails every one of those lines. A new
+e2e scenario that renames, moves or deletes a folder must check the same way.
 
 ## Drag-and-drop move: never block the tree on link rewriting
 
@@ -983,8 +999,35 @@ and the `[[` suggestions both use it. `rankLinkSuggestions()` orders notes for a
 query. `createLinkSuggest()` is the popup: its key map (Up/Down/Enter/Tab/Esc) is
 added only while it is open, so Enter keeps continuing lists the rest of the time.
 It is built and destroyed with the editor in `showApp()`, next to the scroll sync.
-Wikilinks `[[...]]` are NOT rewritten on move (open task B1); the suggestions
-insert markdown links for that reason.
+The suggestions insert markdown links, not `[[...]]`: those also work on
+github.com, which shows `[[...]]` as plain text.
+
+## Wiki links `[[...]]`: one set of rules for backlinks and rewriting
+
+The app reads and rewrites `[[...]]` but never creates them. Both
+`extractOutgoingLinks()` (`js/backlinks.js`) and `rewriteWikiLinks()` (called by
+`updateReferencesInFile`, `js/reference-rewriter.js`) follow Obsidian:
+
+- `[[./x]]`, `[[../x]]` - from the folder of the note that contains the link;
+- any other path (`[[Notes/x]]`, `[[/Notes/x]]`) - from the repository root;
+- a bare name (`[[x]]`) - by file name, in any folder;
+- `#heading` and `|alias` are not part of the target.
+
+Resolving every wiki link from the note folder (the old backlinks code) hid all
+links written in another folder, and `[[Notes/x]]` falsely matched
+`Other/Notes/x.md`. Do not go back to it.
+
+Rewriting keeps the written form: `.md` or not, a leading `/`, `./`, `#heading`,
+`|alias`, the `!` of an embed; code spans and fences are skipped
+(`replaceOutsideFences`). A bare `[[Name]]` is rewritten only when the caller
+passes `{ wikiName: true }`. `updateReferencesEverywhere()` (`js/file-mover.js`)
+does that only when the file NAME changed and the old name is unique among
+`allFiles` (case-insensitive): with two `Printer jam.md` the link could mean
+either one, so it is left alone. A move that keeps the name never touches
+`[[Name]]`. Folder operations get path wiki links through the same
+`updateReferencesInFile`. Not handled: relative `[[../x]]` inside the moved
+file itself. Tests: `test/backlinks.test.js`, `test/reference-rewriter.test.js`,
+`test/file-mover.test.js`, `test/folder-manager.test.js`.
 
 ## Preview re-render must keep loaded images (no placeholders while typing)
 

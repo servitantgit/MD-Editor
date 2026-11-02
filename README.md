@@ -62,7 +62,7 @@ js/
   image-resolver.js        markdown path -> data: URL via the GitHub API, cached
   file-mover.js            orchestrates moving a file (reads/writes through
                             github-client, uses reference-rewriter)
-  folder-manager.js        create/rename/delete folders (via file operations)
+  folder-manager.js        create/rename/delete folders (one atomic commit)
   image-preview.js         DOM side of the preview: src substitution, resize handle
   editor.js                wrapper around EasyMDE (setup, preview rendering,
                             correct CodeMirror.refresh(), tab-aware Preview)
@@ -229,9 +229,10 @@ python3 e2e_smoke_test.py         # editing, hybrid autosave + 409, tabs, create
   again). This option is kept off by default — see `README-CLOUDFLARE.md`.
 - Toolbar icons (Font Awesome) load from a CDN — if the network is
   unavailable, only the icon glyphs disappear; functionality is unaffected.
-- Reference rewriting handles markdown images, markdown links, and raw
-  `<img>` tags; links like `onenote:...` and other external schemes are
-  deliberately left untouched.
+- Reference rewriting handles markdown images, markdown links, `[[wiki links]]`
+  and raw `<img>` tags; links like `onenote:...` and other external schemes are
+  deliberately left untouched. A bare `[[Name]]` follows a rename only when
+  no other note in the repository has the same name.
 - PDF export depends on `html2pdf.js` (html2canvas) — very large images can
   slow generation down.
 - Full-text search degrades to session-only when IndexedDB is unavailable
