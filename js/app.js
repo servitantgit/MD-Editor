@@ -29,6 +29,7 @@ import { buildHtmlSrcdoc } from './html-preview.js';
 import { createMinimap } from './minimap.js';
 import { createScrollSync } from './scroll-sync.js';
 import { createLinkSuggest } from './link-suggest.js';
+import { createLatestOnly } from './latest-only.js';
 
 const els = {
   loginScreen: document.getElementById('login-screen'),
@@ -1039,10 +1040,17 @@ function insertMarkdownAtCursor(text) {
  *   rewritePrefix — folder move/rename: remap every path under from/ → to/.
  *   expandFolder — folder path to expand (and all ancestors) after render.
  */
+// Overlapping loadTree() calls (refresh, every save/move/delete/upload): only the
+// newest response may reach state.allFiles and the tree (js/latest-only.js).
+const treeRun = createLatestOnly();
+
 async function loadTree(opts = {}) {
   els.fileTreeEl.innerHTML = '<div class="tree-loading">Loading...</div>';
   try {
-    let files = await state.client.getTree(state.branch);
+    const res = await treeRun(() => state.client.getTree(state.branch));
+    // A newer loadTree() started while this one waited: leave everything to it.
+    if (res.stale) return;
+    let files = res.value;
 
     if (opts.rewritePath && opts.rewritePath.from && opts.rewritePath.to
         && opts.rewritePath.from !== opts.rewritePath.to) {

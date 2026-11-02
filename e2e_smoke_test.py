@@ -1387,6 +1387,36 @@ with sync_playwright() as p:
     assert badge_after < badge_before, f"Commit badge did not drop after Discard: {badge_before} -> {badge_after}"
     print(f"\u2713 Discard restores the GitHub version, pushes nothing, clears the dot and the badge ({badge_before} -> {badge_after})")
 
+    # --- Overlapping tree loads: a slow older response must not overwrite a newer tree ---
+    race = {"hold": True, "held": None}
+    old_tree_body = json.dumps({"tree": FAKE_TREE["tree"] + EXTRA_TREE})
+    def hold_first_tree(route, request):
+        if race["hold"] and race["held"] is None:
+            race["held"] = route
+            return
+        route.fallback()
+    TREE_ROUTE = re.compile(r"https://api\.github\.com/.*/git/trees/.*")
+    page.route(TREE_ROUTE, hold_first_tree)
+    page.click("#btn-refresh")
+    for _ in range(50):
+        if race["held"] is not None:
+            break
+        page.wait_for_timeout(100)
+    assert race["held"] is not None, "the first tree request was not captured"
+    race["hold"] = False
+    EXTRA_TREE.append({"path": "race-new.md", "type": "blob", "sha": "sha-race"})
+    page.click("#btn-refresh")
+    page.wait_for_selector(".file-item:not(.folder):has-text('race-new.md')", timeout=5000)
+    race["held"].fulfill(status=200, content_type="application/json", body=old_tree_body)
+    page.wait_for_timeout(800)
+    assert page.locator(".file-item:not(.folder):has-text('race-new.md')").count() >= 1, \
+        "a stale tree response landed after a newer one and overwrote the tree"
+    print("\u2713 a slow older tree load does not overwrite a newer one")
+    page.unroute(TREE_ROUTE, hold_first_tree)
+    EXTRA_TREE[:] = [e for e in EXTRA_TREE if e.get("path") != "race-new.md"]
+    page.click("#btn-refresh")
+    page.wait_for_selector(".file-item:not(.folder):has-text('race-new.md')", state="detached", timeout=5000)
+
     # --- H. Switching repository IN-APP must not leak the previous session's
     # listeners. showApp() runs again on a switch with NO page reload, and the
     # upload/mobile listeners used to be re-attached every time while keeping the
