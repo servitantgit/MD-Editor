@@ -58,3 +58,36 @@ test('resolveNoteLink joins against source directory', () => {
   assert.equal(resolveNoteLink('A/B/c.md', './d.md'), 'A/B/d.md');
   assert.equal(resolveNoteLink('A/B/c.md', '../x.md'), 'A/x.md');
 });
+
+// ---- [[wiki links]] resolve like Obsidian: a path from the repository root, a bare name by file name ----
+test('backlinks: [[Path/Note]] from another folder is resolved from the repository root', () => {
+  const idx = createBacklinkIndex();
+  idx.setFile('Other/deep/plain.md', 'See [[Notes/Printer jam]].');
+  idx.setFile('Other/deep/alias.md', 'See [[Notes/Printer jam|the jam]].');
+  idx.setFile('Other/deep/heading.md', 'See [[Notes/Printer jam#Fix]].');
+  idx.setFile('Other/deep/ext.md', 'See [[Notes/Printer jam.md]].');
+  idx.setFile('Other/deep/slash.md', 'See [[/Notes/Printer jam]].');
+  assert.deepEqual(idx.getBacklinks('Notes/Printer jam.md'), [
+    'Other/deep/alias.md', 'Other/deep/ext.md', 'Other/deep/heading.md', 'Other/deep/plain.md', 'Other/deep/slash.md',
+  ]);
+});
+
+test('backlinks: [[Note name]] from another folder finds the note by its file name', () => {
+  const idx = createBacklinkIndex();
+  idx.setFile('Other/deep/a.md', 'See [[Printer jam]] and [[Printer jam|alias]].');
+  assert.deepEqual(idx.getBacklinks('Notes/Printer jam.md'), ['Other/deep/a.md']);
+});
+
+test('backlinks: [[./x]] and [[../x]] wiki links still resolve from the note folder', () => {
+  const idx = createBacklinkIndex();
+  idx.setFile('Other/note.md', 'See [[../Notes/Printer jam]].');
+  idx.setFile('Notes/near.md', 'See [[./Printer jam]].');
+  assert.deepEqual(idx.getBacklinks('Notes/Printer jam.md'), ['Notes/near.md', 'Other/note.md']);
+});
+
+test('backlinks: [[Notes/x]] is not mistaken for a note under the source folder', () => {
+  const idx = createBacklinkIndex();
+  idx.setFile('Other/note.md', 'See [[Notes/Printer jam]].');
+  assert.deepEqual(idx.getBacklinks('Other/Notes/Printer jam.md'), [], 'no false match under Other/');
+  assert.deepEqual(idx.getBacklinks('Notes/Printer jam.md'), ['Other/note.md']);
+});

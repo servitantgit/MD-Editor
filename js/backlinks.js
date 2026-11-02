@@ -87,7 +87,12 @@ export function extractOutgoingLinks(fromPath, body) {
     if (!target) continue;
     // Wikilinks rarely use extensions; leave as-is for fuzzy match.
     if (/^(https?:|mailto:)/i.test(target)) continue;
-    const abs = resolveNoteLink(fromPath, target);
+    // Obsidian rules: [[./x]] and [[../x]] resolve from the note folder; any
+    // other path ([[Notes/x]], [[/Notes/x]]) from the repository root; a bare
+    // name ([[x]]) stays a name and linkMatchesPath finds it by file name.
+    // #heading is dropped. Resolving from the note folder broke every wiki
+    // link written in another folder.
+    const abs = /^\.\.?\//.test(target) ? resolveNoteLink(fromPath, target) : stripHrefDecorations(target);
     if (abs) out.add(abs);
   }
 
