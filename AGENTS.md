@@ -1132,6 +1132,15 @@ rule; when a fixed bug reveals a new class, add a rule here.
    RED without the fix before they go GREEN.
 6. **A fixed bug leaves a rule.** If the cause is a pattern that can repeat
    elsewhere, add it to this list, not only a test for the one case.
+7. **A link target is decoded exactly once, by the consumer.** Notes hold
+   targets as written: `a%20b.png`, `%D0%9A...` for Cyrillic (the reference
+   rewriter writes them encoded itself, `encodeLinkPath`). The code that turns
+   a target into a repo path decodes it once (`ImageResolver._repoPath()`,
+   `js/reference-rewriter.js`); callers pass the target as written and never
+   decode. A real tree path given to such a consumer is passed encoded
+   (`encodeLinkPath`). Decoding in two places double-decodes a literal `%25`;
+   decoding in none sends `%20` to the API encoded again (`%2520`, 404):
+   Markdown preview showed no image with a space in its path (`dd5b585`).
 
 ## General rule before considering a task done
 
