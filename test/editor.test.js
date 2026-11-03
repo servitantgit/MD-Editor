@@ -589,3 +589,61 @@ test('Source draws no image widget for an image inside a code block', async () =
   assert.equal(widgets.length, 1, 'only the image outside the code block gets a widget');
   assert.equal(widgets[0].querySelector('.cm-inline-image-filename').textContent, 'b.png');
 });
+
+test('paste: a URL over a selection in a markdown note becomes a link, not an image upload', async () => {
+  const dom = new JSDOM('<!doctype html><body></body>');
+  const { codemirror, inputField } = installEnvironment(dom, { text: () => 'see docs here' });
+  Object.assign(codemirror, {
+    replaced: [],
+    listSelections: () => [{ anchor: { line: 0, ch: 4 }, head: { line: 0, ch: 8 } }],
+    getSelection: () => 'docs',
+    getCursor: () => ({ line: 0, ch: 4 }),
+    indexFromPos: (p) => p.ch,
+    replaceSelection(s) { this.replaced.push(s); },
+  });
+  const { createEditor } = await import('../js/editor.js');
+  const pastes = [];
+  const handle = createEditor(dom.window.document.createElement('textarea'), {
+    marked: {},
+    imageResolver: { resolve: async () => '' },
+    getCurrentPath: () => 'Notes/a.md',
+    onImageUploadRequest: () => {},
+    onImagePaste: (f) => pastes.push(f),
+  });
+  const ev = new dom.window.Event('paste', { cancelable: true });
+  Object.defineProperty(ev, 'clipboardData', { value: { items: [], getData: () => 'https://a.com/x' } });
+  for (const fn of codemirror.handlers.paste || []) fn(codemirror, ev);
+  assert.deepEqual(codemirror.replaced, ['[docs](https://a.com/x)']);
+  assert.equal(ev.defaultPrevented, true);
+  assert.deepEqual(pastes, [], 'no image upload');
+  handle.destroy();
+});
+
+test('paste: in a non-markdown file a URL over a selection is a normal paste', async () => {
+  const dom = new JSDOM('<!doctype html><body></body>');
+  const { codemirror, inputField } = installEnvironment(dom, { text: () => 'see docs here' });
+  Object.assign(codemirror, {
+    replaced: [],
+    listSelections: () => [{ anchor: { line: 0, ch: 4 }, head: { line: 0, ch: 8 } }],
+    getSelection: () => 'docs',
+    getCursor: () => ({ line: 0, ch: 4 }),
+    indexFromPos: (p) => p.ch,
+    replaceSelection(s) { this.replaced.push(s); },
+  });
+  const { createEditor } = await import('../js/editor.js');
+  const pastes = [];
+  const handle = createEditor(dom.window.document.createElement('textarea'), {
+    marked: {},
+    imageResolver: { resolve: async () => '' },
+    getCurrentPath: () => 'Notes/page.html',
+    onImageUploadRequest: () => {},
+    onImagePaste: (f) => pastes.push(f),
+  });
+  const ev = new dom.window.Event('paste', { cancelable: true });
+  Object.defineProperty(ev, 'clipboardData', { value: { items: [], getData: () => 'https://a.com/x' } });
+  for (const fn of codemirror.handlers.paste || []) fn(codemirror, ev);
+  assert.deepEqual(codemirror.replaced, []);
+  assert.equal(ev.defaultPrevented, false);
+  assert.deepEqual(pastes, [], 'no image upload');
+  handle.destroy();
+});

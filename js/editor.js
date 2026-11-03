@@ -12,6 +12,7 @@ import { dirnameOf, basenameOf, resolveRelativePath, isExternalOrAnchor, isImage
 import { applyTaskList, findTaskLines } from './markdown-commands.js';
 import { findMarkdownImages } from './markdown-tokens.js';
 import { buildHtmlSrcdoc } from './html-preview.js';
+import { linkFromPaste, isInsideCode } from './paste-link.js';
 
 /**
  * @param {HTMLTextAreaElement} textareaEl
@@ -406,6 +407,28 @@ export function createEditor(textareaEl, deps) {
     }
   };
   inputField.addEventListener('paste', onPaste);
+
+  // A URL pasted over selected text in a markdown note becomes [text](url)
+  // (js/paste-link.js). CodeMirror's own 'paste' event, NOT a DOM listener:
+  // CodeMirror inserts the text in its DOM handler, which runs before ours,
+  // while cm.on('paste') fires first and preventDefault() cancels the insert.
+  const onPasteLink = (cm, event) => {
+    const path = deps.getCurrentPath ? deps.getCurrentPath() : null;
+    if (kindFromPath(path || '').kind !== 'markdown') return;
+    const data = event && event.clipboardData;
+    const clip = data && typeof data.getData === 'function' ? data.getData('text/plain') : '';
+    if (!clip || typeof cm.listSelections !== 'function' || cm.listSelections().length !== 1) return;
+    const offset = cm.indexFromPos(cm.getCursor('from'));
+    const link = linkFromPaste({
+      selection: cm.getSelection(),
+      clipboardText: clip,
+      inCode: isInsideCode(cm.getValue(), offset),
+    });
+    if (link === null) return;
+    event.preventDefault();
+    cm.replaceSelection(link);
+  };
+  easyMDE.codemirror.on('paste', onPasteLink);
 
   // React to window/container resizing — the same class of problems.
   // Live Preview right in the text field: the Markdown image link
@@ -851,6 +874,7 @@ wrapper.addEventListener('contextmenu', (e) => {
     clearTimeout(inlineImageTimer);
     inlineImageTimer = null;
     inputField.removeEventListener('paste', onPaste);
+    easyMDE.codemirror.off('paste', onPasteLink);
     easyMDE.codemirror.off('change', onChange);
 closeImageMenu();
     if (typeof easyMDE.codemirror.removeKeyMap === 'function') {
