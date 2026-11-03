@@ -1042,6 +1042,26 @@ either one, so it is left alone. A move that keeps the name never touches
 file itself. Tests: `test/backlinks.test.js`, `test/reference-rewriter.test.js`,
 `test/file-mover.test.js`, `test/folder-manager.test.js`.
 
+## Paste a URL over a selection: js/paste-link.js + cm.on('paste')
+
+`linkFromPaste({ selection, clipboardText, inCode })` (pure) returns
+`[text](url)` or `null` for a normal paste. Rules: exactly one `http(s)://` URL
+with no spaces (trimmed); a non-empty one-line selection without `[` or `]` that
+is not itself a URL; not inside code (`isInsideCode()`, built on `md-fences.js`).
+A URL with `(` or `)` is wrapped in `<...>`, one with `<` or `>` is a normal paste.
+`editor.js` asks only for markdown files and only with a single selection, and
+inserts with `replaceSelection`, so Ctrl+Z is one step.
+
+Hook it with CodeMirror's own `cm.on('paste', (cm, event) => ...)`, NOT a DOM
+listener on the input field. CodeMirror inserts pasted text in its own DOM
+handler, registered before ours, so a DOM listener runs too late: the URL would
+already have replaced the selection. `cm.on('paste')` fires first and
+`preventDefault()` cancels the insert. The image paste stays a DOM listener: it
+only acts when there is no text to insert. The DOM tests in `test/editor.test.js`
+call the CodeMirror handler with a fake CodeMirror, so they cannot prove this
+order: after touching the hook, check paste in a real browser.
+Tests: `test/paste-link.test.js`, `test/editor.test.js`.
+
 ## Preview re-render must keep loaded images (no placeholders while typing)
 
 EasyMDE rewrites the Preview `innerHTML` on every keystroke. Images used to come

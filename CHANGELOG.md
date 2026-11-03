@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Paste a URL over selected text to make a link.** In a markdown note, selecting a word and pasting a single `http(s)://` URL inserts `[word](url)`; Ctrl+Z undoes it in one step. Anything else is a normal paste: no selection, a multi-line or multiple selection, a selection with `[` or `]`, a selected URL, code spans and fences, non-markdown files. Image paste is unchanged (`js/paste-link.js`, `js/editor.js`)
 - **Link suggestions while typing `[[`.** A list of notes opens under the cursor and filters as you type; Up/Down, Enter or Tab inserts a root-absolute link `[name](/path)` (the same format as Copy as link), Esc closes it (`js/link-suggest.js`)
 - **Discard button** next to Save: reverts the open note to its GitHub version, deletes the local draft, clears the unsaved dot and the Commit badge, and pushes nothing (`js/autosave.js`, `js/app.js`)
 
