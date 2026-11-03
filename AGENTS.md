@@ -1050,7 +1050,13 @@ deleted, state clean, nothing pushed. It shares `_reloadFromRemote()` with Reloa
 in the conflict banner and does nothing while a save is in flight. The button is
 enabled exactly when the tab shows the unsaved dot (`setActiveFileUnsaved`), and
 `onReloadRemote` also drops the file from the working tree, so the Commit badge
-follows. A note that does not exist on GitHub yet cannot be discarded (open task).
+follows. New notes are created on
+GitHub at once (`onCreateNewFile` PUTs the starter text), so Discard always has
+a version to load. Deliberately not handled: a note deleted on GitHub elsewhere
+(github.com, another device or tab) while it has unsaved edits here. Discard
+then reports "Not Found" and keeps the tab, the dot, the draft and the Commit
+entry; the local text and the draft are kept. Rare;
+revisit only if it shows up in practice.
 
 ## Sidebar: the file tree lives inside .folder-dropzone
 
@@ -1194,6 +1200,19 @@ TTL; at worst a re-created file of the same name shows the draft banner, which
 the user can discard. Do not reintroduce the "not in the tree" rule. Pinned by
 `test/draft-store.test.js` ("drops only drafts older than the TTL", "an empty or
 partial tree never deletes a fresh draft").
+
+## Truncated tree: deliberately not handled (B2)
+
+`getTree()` (`js/github-client.js`) ignores `truncated` in the recursive tree
+response. GitHub cuts that response for very large repositories (roughly
+100000 entries or 7 MB - check the current GitHub docs). With a cut tree the
+file tree, search (it would drop unseen files from the index), backlinks and
+link rewriting on move would all see only part of the repository; drafts are
+already safe (see above). The target repository has about 1200 entries (~1% of
+the limit), so this is not handled on purpose. Revisit when a repository grows
+past ~50000 entries. Minimum fix then: expose `truncated` from `getTree()`,
+warn in the UI, never remove files from the search index based on a truncated
+tree, and warn that a move may not update every link.
 
 ## Never put unsanitized HTML into the main page
 
