@@ -1061,6 +1061,39 @@ of the sidebar empty above the results. `css/app.css` hides the wrapper with
 logic changes, keep the wrapper hidden whenever the tree is.
 `e2e_smoke_test.py` asserts the results start right under the search box.
 
+## Architecture rules (each one closes a whole class of bugs)
+
+These came out of real bugs. Before adding a feature, check it against every
+rule; when a fixed bug reveals a new class, add a rule here.
+
+1. **Writing several files = ONE commit.** Any operation that changes more than
+   one path goes through `client.commitTreeChanges()` (see "Folder operations:
+   ONE atomic commit"). Never a loop of Contents API PUT/DELETE: a failure
+   halfway leaves the repository half-changed (folder rename/delete did, B3).
+2. **A late response must not overwrite a newer one.** An async load that can be
+   started from several places (`loadTree()` is called from ~15) must ignore a
+   response to an older request that arrives after a newer one (B4). A new
+   loader of shared state gets the same guard and a test with a fake client
+   that answers out of order.
+3. **One set of link rules.** Backlinks (`js/backlinks.js`), the reference
+   rewriter (`js/reference-rewriter.js`) and link building (`buildFileLink`,
+   `js/link-suggest.js`) must agree on what a link points at (see "Wiki links
+   `[[...]]`"). A new link form is added to all of them in one change, with
+   tests in each. Reading a link form that moves do not rewrite breaks notes
+   silently (B1, B5).
+4. **Failures before code.** A task that touches GitHub or shared state states
+   up front what happens on: an error halfway (network, rate limit, 409); two
+   actions at once (Refresh, a second tab, a double click); ambiguous data (two
+   files with the same name, an empty file, binary under `.md`); a large
+   repository (1000+ files, a `truncated` tree). At least one test covers a
+   failure, not only the happy path.
+5. **A test must be able to fail.** One exact expected value; no
+   `a === x || a === y` and no "anything but an error". A test written that way
+   accepted the wrong wiki-link resolution unnoticed (B5). New tests are seen
+   RED without the fix before they go GREEN.
+6. **A fixed bug leaves a rule.** If the cause is a pattern that can repeat
+   elsewhere, add it to this list, not only a test for the one case.
+
 ## General rule before considering a task done
 
 Here CI broke twice in a row right after merge (first `npm ci`, then a stale
