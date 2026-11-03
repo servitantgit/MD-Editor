@@ -990,6 +990,19 @@ an optional UI piece again; the minimap only paints and handles clicks.
 Pinned by `test/scroll-sync.test.js` (pure functions + jsdom with hand-driven
 frames) and the e2e check "Live with the minimap closed".
 
+**Cursor follow: deliberately not handled (F13).** The sync maps the TOP of the
+leading pane, not the cursor line. Keyboard moves work through it (it listens to
+`cm.on('scroll')`, so Arrow Down, Ctrl+End and Ctrl+Home move Preview too), but
+in a note with images the cursor line near the bottom of Source can sit 2-3
+screens below the visible part of Preview (measured in the browser: 131 lines,
+22 images, cursor line 1474-2259 px below a 630 px Preview pane). Getting this
+sync right took many hours, so this is left as is on purpose. Do NOT add a
+separate "scroll Preview to the cursor" module: its writes are not echoes the
+guard knows, so the sync would make Preview the leader and move Source back (the
+panes fight). If it is ever done, it belongs inside `createScrollSync()` (e.g.
+map the cursor line instead of the top while Source leads and the cursor is on
+screen), with RED tests first and the e2e check unchanged.
+
 ## Link suggestions and the one link format: js/link-suggest.js
 
 `buildFileLink(path)` is the only place that builds a link to a repository file:
