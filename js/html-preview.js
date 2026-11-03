@@ -35,8 +35,9 @@ export async function buildHtmlSrcdoc(html, currentPath, resolver) {
     if (!val || isExternalOrAnchor(val) || val.startsWith('data:') || val.startsWith('blob:')) return;
     if (!resolver || typeof resolver.resolve !== 'function') return;
     try {
-      // Decode %20 etc. so the resolver sees the real repo path (the API layer re-encodes it).
-      const url = await resolver.resolve(decodeUriSafe(val), base);
+      // Pass the src as written: ImageResolver decodes %20 once. Decoding here
+      // too would double-decode a literal %25 in a file name.
+      const url = await resolver.resolve(val, base);
       el.setAttribute(attr, url);
     } catch (_) {
       // leave original; broken asset stays visible in the iframe

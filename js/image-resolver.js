@@ -5,7 +5,7 @@
 // Also rewrites GitHub-flavoured *virtual* image paths that are not real blobs:
 //   ../../actions/workflows/ci.yml/badge.svg  →  https://github.com/{owner}/{repo}/actions/...
 
-import { dirnameOf, resolveRelativePath, isExternalOrAnchor } from './paths.js';
+import { dirnameOf, resolveRelativePath, isExternalOrAnchor, decodeUriSafe } from './paths.js';
 
 /** Match repo-relative Actions status badge paths (GitHub README convention). */
 const ACTIONS_BADGE_RE = /^actions\/workflows\/([^/]+\.(?:yml|yaml))\/badge\.svg$/i;
@@ -31,6 +31,19 @@ export class ImageResolver {
     this.cache = new Map(); // path -> data: or https URL
   }
 
+  /**
+   * Repo path for an image target AS WRITTEN in the text. Decoded exactly once
+   * here (%20 -> space), so callers never decode; a real tree path is passed
+   * encoded (encodeLinkPath) and comes back unchanged. "/x" is from the repo
+   * root, anything else from the folder of the note.
+   */
+  _repoPath(origSrc, currentFilePath) {
+    const src = decodeUriSafe(origSrc);
+    return src.startsWith('/')
+      ? src.slice(1)
+      : resolveRelativePath(dirnameOf(currentFilePath || ''), src);
+  }
+
   invalidate(path) {
     this.cache.delete(path);
   }
@@ -47,9 +60,7 @@ export class ImageResolver {
     // Protocol-relative CDN URLs
     if (origSrc.startsWith('//')) return 'https:' + origSrc;
 
-    const path = origSrc.startsWith('/')
-      ? origSrc.slice(1)
-      : resolveRelativePath(dirnameOf(currentFilePath || ''), origSrc);
+    const path = this._repoPath(origSrc, currentFilePath);
 
     if (this.cache.has(path)) return this.cache.get(path);
 
@@ -79,9 +90,7 @@ export class ImageResolver {
     if (!origSrc) return null;
     if (isExternalOrAnchor(origSrc)) return origSrc;
     if (origSrc.startsWith('//')) return 'https:' + origSrc;
-    const path = origSrc.startsWith('/')
-      ? origSrc.slice(1)
-      : resolveRelativePath(dirnameOf(currentFilePath || ''), origSrc);
+    const path = this._repoPath(origSrc, currentFilePath);
     return this.cache.has(path) ? this.cache.get(path) : null;
   }
 }

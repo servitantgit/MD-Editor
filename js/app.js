@@ -6,6 +6,7 @@
 import { DemoClient, isDemoSession } from './demo-client.js';
 import { GitHubClient, b64ToUtf8 } from './github-client.js';
 import { ImageResolver } from './image-resolver.js';
+import { encodeLinkPath } from './paths.js';
 import { createEditor } from './editor.js';
 import { FileTree } from './file-tree.js';
 import { setupImageDropzone, pickImageFiles, uploadImage } from './upload.js';
@@ -1127,7 +1128,9 @@ function previewImageFile(path) {
   document.body.appendChild(overlay);
 
   imageResolver
-    .resolve(path.startsWith('/') ? path : '/' + path, null)
+    // A real tree path, not a link target: pass it encoded so the
+    // resolver's single decode gives it back unchanged (a literal % survives).
+    .resolve('/' + encodeLinkPath(path.replace(/^\//, '')), null)
     .then((url) => { overlay.querySelector('img').src = url; })
     .catch((err) => {
       overlay.querySelector('.image-preview-path').textContent = 'Failed to load: ' + err.message;

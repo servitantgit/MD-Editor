@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { actionsBadgePublicUrl, ImageResolver } from '../js/image-resolver.js';
-import { resolveRelativePath, dirnameOf } from '../js/paths.js';
+import { resolveRelativePath, dirnameOf, encodeLinkPath } from '../js/paths.js';
 
 test('actions badge relative path from README root resolves to public GitHub URL', () => {
   const path = resolveRelativePath(dirnameOf('README.md'), '../../actions/workflows/test.yml/badge.svg');
@@ -50,4 +50,44 @@ test('cachedUrl: external and protocol-relative URLs give what resolve gives', a
   for (const src of ['https://e.com/a.png', '//cdn.example.com/a.png']) {
     assert.equal(r.cachedUrl(src, 'n.md'), await r.resolve(src, 'n.md'));
   }
+});
+
+// Link targets reach the resolver as written in the text (%20 for a space).
+// The resolver decodes them once; callers never decode. A real tree path
+// (file tree preview) is passed encoded, so a literal % in a name survives.
+function recordingClient() {
+  const calls = [];
+  const client = {
+    owner: 'o',
+    repo: 'r',
+    async getFileAsDataUrl(p) { calls.push(p); return 'data:image/png;base64,' + calls.length; },
+  };
+  return { calls, client };
+}
+
+test('resolve decodes %20 in a link target before asking the client', async () => {
+  const { calls, client } = recordingClient();
+  await new ImageResolver(client).resolve('../Asset/a%20b.png', 'n/x.md');
+  assert.deepEqual(calls, ['Asset/a b.png']);
+});
+
+test('cachedUrl: encoded and plain forms of one target share one cache entry', async () => {
+  const { calls, client } = recordingClient();
+  const r = new ImageResolver(client);
+  const url = await r.resolve('../Asset/a%20b.png', 'n/x.md');
+  assert.equal(r.cachedUrl('../Asset/a%20b.png', 'n/x.md'), url);
+  assert.equal(r.cachedUrl('../Asset/a b.png', 'n/x.md'), url);
+  assert.equal(calls.length, 1);
+});
+
+test('resolve: a real tree path passed encoded keeps a literal % in the name', async () => {
+  const { calls, client } = recordingClient();
+  await new ImageResolver(client).resolve('/' + encodeLinkPath('Asset/a%20b.png'), null);
+  assert.deepEqual(calls, ['Asset/a%20b.png']);
+});
+
+test('resolve: a malformed percent sequence is used as is (guard)', async () => {
+  const { calls, client } = recordingClient();
+  await new ImageResolver(client).resolve('../Asset/100%.png', 'n/x.md');
+  assert.deepEqual(calls, ['Asset/100%.png']);
 });
