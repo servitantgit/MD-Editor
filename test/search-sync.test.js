@@ -45,7 +45,7 @@ function newStore({ now = () => 1_000_000 } = {}) {
 }
 
 /** A fresh SearchSync instance with fake dependencies. */
-function newSync({ client, store, owner = 'owner', repo = 'repo', branch = 'main', onProgress, onDone } = {}) {
+function newSync({ client, store, owner = 'owner', repo = 'repo', branch = 'main', onProgress, onDone, onLinksRestored } = {}) {
   return new SearchSync({
     client,
     store,
@@ -55,6 +55,7 @@ function newSync({ client, store, owner = 'owner', repo = 'repo', branch = 'main
     MiniSearchCtor: MiniSearch,
     onProgress,
     onDone,
+    onLinksRestored,
   });
 }
 
@@ -510,4 +511,105 @@ test('search-sync: an index saved by this version is reused on the next login wi
   assert.equal(await second.hydrate(), 3, 'the saved index is loaded');
   await second.run(SAMPLE_TREE);
   assert.deepEqual(client.getFileCalls, [], 'nothing is fetched again');
+});
+
+// Backlinks survive a reload: the outgoing links of every note are stored in
+// the same record as the search index (links[path] = extractOutgoingLinks, the
+// function the backlink index uses), and hydrate() hands them back.
+const BL_TREE = [
+  { path: 'A/n.md', sha: 'sha-n' },
+  { path: 'A/B.md', sha: 'sha-b' },
+  { path: 'A/x.txt', sha: 'sha-x' },
+];
+const BL_FILES = {
+  'A/n.md': { sha: 'sha-n', body: 'See [b](B.md) and [[Real]], not \x60[[Code]]\x60.\n' },
+  'A/B.md': { sha: 'sha-b', body: '# B\n' },
+  'A/x.txt': { sha: 'sha-x', body: 'plain [[Txt]] text\n' },
+};
+async function blRecord(store) {
+  const record = await store.get('owner/repo@main');
+  assert.ok(record, 'a record is saved');
+  assert.ok(record.links && typeof record.links === 'object', 'record.links is saved');
+  return record;
+}
+
+test('search-sync links: the saved record keeps outgoing links of each note, none for .txt', async () => {
+  const store = newStore();
+  const client = new FakeGitHubClient({ tree: BL_TREE, files: BL_FILES });
+  const sync = newSync({ client, store });
+  await sync.hydrate();
+  await sync.run(BL_TREE);
+  const record = await blRecord(store);
+  assert.deepEqual(record.links['A/n.md'], ['A/B.md', 'Real']);
+  assert.equal(Object.prototype.hasOwnProperty.call(record.links, 'A/x.txt'), false, 'no links for a .txt file');
+});
+
+test('search-sync links: after reload hydrate restores links without fetching any note', async () => {
+  const store = newStore();
+  const client = new FakeGitHubClient({ tree: BL_TREE, files: BL_FILES });
+  const first = newSync({ client, store });
+  await first.hydrate();
+  await first.run(BL_TREE);
+  client.getFileCalls = [];
+  const calls = [];
+  const second = newSync({ client, store, onLinksRestored: (path, links) => calls.push([path, links]) });
+  await second.hydrate();
+  await second.run(BL_TREE);
+  assert.deepEqual(client.getFileCalls, [], 'nothing is fetched again');
+  assert.deepEqual(calls.find(([p]) => p === 'A/n.md'), ['A/n.md', ['A/B.md', 'Real']]);
+  assert.equal(calls.some(([p]) => p === 'A/x.txt'), false, 'no restored links for a .txt file');
+});
+
+test('search-sync links: a note removed from the tree loses its stored links', async () => {
+  const store = newStore();
+  const client = new FakeGitHubClient({ tree: BL_TREE, files: BL_FILES });
+  const sync = newSync({ client, store });
+  await sync.hydrate();
+  await sync.run(BL_TREE);
+  await sync.run(BL_TREE.filter((f) => f.path !== 'A/n.md'));
+  const record = await blRecord(store);
+  assert.equal(Object.prototype.hasOwnProperty.call(record.links, 'A/n.md'), false, 'removed note has no links');
+});
+
+test('search-sync links: a changed note replaces its stored links', async () => {
+  const store = newStore();
+  const client = new FakeGitHubClient({ tree: BL_TREE, files: BL_FILES });
+  const sync = newSync({ client, store });
+  await sync.hydrate();
+  await sync.run(BL_TREE);
+  const tree2 = BL_TREE.map((f) => (f.path === 'A/n.md' ? { path: f.path, sha: 'sha-n2' } : f));
+  client.files = { ...BL_FILES, 'A/n.md': { sha: 'sha-n2', body: 'Now [[Other]] only.\n' } };
+  await sync.run(tree2);
+  const record = await blRecord(store);
+  assert.deepEqual(record.links['A/n.md'], ['Other']);
+});
+
+test('search-sync links: a note that failed to download has no stored links (keys of links are in manifest)', async () => {
+  const store = newStore();
+  const client = new FakeGitHubClient({ tree: BL_TREE, files: BL_FILES, shouldFail: new Set(['A/n.md']) });
+  const sync = newSync({ client, store });
+  await sync.hydrate();
+  await sync.run(BL_TREE);
+  const record = await blRecord(store);
+  assert.equal(Object.prototype.hasOwnProperty.call(record.links, 'A/n.md'), false, 'failed note has no links');
+  for (const key of Object.keys(record.links)) {
+    assert.ok(Object.prototype.hasOwnProperty.call(record.manifest, key), key + ' is in manifest');
+  }
+});
+
+test('search-sync links: a record from INDEX_VERSION 3 is dropped and rebuilt, nothing restored', async () => {
+  const store = newStore();
+  const client = new FakeGitHubClient({ tree: BL_TREE, files: BL_FILES });
+  const first = newSync({ client, store });
+  await first.hydrate();
+  await first.run(BL_TREE);
+  const old = await store.get('owner/repo@main');
+  await store.put({ ...old, indexVersion: 3, links: { 'A/n.md': ['A/B.md', 'Real'] } });
+  client.getFileCalls = [];
+  const calls = [];
+  const second = newSync({ client, store, onLinksRestored: (path, links) => calls.push([path, links]) });
+  await second.hydrate();
+  assert.deepEqual(calls, [], 'nothing restored from an old record');
+  await second.run(BL_TREE);
+  assert.deepEqual(client.getFileCalls.slice().sort(), ['A/B.md', 'A/n.md', 'A/x.txt'], 'every file is fetched again');
 });

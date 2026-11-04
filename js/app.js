@@ -958,6 +958,9 @@ function setupSearch(owner, repo) {
     onFileIndexed: (path, body) => {
       try { backlinkIndex.setFile(path, body); } catch (_) {}
     },
+    onLinksRestored: (path, links) => {
+      try { backlinkIndex.setLinks(path, links); } catch (_) {}
+    },
     onFileRemoved: (path) => {
       try {
         if (path == null) backlinkIndex.clear();

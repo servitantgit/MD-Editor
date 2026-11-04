@@ -16,10 +16,12 @@ export const BODY_CACHE_LIMIT = 200;
 
 /**
  * Bump by 1 whenever the indexing rules change (extractTitle, stripMarkdown,
- * the searcher fields/options). A stored index with a different version is
- * dropped on load and rebuilt in the background.
+ * the searcher fields/options, extractOutgoingLinks in backlinks.js - its
+ * result is stored with the index for backlinks). A stored index with a
+ * different version is dropped on load and rebuilt in the background.
+ * 4: outgoing links stored for backlinks.
  */
-export const INDEX_VERSION = 3;
+export const INDEX_VERSION = 4;
 
 /** Characters of context kept before / after the highlighted term. */
 export const SNIPPET_BEFORE = 15;

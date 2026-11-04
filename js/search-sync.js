@@ -10,6 +10,7 @@
 import { b64ToUtf8 } from './github-client.js';
 import { createSearchIndex, diffTree, isSearchablePath, SearchIndex, INDEX_VERSION } from './search-index.js';
 import { recordKey } from './search-store.js';
+import { extractOutgoingLinks, isNoteSourcePath } from './backlinks.js';
 
 /** Parallel getFileB64 calls. Enough to be quick, far below the rate limit. */
 export const FETCH_CONCURRENCY = 4;
@@ -29,7 +30,7 @@ export class SearchSync {
    * @param {(done: number, total: number) => void} [deps.onProgress]
    * @param {(info: {indexed: number, total: number, persistent: boolean}) => void} [deps.onDone]
    */
-  constructor({ client, store, owner, repo, branch, MiniSearchCtor, onProgress, onDone, onFileIndexed, onFileRemoved }) {
+  constructor({ client, store, owner, repo, branch, MiniSearchCtor, onProgress, onDone, onFileIndexed, onFileRemoved, onLinksRestored }) {
     this.client = client;
     this.store = store;
     this.key = recordKey(owner, repo, branch);
@@ -39,8 +40,13 @@ export class SearchSync {
     this.onDone = onDone || (() => {});
     this.onFileIndexed = onFileIndexed || (() => {});
     this.onFileRemoved = onFileRemoved || (() => {});
+    this.onLinksRestored = onLinksRestored || (() => {});
     this.index = null;
     this.manifest = {};
+    // Outgoing links of each indexed note, { [path]: string[] }, saved with the
+    // index so backlinks are complete after a reload. Keys are a subset of the
+    // manifest keys (see _linksInManifest).
+    this.links = {};
     this.lastSyncedAt = 0;
     this.destroyed = false;
   }
@@ -61,13 +67,20 @@ export class SearchSync {
     // manifest with an empty index would leave search empty until a manual rebuild.
     this.index = null;
     this.manifest = {};
+    this.links = {};
     if (record && record.indexVersion === INDEX_VERSION && record.serializedIndex) {
       try {
         this.index = new SearchIndex(this.MiniSearchCtor, { serialized: record.serializedIndex });
         this.manifest = record.manifest || {};
+        this.links = this._linksInManifest(record.links);
       } catch (_) { /* unreadable blob: rebuild from scratch */ }
     }
     if (!this.index) this.index = createSearchIndex(this.MiniSearchCtor);
+    // Backlinks after a reload come from the stored links, not from bodies:
+    // unchanged notes are never downloaded again.
+    for (const [path, links] of Object.entries(this.links)) {
+      try { this.onLinksRestored(path, links.slice()); } catch (_) {}
+    }
     return this.index.size;
   }
 
@@ -100,6 +113,7 @@ export class SearchSync {
     if (force) {
       this.index.clear();
       this.manifest = {};
+      this.links = {};
       try { this.onFileRemoved(null); } catch (_) {} // signal full rebuild start
     }
 
@@ -110,10 +124,12 @@ export class SearchSync {
     // go in, otherwise the old version can survive alongside the new one.
     for (const path of removed) {
       this.index.removeDocument(path);
+      delete this.links[path];
       try { this.onFileRemoved(path); } catch (_) {}
     }
     for (const path of changed) {
       this.index.removeDocument(path);
+      delete this.links[path];
       try { this.onFileRemoved(path); } catch (_) {}
     }
 
@@ -167,6 +183,8 @@ export class SearchSync {
           const body = b64ToUtf8(b64);
           this.index.add(path, body);
           try { this.onFileIndexed(path, body); } catch (_) {}
+          // Same function as backlinkIndex.setFile, so restored backlinks match.
+          try { if (isNoteSourcePath(path)) this.links[path] = extractOutgoingLinks(path, body); } catch (_) {}
           done++;
         } catch (_) {
           // Not valid UTF-8: stays absent from the index but listed in the
@@ -219,6 +237,22 @@ export class SearchSync {
     }
   }
 
+  /**
+   * Stored links limited to notes that are in the manifest. Invariant: the keys
+   * of links are a subset of the keys of manifest, so an interrupted first sync
+   * never keeps links of a file it did not download.
+   */
+  _linksInManifest(stored) {
+    const out = {};
+    if (!stored || typeof stored !== 'object') return out;
+    for (const path of Object.keys(stored)) {
+      if (!Object.prototype.hasOwnProperty.call(this.manifest, path)) continue;
+      if (!isNoteSourcePath(path) || !Array.isArray(stored[path])) continue;
+      out[path] = stored[path].filter((t) => typeof t === 'string');
+    }
+    return out;
+  }
+
   async _persist() {
     if (this.destroyed) return;
     await this.store.put({
@@ -226,6 +260,7 @@ export class SearchSync {
       serializedIndex: this.index.serialize(),
       manifest: this.manifest,
       indexVersion: INDEX_VERSION,
+      links: this._linksInManifest(this.links),
     });
   }
 

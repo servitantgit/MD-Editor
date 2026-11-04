@@ -117,3 +117,21 @@ test('extractOutgoingLinks skips links inside code: fence inside a blockquote', 
 test('extractOutgoingLinks keeps a link right after a code span (guard)', () => {
   assert.deepEqual(extractOutgoingLinks('A/n.md', '\x60code\x60 [[Real]]\n'), ['Real']);
 });
+
+// After a reload the backlink index is filled from stored links, not from
+// bodies: setLinks must give exactly what setFile gives (same "notes only" rule).
+test('backlinks: setLinks with extractOutgoingLinks gives the same backlinks as setFile', () => {
+  const body = 'See [b](B.md) and [[Real]], not \x60[[Code]]\x60.\n';
+  const a = createBacklinkIndex();
+  a.setFile('A/n.md', body);
+  a.setFile('A/x.txt', '[[Real]]');
+  const b = createBacklinkIndex();
+  b.setLinks('A/n.md', extractOutgoingLinks('A/n.md', body));
+  b.setLinks('A/x.txt', extractOutgoingLinks('A/x.txt', '[[Real]]'));
+  for (const p of ['A/B.md', 'Real.md', 'Code.md', 'A/x.txt']) {
+    assert.deepEqual(b.getBacklinks(p), a.getBacklinks(p), p);
+  }
+  assert.deepEqual(b.getBacklinks('A/B.md'), ['A/n.md']);
+  assert.deepEqual(b.getBacklinks('Real.md'), ['A/n.md']);
+  assert.equal(b.size, 1, 'a .txt file is not a link source');
+});

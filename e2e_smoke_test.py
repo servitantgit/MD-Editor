@@ -915,6 +915,11 @@ with sync_playwright() as p:
     print("✓ an opened file gets a tab, and it is the active one")
 
     # G1. Edit the first note, leave a scroll position and cursor behind, open a second one.
+    # The second note links to the first one until the end of G5: backlinks
+    # after a reload (G5) must come from the stored index. Restored afterwards so
+    # later scenarios (delete, rename, move) see the plain note.
+    SECOND_MD_PLAIN = SECOND_MD
+    SECOND_MD = "# Second note\n\nSECOND_NOTE_BODY\n\nSee [[Test note]].\n"
     show_second_note_in_tree(True)
     CONTENT_WRITES.clear()
     page.click(".CodeMirror")
@@ -1044,6 +1049,17 @@ with sync_playwright() as p:
     wait_until(lambda: "# Test note" in editor_text(), what="the active tab to load after the reload")
     assert not any(SECOND_URL_PART in u for u in FETCH_LOG), \
         "background tabs must not be fetched until they are opened"
+    # Backlinks after a reload: the second note is still not downloaded (checked
+    # above) and the in-memory body cache is empty, so its link to this note can
+    # only come from the links stored with the search index in IndexedDB.
+    page.click("#btn-backlinks")
+    page.wait_for_selector("#backlinks-panel .backlink-item[title='Notes/Second note.md']", timeout=10000)
+    assert not any(SECOND_URL_PART in u for u in FETCH_LOG), \
+        "backlinks must come from the stored index, not from downloading the linking note"
+    page.click("#btn-backlinks")
+    wait_until(lambda: page.locator("#backlinks-panel.hidden").count() == 1, what="the backlinks panel to close")
+    SECOND_MD = SECOND_MD_PLAIN
+    print("\u2713 backlinks are complete after a reload without downloading the linking notes")
     page.click("#tab-bar .tab:has-text('Second note.md') .tab-label")
     wait_until(lambda: "SECOND_NOTE_BODY" in editor_text(), what="a restored background tab to load on first click")
     print("✓ tabs survive a reload; background tabs load lazily")

@@ -143,6 +143,15 @@ export function linkMatchesPath(linkTarget, currentPath) {
 }
 
 /**
+ * Whether a file is a knowledge-base note, i.e. a source of backlinks.
+ * One rule for setFile, setLinks and the links stored by search-sync.
+ * @param {string} path
+ */
+export function isNoteSourcePath(path) {
+  return /\.(md|markdown|mdown)$/i.test(String(path || ''));
+}
+
+/**
  * Mutable reverse index: targetPath → Set<sourcePath>
  * We store under the exact outgoing strings and query by matching.
  */
@@ -155,12 +164,25 @@ export function createBacklinkIndex() {
     setFile(sourcePath, body) {
       if (!sourcePath) return;
       // Knowledge-base edges come from notes only.
-      if (!/\.(md|markdown|mdown)$/i.test(sourcePath)) {
+      if (!isNoteSourcePath(sourcePath)) {
         this.removeFile(sourcePath);
         return;
       }
       const links = extractOutgoingLinks(sourcePath, body);
       forward.set(sourcePath, new Set(links));
+    },
+
+    /**
+     * Replace outgoing links for one source file with links extracted earlier
+     * (stored with the search index). Same notes-only rule as setFile.
+     */
+    setLinks(sourcePath, links) {
+      if (!sourcePath) return;
+      if (!isNoteSourcePath(sourcePath)) {
+        this.removeFile(sourcePath);
+        return;
+      }
+      forward.set(sourcePath, new Set(Array.isArray(links) ? links : []));
     },
 
     removeFile(sourcePath) {
