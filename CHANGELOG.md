@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Draft storage confirmation foundation.** Draft mutations are ordered per scoped path within one store instance. The new `deleteIfText` API deletes only matching text in one IndexedDB transaction and preserves a draft when cleanup aborts. Covered by ordering, empty-text, memory fallback and transaction-abort tests (538 unit tests total). Commit UI integration is still pending; this does not yet fix its confirmation bugs (`733f527`)
 - **Image audit** (`tools/image-audit.mjs`, `js/image-audit.js`): lists pictures no note links to, image links to a missing file and identical copies. It reads the repository from git HEAD and withholds the unused list whenever anything is unclear (an unread note, a wiki image link, an HTML image reference)
 - **Paste a URL over selected text to make a link.** In a markdown note, selecting a word and pasting a single `http(s)://` URL inserts `[word](url)`; Ctrl+Z undoes it in one step. Anything else is a normal paste: no selection, a multi-line or multiple selection, a selection with `[` or `]`, a selected URL, code spans and fences, non-markdown files. Image paste is unchanged (`js/paste-link.js`, `js/editor.js`)
 - **Link suggestions while typing `[[`.** A list of notes opens under the cursor and filters as you type; Up/Down, Enter or Tab inserts a root-absolute link `[name](/path)` (the same format as Copy as link), Esc closes it (`js/link-suggest.js`)

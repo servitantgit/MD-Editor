@@ -1237,6 +1237,12 @@ rule; when a fixed bug reveals a new class, add a rule here.
    until a manual rebuild. A new stored field is limited to the manifest, so it
    never outlives the files it came from (`8881736`).
 
+9. **Confirm the sent snapshot, not just its path.** Draft cleanup after a
+   successful remote write must not delete newer local text. Use ordered
+   mutations and an atomic conditional cleanup, not a separate read then
+   unconditional delete. The storage foundation is in `733f527`; Commit UI
+   integration is still pending (see "Draft confirmation" below).
+
 ## General rule before considering a task done
 
 Here CI broke twice in a row right after merge (first `npm ci`, then a stale
@@ -1320,6 +1326,33 @@ insignificant relative to the main task. Before push:
 14. Follow the step order of the task. RED is produced by running the new tests
     BEFORE the code change, not by changing the code and then reverting it with
     `git checkout` or `git stash`. If the order cannot be followed: STOP and ask.
+
+## Draft confirmation: ordered mutations and atomic conditional cleanup
+
+**Lesson: storage ordering fixed in `733f527`.** Read-only probes on the
+pre-fix code (`35cf2dd`) showed two unsafe orders: a pending put could finish
+after delete and resurrect a draft; a separate get/compare/delete could
+delete newer text written between the read and the delete.
+
+`DraftStore` now queues put/delete/deleteByKey/deleteIfText per full
+`owner/repo@branch:path` key within ONE store instance. Other keys are
+independent; a rejected operation does not poison the queue. This is not
+cross-tab or cross-instance locking.
+
+`deleteIfText(ref, expectedText)` returns true only when it deletes a
+matching record. Missing or different text returns false; empty text is
+a valid match. IndexedDB reads, compares and deletes in ONE readwrite
+transaction; an aborted transaction returns false and preserves the draft.
+The memory fallback performs the same conditional operation.
+
+Tests: `test/draft-store.test.js` (seven tests seen RED before the fix),
+`test/draft-confirmation-guards.test.js` (independent keys, queue recovery
+and real transaction abort; guard tests). Baseline after `733f527`:
+538/538 unit tests and the existing E2E smoke suite passed.
+
+**Integration is not finished.** Commit UI and Autosave still use their
+existing confirmation paths. The storage foundation alone does not fix
+Commit clearing newer edits or leaving Autosave dirty after success.
 
 ## Draft sweep: never delete a draft because its path is missing from the tree
 
