@@ -706,10 +706,11 @@ everything. Changing `extractTitle`, `stripMarkdown` or the searcher
 fields/options without a bump leaves old titles/bodies in every browser until a
 manual rebuild. Never keep a manifest next to an index that failed to load: the
 sync then believes everything is indexed and search stays empty.
-Current value: 6 (2 = shared fence rules in `stripMarkdown`, 3 = fences inside
+Current value: 7 (2 = shared fence rules in `stripMarkdown`, 3 = fences inside
 block quotes, 4 = outgoing links stored for backlinks, 5 = link targets in
 `<...>` and percent-encoded targets read by backlinks, 6 = one level of
-balanced `(...)` inside a target). A change in `js/md-fences.js` changes what
+balanced `(...)` inside a target, 7 = backlinks use the shared external-link
+rule `isExternalOrAnchor`). A change in `js/md-fences.js` changes what
 gets indexed, so it needs a bump as well; so does a change in
 `extractOutgoingLinks()` (`js/backlinks.js`), in `LINK_TARGET_SRC` /
 `REF_TOKEN_RE` / `classifyRefMatch()` (`js/markdown-tokens.js`) or in the link
@@ -1055,6 +1056,10 @@ file whose NAME holds a literal `%20`, linked without encoding, is read as a
 space (the rewriter does the same); `>` inside `<...>` is not recognised (not
 allowed in Windows file names). The app writes pictures percent-encoded
 (`js/upload.js`), never as `![](<...>)`.
+Open question: `isExternalOrAnchor()` treats a `//host/x` target as a repo path;
+backlinks and the image audit exclude `//` themselves, Preview, the link click
+and the image resolver do not. Changing `paths.js` needs its own tests for each
+of those callers.
 
 ## Wiki links `[[...]]`: one set of rules for backlinks and rewriting
 
@@ -1200,6 +1205,9 @@ rule; when a fixed bug reveals a new class, add a rule here.
    started writing `[x](</a b.md>)` and nothing read it, so moves stopped
    updating those links and backlinks never saw them (fixed in `e803e0d`).
    Reading a link form that moves do not rewrite breaks notes silently (B1, B5).
+   What is EXTERNAL is one rule too, `isExternalOrAnchor()` (`js/paths.js`: any
+   URL scheme, `#anchor`, `data:`); backlinks once kept their own list of five
+   schemes and indexed `onenote:` and `file:` links as notes (fixed in `56ac283`).
 4. **Failures before code.** A task that touches GitHub or shared state states
    up front what happens on: an error halfway (network, rate limit, 409); two
    actions at once (Refresh, a second tab, a double click); ambiguous data (two
