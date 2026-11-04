@@ -706,14 +706,15 @@ everything. Changing `extractTitle`, `stripMarkdown` or the searcher
 fields/options without a bump leaves old titles/bodies in every browser until a
 manual rebuild. Never keep a manifest next to an index that failed to load: the
 sync then believes everything is indexed and search stays empty.
-Current value: 5 (2 = shared fence rules in `stripMarkdown`, 3 = fences inside
+Current value: 6 (2 = shared fence rules in `stripMarkdown`, 3 = fences inside
 block quotes, 4 = outgoing links stored for backlinks, 5 = link targets in
-`<...>` and percent-encoded targets read by backlinks). A change in
-`js/md-fences.js` changes what gets indexed, so it needs a bump as well; so does
-a change in `extractOutgoingLinks()` (`js/backlinks.js`) or in `REF_TOKEN_RE` /
-`classifyRefMatch()` (`js/markdown-tokens.js`), because the result is stored in
-the record (next paragraph). A test pins the number
-(`test/search-index.test.js`).
+`<...>` and percent-encoded targets read by backlinks, 6 = one level of
+balanced `(...)` inside a target). A change in `js/md-fences.js` changes what
+gets indexed, so it needs a bump as well; so does a change in
+`extractOutgoingLinks()` (`js/backlinks.js`), in `LINK_TARGET_SRC` /
+`REF_TOKEN_RE` / `classifyRefMatch()` (`js/markdown-tokens.js`) or in the link
+rules of `stripMarkdown`, because the result is stored in the record (next
+paragraph). A test pins the number (`test/search-index.test.js`).
 
 **Backlinks survive a reload: outgoing links are stored with the index.** The
 record also holds `links` (`{ [path]: string[] }`): for every note that entered
@@ -1036,16 +1037,24 @@ It is built and destroyed with the editor in `showApp()`, next to the scroll syn
 The suggestions insert markdown links, not `[[...]]`: those also work on
 github.com, which shows `[[...]]` as plain text.
 
-**Readers of that format.** `REF_TOKEN_RE` takes a target either without spaces
-or in `<...>` (same capture groups, the plain form first); `classifyRefMatch()`
-returns it without the brackets and `angle: true`, and `rebuildRefToken()` puts
-the brackets back. On a move, a link in `<...>` keeps a plain path; any other
-link stays percent-encoded (`encodeLinkPath`). Backlinks decode the target once
-with `decodeUriSafe` (rule 7). Not handled on purpose: a file whose NAME holds a
-literal `%20`, linked without encoding, is read as a space (the rewriter does the
-same); `>` inside `<...>` is not recognised (not allowed in Windows file names).
-`IMG_TOKEN_RE` (Preview/PDF) was not changed: the app writes pictures
-percent-encoded (`js/upload.js`), never as `![](<...>)`.
+**Readers of that format.** ONE target rule, `LINK_TARGET_SRC`
+(`js/markdown-tokens.js`): no spaces, one level of balanced `(...)` allowed
+(`Asset/ATS_(BOB_Load)_image_0001.jpg`). It builds `REF_TOKEN_RE` (backlinks,
+move/rename, image audit), `IMG_TOKEN_RE` (Preview/PDF, image resize) and
+`MD_IMAGE_RE` (Source image widgets); no reader keeps its own copy of the rule.
+`REF_TOKEN_RE` also takes a target in `<...>` (same capture groups, the plain
+form first); `classifyRefMatch()` returns it without the brackets and
+`angle: true`, and `rebuildRefToken()` puts the brackets back. On a move, a
+link in `<...>` keeps a plain path; any other link stays percent-encoded
+(`encodeLinkPath`, which keeps `(` and `)`). Backlinks decode the target once
+with `decodeUriSafe` (rule 7). `stripMarkdown` (search text) drops links by a
+looser rule, a superset of its old one. Not handled on purpose: nested or
+unbalanced parentheses in a target (`a((b)).png`, `a(b.png` - marked shows
+them, our readers do not, and the image audit turns invalid on such a link); a
+file whose NAME holds a literal `%20`, linked without encoding, is read as a
+space (the rewriter does the same); `>` inside `<...>` is not recognised (not
+allowed in Windows file names). The app writes pictures percent-encoded
+(`js/upload.js`), never as `![](<...>)`.
 
 ## Wiki links `[[...]]`: one set of rules for backlinks and rewriting
 
@@ -1138,20 +1147,33 @@ logic changes, keep the wrapper hidden whenever the tree is.
 to a missing file (with a hint when only the case differs) and groups of
 identical pictures by blob sha. Same link rules as the reference rewriter
 (Architecture rules 3 and 7). Fail-safe: an unread note, an `![[embed]]` or
-`[[x.png]]`, or an HTML file pointing at a picture makes the report invalid,
-and an invalid report lists NO unused pictures, so nothing can be offered for
-deletion by mistake.
+`[[x.png]]`, an HTML file pointing at a picture, or an image link the parser
+cannot read (an `![...](` outside code that is not inside a parsed token) makes
+the report invalid, and an invalid report lists NO unused pictures, so nothing
+can be offered for deletion by mistake.
+
+**Lesson: Gillette `5f57fdf` -> `1aca810`.** Before `13d5027` every reader cut
+a target at the first `)`: `![x](../Asset/ATS_(BOB_Load)_image_0001.jpg)` was
+read as `../Asset/ATS_(BOB_Load`, not a picture path, so the audit skipped it
+silently and listed 32 USED pictures as unused; they were deleted together with
+51 truly unused ones and restored from `6b276be` in `1aca810`. A tool that
+offers deletion must count what it could NOT read, not only what it read.
+After any change in link parsing, run a read-only probe over the real notes
+(every link through backlinks, move/rename, Preview and the audit) before
+trusting the audit again.
 
 Run: `node tools/image-audit.mjs <repo-dir> [--out <file>]`. It reads the tree
 and the notes from git HEAD, never the disk (PowerShell 5.1 mangles non-ASCII
 file names, OneDrive locks files, Windows ignores case), and refuses a dirty or
 outdated checkout (fetch, HEAD must equal upstream). Exit 0 valid, 2 invalid,
 1 stopped. Deleting is not part of the tool: a reviewed list is removed in ONE
-commit in the notes repository (Gillette `5f57fdf`, 83 pictures).
+commit in the notes repository (Gillette `5f57fdf`, 83 pictures, 32 of them by
+mistake - see the lesson above).
 Not handled: duplicate groups where several copies are used (needs link
 rewriting). An in-app panel is deliberately postponed: the audit is rarely
-needed and Gillette is clean after `5f57fdf`; usage notes are in the header
-of `tools/image-audit.mjs`. Pinned by `test/image-audit.test.js`.
+needed and Gillette is clean after `1aca810` (valid, 0 unused, 0 broken); usage
+notes are in the header of `tools/image-audit.mjs`. Pinned by
+`test/image-audit.test.js`.
 
 ## Architecture rules (each one closes a whole class of bugs)
 
