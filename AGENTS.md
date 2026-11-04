@@ -1117,7 +1117,9 @@ outdated checkout (fetch, HEAD must equal upstream). Exit 0 valid, 2 invalid,
 1 stopped. Deleting is not part of the tool: a reviewed list is removed in ONE
 commit in the notes repository (Gillette `5f57fdf`, 83 pictures).
 Not handled: duplicate groups where several copies are used (needs link
-rewriting); no panel in the app yet. Pinned by `test/image-audit.test.js`.
+rewriting). An in-app panel is deliberately postponed: the audit is rarely
+needed and Gillette is clean after `5f57fdf`; usage notes are in the header
+of `tools/image-audit.mjs`. Pinned by `test/image-audit.test.js`.
 
 ## Architecture rules (each one closes a whole class of bugs)
 

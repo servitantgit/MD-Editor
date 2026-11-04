@@ -1,10 +1,47 @@
 // tools/image-audit.mjs
 // Image audit report for a repository checked out next to MD-Editor.
-// Usage: node tools/image-audit.mjs <repo-dir> [--out <file>]
 // Reads the tree and the notes from git HEAD (never the disk: no encoding,
 // OneDrive or case-insensitivity surprises). All rules live in
-// js/image-audit.js. Refuses to run on a dirty or outdated checkout.
-// Exit code: 0 valid report, 2 invalid report (no unused list), 1 stopped.
+// js/image-audit.js (tests: test/image-audit.test.js).
+//
+// HOW TO USE (rarely needed; an in-app panel is deliberately postponed)
+//
+// 1. Before: in the notes repository commit or discard local changes and
+//    pull. The tool refuses a dirty checkout and one that differs from its
+//    upstream (it runs git fetch itself).
+//
+// 2. Run from the MD-Editor root (PowerShell):
+//      $root = Join-Path (Split-Path $PWD.Path -Parent) 'Gillette'
+//      $out  = Join-Path ([Environment]::GetFolderPath('Desktop')) 'image-audit-report.txt'
+//      node tools/image-audit.mjs $root --out $out
+//    Without --out the report goes to the console. Exit code: 0 valid
+//    report, 2 invalid report (unused list withheld), 1 stopped.
+//
+// 3. Read the report:
+//    - "valid false": something is unclear (a note could not be read, an
+//      ![[embed]] or [[x.png]], an HTML file pointing at a picture). The
+//      reasons are listed and NO unused pictures are shown. Fix or accept
+//      the cause first; never delete from an invalid report.
+//    - UNUSED: no note shows the picture. "= copy of X" means the same
+//      bytes stay in X, so deleting loses nothing.
+//    - BROKEN: a note links to a picture that does not exist. Fix the
+//      note; "[exists as ...]" means only the letter case differs.
+//    - DUPLICATES: same bytes under several names. "used 2/2" can only be
+//      cleaned by rewriting links; this tool does not do that.
+//
+// 4. Delete (the tool itself never deletes): put the reviewed paths in a
+//    UTF-8 text file, one repo path per line (Asset/x.jpg, without the size
+//    tail), then in the notes repository make ONE commit:
+//      git -C $root --literal-pathspecs rm --pathspec-from-file=<list>
+//      git -C $root commit -m "Delete N unused images" -m "restore: git checkout <old-sha> -- <path>"
+//      git -C $root push
+//    <old-sha> is the HEAD printed at the top of the report. Run the audit
+//    again afterwards: unused 0, broken 0.
+//
+// 5. Restore a deleted picture:
+//      git -C $root checkout <old-sha> -- Asset/x.jpg
+//    then commit it. Not "git show ... > file": PowerShell 5.1 re-encodes the bytes and breaks the picture.
+//    (Gillette: the 83 pictures deleted in 5f57fdf come back from 6b276be.)
 
 import { execFileSync } from 'node:child_process';
 import { writeFileSync } from 'node:fs';
