@@ -706,11 +706,13 @@ everything. Changing `extractTitle`, `stripMarkdown` or the searcher
 fields/options without a bump leaves old titles/bodies in every browser until a
 manual rebuild. Never keep a manifest next to an index that failed to load: the
 sync then believes everything is indexed and search stays empty.
-Current value: 4 (2 = shared fence rules in `stripMarkdown`, 3 = fences inside
-block quotes, 4 = outgoing links stored for backlinks). A change in
+Current value: 5 (2 = shared fence rules in `stripMarkdown`, 3 = fences inside
+block quotes, 4 = outgoing links stored for backlinks, 5 = link targets in
+`<...>` and percent-encoded targets read by backlinks). A change in
 `js/md-fences.js` changes what gets indexed, so it needs a bump as well; so does
-a change in `extractOutgoingLinks()` (`js/backlinks.js`), because its result is
-stored in the record (next paragraph). A test pins the number
+a change in `extractOutgoingLinks()` (`js/backlinks.js`) or in `REF_TOKEN_RE` /
+`classifyRefMatch()` (`js/markdown-tokens.js`), because the result is stored in
+the record (next paragraph). A test pins the number
 (`test/search-index.test.js`).
 
 **Backlinks survive a reload: outgoing links are stored with the index.** The
@@ -1034,6 +1036,17 @@ It is built and destroyed with the editor in `showApp()`, next to the scroll syn
 The suggestions insert markdown links, not `[[...]]`: those also work on
 github.com, which shows `[[...]]` as plain text.
 
+**Readers of that format.** `REF_TOKEN_RE` takes a target either without spaces
+or in `<...>` (same capture groups, the plain form first); `classifyRefMatch()`
+returns it without the brackets and `angle: true`, and `rebuildRefToken()` puts
+the brackets back. On a move, a link in `<...>` keeps a plain path; any other
+link stays percent-encoded (`encodeLinkPath`). Backlinks decode the target once
+with `decodeUriSafe` (rule 7). Not handled on purpose: a file whose NAME holds a
+literal `%20`, linked without encoding, is read as a space (the rewriter does the
+same); `>` inside `<...>` is not recognised (not allowed in Windows file names).
+`IMG_TOKEN_RE` (Preview/PDF) was not changed: the app writes pictures
+percent-encoded (`js/upload.js`), never as `![](<...>)`.
+
 ## Wiki links `[[...]]`: one set of rules for backlinks and rewriting
 
 The app reads and rewrites `[[...]]` but never creates them. Both
@@ -1155,11 +1168,16 @@ rule; when a fixed bug reveals a new class, add a rule here.
    loader of shared state gets the same guard and a test with a fake client
    that answers out of order.
 3. **One set of link rules.** Backlinks (`js/backlinks.js`), the reference
-   rewriter (`js/reference-rewriter.js`) and link building (`buildFileLink`,
-   `js/link-suggest.js`) must agree on what a link points at (see "Wiki links
-   `[[...]]`"). A new link form is added to all of them in one change, with
-   tests in each. Reading a link form that moves do not rewrite breaks notes
-   silently (B1, B5).
+   rewriter (`js/reference-rewriter.js`), the image audit (`js/image-audit.js`)
+   and link building (`buildFileLink`, `js/link-suggest.js`) must agree on what a
+   link points at (see "Wiki links `[[...]]`" and "Link suggestions"). Markdown
+   links are parsed in ONE place, `REF_TOKEN_RE` + `classifyRefMatch()`
+   (`js/markdown-tokens.js`); no reader keeps its own link regex. A new link form
+   is added to all of them in one change, with tests in each. A new WRITE format
+   needs a test for every reader (backlinks, move/rename, audit): `f02e83f`
+   started writing `[x](</a b.md>)` and nothing read it, so moves stopped
+   updating those links and backlinks never saw them (fixed in `e803e0d`).
+   Reading a link form that moves do not rewrite breaks notes silently (B1, B5).
 4. **Failures before code.** A task that touches GitHub or shared state states
    up front what happens on: an error halfway (network, rate limit, 409); two
    actions at once (Refresh, a second tab, a double click); ambiguous data (two
