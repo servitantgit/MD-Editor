@@ -497,8 +497,8 @@ creates). `getFileB64()` used `if (!b64)` as "content missing / file too large",
 so an empty file threw `Empty contents or file too large` and aborted the whole
 folder move. It now returns `{ b64: '' }` when `data.size === 0`, before the
 blob fallback. Check `size === 0` explicitly; never treat an empty string as a
-failure. `getBlobB64()` still has the same `!data.content` check (history
-restore of an empty version) - open task. Pinned by `test/github-client.test.js`.
+failure. `getBlobB64()` has the same `size === 0` check (history restore of an
+empty version). Pinned by `test/github-client.test.js`.
 
 ## inlineImageMarks: the generation guard is what stops orphaned marks
 
@@ -1099,6 +1099,25 @@ of the sidebar empty above the results. `css/app.css` hides the wrapper with
 `.folder-dropzone:has(> .file-tree.hidden)`. If the markup or the show/hide
 logic changes, keep the wrapper hidden whenever the tree is.
 `e2e_smoke_test.py` asserts the results start right under the search box.
+
+## Image audit: js/image-audit.js + tools/image-audit.mjs
+
+`auditImages({ files, texts })` is pure: pictures no note links to, image links
+to a missing file (with a hint when only the case differs) and groups of
+identical pictures by blob sha. Same link rules as the reference rewriter
+(Architecture rules 3 and 7). Fail-safe: an unread note, an `![[embed]]` or
+`[[x.png]]`, or an HTML file pointing at a picture makes the report invalid,
+and an invalid report lists NO unused pictures, so nothing can be offered for
+deletion by mistake.
+
+Run: `node tools/image-audit.mjs <repo-dir> [--out <file>]`. It reads the tree
+and the notes from git HEAD, never the disk (PowerShell 5.1 mangles non-ASCII
+file names, OneDrive locks files, Windows ignores case), and refuses a dirty or
+outdated checkout (fetch, HEAD must equal upstream). Exit 0 valid, 2 invalid,
+1 stopped. Deleting is not part of the tool: a reviewed list is removed in ONE
+commit in the notes repository (Gillette `5f57fdf`, 83 pictures).
+Not handled: duplicate groups where several copies are used (needs link
+rewriting); no panel in the app yet. Pinned by `test/image-audit.test.js`.
 
 ## Architecture rules (each one closes a whole class of bugs)
 

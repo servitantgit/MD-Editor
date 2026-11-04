@@ -172,8 +172,8 @@ python3 e2e_smoke_test.py         # editing, hybrid autosave + 409, tabs, create
   ~400 ms (and again after ~10 s idle) so a crash or reload does not lose work.
   **GitHub is updated only on Save** (current file) or **Commit** (all dirty files).
   Status next to Save: `● Unsaved` / `○ Local only — Save or Commit to push` /
-  `⟳ Saving to GitHub…` / `✓ Saved to GitHub` / `⚠ Save failed`. A draft
-
+  `⟳ Saving to GitHub…` / `✓ Saved to GitHub` / `⚠ Save failed`.
+  Unsaved edits stay a local draft until Save, Commit or Discard.
 - **409 conflicts handled gracefully** — the first sha conflict is retried
   silently with a freshly read sha; a second one in a row raises a banner
   offering *Reload from GitHub / Overwrite*.
@@ -188,6 +188,10 @@ python3 e2e_smoke_test.py         # editing, hybrid autosave + 409, tabs, create
   highlighted; clicking one opens the note. The index is built in the browser
   and persisted in IndexedDB for 30 days; clearing the input brings the tree
   back exactly as it was.
+- **Backlinks** — the **Backlinks** panel lists the notes that link to the
+  open one: markdown links and `[[wiki links]]`; links inside code are ignored.
+- **Link suggestions** — typing `[[` opens a list of notes that filters as you
+  type; Enter inserts a root-absolute link `[name](/path)`.
 - **Image previews** — resolved through the GitHub API (works with private
   repos too), not as direct links. This is the editor's own preview, not a
   separate static GitHub Preview.

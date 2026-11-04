@@ -8,11 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Image audit** (`tools/image-audit.mjs`, `js/image-audit.js`): lists pictures no note links to, image links to a missing file and identical copies. It reads the repository from git HEAD and withholds the unused list whenever anything is unclear (an unread note, a wiki image link, an HTML image reference)
 - **Paste a URL over selected text to make a link.** In a markdown note, selecting a word and pasting a single `http(s)://` URL inserts `[word](url)`; Ctrl+Z undoes it in one step. Anything else is a normal paste: no selection, a multi-line or multiple selection, a selection with `[` or `]`, a selected URL, code spans and fences, non-markdown files. Image paste is unchanged (`js/paste-link.js`, `js/editor.js`)
 - **Link suggestions while typing `[[`.** A list of notes opens under the cursor and filters as you type; Up/Down, Enter or Tab inserts a root-absolute link `[name](/path)` (the same format as Copy as link), Esc closes it (`js/link-suggest.js`)
 - **Discard button** next to Save: reverts the open note to its GitHub version, deletes the local draft, clears the unsaved dot and the Commit badge, and pushes nothing (`js/autosave.js`, `js/app.js`)
 
 ### Fixed
+- **Backlinks counted links shown as examples inside code.** `[[x]]` or `[x](x.md)` in a fenced block or a code span appeared in the Backlinks panel; they are now skipped, the same way links are skipped when a note moves (`js/backlinks.js`)
 - **Images with a space (or any `%XX`) in the link did not show in Preview.** `![x](../Asset/a%20b.jpg)` was sent to GitHub encoded twice (`a%2520b.jpg`), so the image failed to load in Preview and in the inline image widget (all 15 images of one note). `ImageResolver` now decodes the target once, for `resolve` and `cachedUrl` alike; the HTML preview no longer decodes on its own, and opening a picture from the file tree passes its real path encoded, so a literal `%` in a file name still works (`js/image-resolver.js`, `js/html-preview.js`, `js/app.js`)
 - **Typing in Live made Preview flicker and dragged Source toward the end of the note.** Every keystroke re-rendered Preview with all images reset to a placeholder, so the pane collapsed and its scroll position jumped. Already loaded images are now written resolved from the cache, so the height stays the same (`js/image-resolver.js`, `js/markdown-tokens.js`, `js/editor.js`)
 - **Reload from GitHub in the conflict banner left the file in the Commit list.** The file now leaves the working tree and the badge drops (`js/app.js`)
