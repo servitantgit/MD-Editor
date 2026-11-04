@@ -706,9 +706,26 @@ everything. Changing `extractTitle`, `stripMarkdown` or the searcher
 fields/options without a bump leaves old titles/bodies in every browser until a
 manual rebuild. Never keep a manifest next to an index that failed to load: the
 sync then believes everything is indexed and search stays empty.
-Current value: 3 (2 = shared fence rules in `stripMarkdown`, 3 = fences inside
-block quotes). A change in `js/md-fences.js` changes what gets indexed, so it
-needs a bump as well. A test pins the number (`test/search-index.test.js`).
+Current value: 4 (2 = shared fence rules in `stripMarkdown`, 3 = fences inside
+block quotes, 4 = outgoing links stored for backlinks). A change in
+`js/md-fences.js` changes what gets indexed, so it needs a bump as well; so does
+a change in `extractOutgoingLinks()` (`js/backlinks.js`), because its result is
+stored in the record (next paragraph). A test pins the number
+(`test/search-index.test.js`).
+
+**Backlinks survive a reload: outgoing links are stored with the index.** The
+record also holds `links` (`{ [path]: string[] }`): for every note that entered
+the index, `extractOutgoingLinks(path, body)` - the same function
+`backlinkIndex.setFile()` uses. `hydrate()` hands each entry to
+`onLinksRestored` and `app.js` calls `backlinkIndex.setLinks()`. Unchanged notes
+are never downloaded again after F5, so the 200-entry body cache alone left the
+panel almost empty. Rules: the keys of `links` are a subset of the manifest keys
+(`_linksInManifest()` filters on save and on load, so an interrupted first sync
+keeps no links of a file it did not fetch); removed and changed paths drop their
+links, `force` clears them, a non-UTF-8 body has none; notes only
+(`isNoteSourcePath()` - one rule for `setFile`, `setLinks` and the sync). Pinned
+by `test/search-sync.test.js` ("search-sync links") and the e2e tabs reload
+check (G5).
 
 **Teardown**: `showApp()` destroys the in-flight sync alongside the editor
 handle, for the same reason — a re-login must not leave the old indexer fetching
@@ -717,8 +734,10 @@ and writing into the new session's store.
 **What local checks cannot see:** `e2e_smoke_test.py` mocks `api.github.com`, so
 rate limits (403), IndexedDB quota and private-window behaviour are all
 invisible to it — they are covered by `test/search-store.test.js` instead. The
-e2e test seeds `sessionStorage` and reloads, so it is a cold start: never assert
-that the index survives a reload there.
+e2e test seeds `sessionStorage` and reloads, so its first load is a cold start
+(empty IndexedDB). Later reloads in the same page keep IndexedDB: the tabs
+scenario (G5) relies on that to check backlinks after a reload without
+downloading the linking note.
 
 ### Autosave — hybrid model: local on idle, GitHub only on Save / Commit
 
@@ -1162,6 +1181,13 @@ rule; when a fixed bug reveals a new class, add a rule here.
    (`encodeLinkPath`). Decoding in two places double-decodes a literal `%25`;
    decoding in none sends `%20` to the API encoded again (`%2520`, 404):
    Markdown preview showed no image with a space in its path (`dd5b585`).
+8. **Anything computed from a note and stored is versioned.** The search record
+   keeps data computed from note bodies (index fields, titles, backlink
+   `links`). Changing the code that computes it (`extractTitle`,
+   `stripMarkdown`, `js/md-fences.js`, `extractOutgoingLinks`) bumps
+   `INDEX_VERSION` in the same change, or every browser keeps the old result
+   until a manual rebuild. A new stored field is limited to the manifest, so it
+   never outlives the files it came from (`8881736`).
 
 ## General rule before considering a task done
 

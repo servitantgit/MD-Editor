@@ -446,7 +446,8 @@ test('stripMarkdown: an inline ```x``` line does not hide the text below it', ()
 
 test('INDEX_VERSION was bumped so stored indexes gain backlink data (links)', () => {
   // Stored indexes built with the old rules must be rebuilt in every browser:
-  // 3 = shared fence rules in stripMarkdown, 4 = outgoing links stored for backlinks.
+  // 4 = outgoing links stored for backlinks; what 3 and older meant: AGENTS.md,
+  // "Bump INDEX_VERSION when indexing rules change".
   assert.equal(INDEX_VERSION, 4);
 });
 
