@@ -8,6 +8,7 @@
 // Skips http(s), mailto, anchors-only, images ![…](…).
 
 import { dirnameOf, resolveRelativePath } from './paths.js';
+import { splitByFences, findCodeSpans } from './md-fences.js';
 
 /** Markdown inline link, not an image. Captures the href. */
 const MD_LINK_RE = /(!)?\[([^\]]*)\]\(\s*<?([^)\s>]+)>?(?:\s+"[^"]*")?\s*\)/g;
@@ -68,32 +69,45 @@ export function resolveNoteLink(fromPath, href) {
  * @returns {string[]} unique repo-rooted paths (may lack .md; matcher handles it)
  */
 export function extractOutgoingLinks(fromPath, body) {
-  const text = String(body || '');
   const out = new Set();
+  // Links inside fenced code and code spans are examples, not links
+  // (Architecture rule 3: the reference rewriter skips them too).
+  const chunks = [];
+  for (const seg of splitByFences(String(body || ''))) {
+    if (!seg.code) chunks.push({ text: seg.text, spans: findCodeSpans(seg.text) });
+  }
+  const inSpan = (spans, i) => spans.some(([a, b]) => i >= a && i < b);
 
-  MD_LINK_RE.lastIndex = 0;
-  let m;
-  while ((m = MD_LINK_RE.exec(text))) {
-    if (m[1] === '!') continue; // image
-    const href = m[3];
-    if (!isInternalNoteHref(href)) continue;
-    const abs = resolveNoteLink(fromPath, href);
-    if (abs) out.add(abs);
+  for (const { text, spans } of chunks) {
+    const re = new RegExp(MD_LINK_RE.source, 'g');
+    let m;
+    while ((m = re.exec(text))) {
+      if (inSpan(spans, m.index)) continue;
+      if (m[1] === '!') continue; // image
+      const href = m[3];
+      if (!isInternalNoteHref(href)) continue;
+      const abs = resolveNoteLink(fromPath, href);
+      if (abs) out.add(abs);
+    }
   }
 
-  WIKI_LINK_RE.lastIndex = 0;
-  while ((m = WIKI_LINK_RE.exec(text))) {
-    let target = (m[1] || '').split('|')[0].trim();
-    if (!target) continue;
-    // Wikilinks rarely use extensions; leave as-is for fuzzy match.
-    if (/^(https?:|mailto:)/i.test(target)) continue;
-    // Obsidian rules: [[./x]] and [[../x]] resolve from the note folder; any
-    // other path ([[Notes/x]], [[/Notes/x]]) from the repository root; a bare
-    // name ([[x]]) stays a name and linkMatchesPath finds it by file name.
-    // #heading is dropped. Resolving from the note folder broke every wiki
-    // link written in another folder.
-    const abs = /^\.\.?\//.test(target) ? resolveNoteLink(fromPath, target) : stripHrefDecorations(target);
-    if (abs) out.add(abs);
+  for (const { text, spans } of chunks) {
+    const re = new RegExp(WIKI_LINK_RE.source, 'g');
+    let m;
+    while ((m = re.exec(text))) {
+      if (inSpan(spans, m.index)) continue;
+      const target = (m[1] || '').split('|')[0].trim();
+      if (!target) continue;
+      // Wikilinks rarely use extensions; leave as-is for fuzzy match.
+      if (/^(https?:|mailto:)/i.test(target)) continue;
+      // Obsidian rules: [[./x]] and [[../x]] resolve from the note folder; any
+      // other path ([[Notes/x]], [[/Notes/x]]) from the repository root; a bare
+      // name ([[x]]) stays a name and linkMatchesPath finds it by file name.
+      // #heading is dropped. Resolving from the note folder broke every wiki
+      // link written in another folder.
+      const abs = /^\.\.?\//.test(target) ? resolveNoteLink(fromPath, target) : stripHrefDecorations(target);
+      if (abs) out.add(abs);
+    }
   }
 
   return [...out];

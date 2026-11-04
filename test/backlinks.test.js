@@ -91,3 +91,29 @@ test('backlinks: [[Notes/x]] is not mistaken for a note under the source folder'
   assert.deepEqual(idx.getBacklinks('Other/Notes/Printer jam.md'), [], 'no false match under Other/');
   assert.deepEqual(idx.getBacklinks('Notes/Printer jam.md'), ['Other/note.md']);
 });
+
+// Links inside code are examples, not links (Architecture rule 3: the
+// reference rewriter already skips fences and code spans, backlinks must too).
+test('extractOutgoingLinks skips links inside code: fenced block', () => {
+  const body = '\x60\x60\x60\n[[X]]\n[x](X.md)\n\x60\x60\x60\n';
+  assert.deepEqual(extractOutgoingLinks('A/n.md', body), []);
+});
+
+test('extractOutgoingLinks skips links inside code: code span', () => {
+  const body = 'see \x60[[X]]\x60 and \x60[x](X.md)\x60\n';
+  assert.deepEqual(extractOutgoingLinks('A/n.md', body), []);
+});
+
+test('extractOutgoingLinks skips links inside code: fence and span mixed with real links', () => {
+  const body = '\x60\x60\x60\n[[InFence]]\n[x](InFence2.md)\n\x60\x60\x60\nsee \x60[[InSpan]]\x60 here\n[[Real]]\n[y](Real2.md)\n';
+  assert.deepEqual(extractOutgoingLinks('A/n.md', body), ['A/Real2.md', 'Real']);
+});
+
+test('extractOutgoingLinks skips links inside code: fence inside a blockquote', () => {
+  const body = '> \x60\x60\x60\n> [[X]]\n> \x60\x60\x60\n';
+  assert.deepEqual(extractOutgoingLinks('A/n.md', body), []);
+});
+
+test('extractOutgoingLinks keeps a link right after a code span (guard)', () => {
+  assert.deepEqual(extractOutgoingLinks('A/n.md', '\x60code\x60 [[Real]]\n'), ['Real']);
+});
