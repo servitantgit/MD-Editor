@@ -1,0 +1,5 @@
+# термінал 1
+node serve.mjs
+# термінал 2
+$env:PYTHONIOENCODING = 'utf-8'
+python e2e_smoke_test.py 2>&1 | Select-Object -Last 30 | Out-String | Set-Clipboard
