@@ -218,3 +218,8 @@ test('link forms: an encoded link stays encoded after a move (guard)', () => {
   assert.deepEqual(updateReferencesInFile('[x](/A/a%20b.md)\n', 'Other', 'A/a b.md', 'B/c d.md'),
     { changed: true, text: '[x](/B/c%20d.md)\n' });
 });
+
+test('parens: a moved image with parentheses is updated and keeps them', () => {
+  assert.deepEqual(updateReferencesInFile('![x](../Asset/a_(b).jpg)\n', 'A', 'Asset/a_(b).jpg', 'Asset/c_(d).jpg'),
+    { changed: true, text: '![x](../Asset/c_(d).jpg)\n' });
+});

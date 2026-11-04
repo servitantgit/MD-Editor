@@ -98,3 +98,20 @@ test('link forms: audit counts an image linked only in <...> as used', () => {
   assert.deepEqual(r.broken, []);
   assert.equal(r.used.get('Asset/a b.png'), 1);
 });
+
+test('parens: audit counts an image with parentheses in its name as used', () => {
+  const r = run([f('A/n.md'), f('Asset/a_(b).png')], { 'A/n.md': '![x](../Asset/a_(b).png)\n' });
+  assert.equal(r.valid, true);
+  assert.deepEqual(r.unused, []);
+  assert.equal(r.used.get('Asset/a_(b).png'), 1);
+});
+
+// Fail-safe: every ![...]( outside code must parse as one image; an image link
+// the parser cannot read makes the report invalid, so nothing is offered for
+// deletion (5f57fdf deleted 32 used images whose links were cut at ")").
+test('parens: audit failure: an image link it cannot parse makes the report invalid', () => {
+  const r = run([f('A/n.md'), f('Asset/a.png')], { 'A/n.md': '![x](../Asset/a(b.jpg)\n' });
+  assert.equal(r.valid, false);
+  assert.deepEqual(r.unused, []);
+  assert.deepEqual(r.reasons, ['unparsed image link: A/n.md']);
+});

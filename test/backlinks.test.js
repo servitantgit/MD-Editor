@@ -175,3 +175,7 @@ test('link forms: an image in <...> is not a backlink (guard)', () => {
 test('link forms: <mailto:...> is not a backlink (guard)', () => {
   assert.deepEqual(extractOutgoingLinks('A/n.md', '[m](<mailto:x@y.com>)\n'), []);
 });
+
+test('parens: backlinks keep parentheses in a link target', () => {
+  assert.deepEqual(extractOutgoingLinks('A/m.md', '[x](n_(1).md)\n'), ['A/n_(1).md']);
+});

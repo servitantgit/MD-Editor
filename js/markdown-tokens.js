@@ -11,17 +11,31 @@ export const TRANSPARENT_PIXEL =
   'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==';
 
 /**
+ * A link or image target without spaces: one level of balanced (...) is part of
+ * the path (Asset/ATS_(BOB_Load)_image_0001.jpg). ONE rule for REF_TOKEN_RE,
+ * IMG_TOKEN_RE and MD_IMAGE_RE; before, every reader cut the target at the
+ * first ")" and the image audit deleted 32 used pictures (5f57fdf). Nested or
+ * unbalanced parentheses are not handled (the image audit reports such a link).
+ */
+export const LINK_TARGET_SRC = /(?:[^\s()]|\([^\s()]*\))+?/.source;
+
+/**
  * Images (markdown ![]() or raw <img>) or plain markdown links [](). A target
  * is either free of spaces or wrapped in <...> (buildFileLink writes that form
  * for a path with a space or a parenthesis). One parser for backlinks, the
  * reference rewriter and the image audit (Architecture rule 3). The group count
  * must not change: callers pass g1..g6 to classifyRefMatch.
  */
-export const REF_TOKEN_RE =
-  /!\[([^\]]*)\]\(\s*(\S+?|<[^\n>]+>)(?:\s+"([^"]*)")?\s*\)|(?<!!)\[([^\]]*)\]\(\s*(\S+?|<[^\n>]+>)(?:\s+"([^"]*)")?\s*\)|<img\b[^>]*\/?>/g;
+export const REF_TOKEN_RE = new RegExp(
+  /!\[([^\]]*)\]\(\s*(@T@|<[^\n>]+>)(?:\s+"([^"]*)")?\s*\)|(?<!!)\[([^\]]*)\]\(\s*(@T@|<[^\n>]+>)(?:\s+"([^"]*)")?\s*\)|<img\b[^>]*\/?>/.source.split('@T@').join(LINK_TARGET_SRC),
+  'g'
+);
 
 /** Only images (markdown ![]() or raw <img>) — used for preview/PDF. */
-export const IMG_TOKEN_RE = /!\[([^\]]*)\]\(\s*(\S+?)(?:\s+"([^"]*)")?\s*\)|<img\b[^>]*\/?>/g;
+export const IMG_TOKEN_RE = new RegExp(
+  /!\[([^\]]*)\]\(\s*(@T@)(?:\s+"([^"]*)")?\s*\)|<img\b[^>]*\/?>/.source.split('@T@').join(LINK_TARGET_SRC),
+  'g'
+);
 
 /** Extracts src/alt/width from a raw <img ...> tag string without DOM. */
 export function parseImgTagAttrs(tagHtml) {
@@ -142,7 +156,10 @@ export function setImageAttrsInLine(line, occIndex, { src, alt, width }) {
   return newLine;
 }
 
-const MD_IMAGE_RE = /!\[([^\]]*)\]\(\s*(\S+?)(?:\s+"([^"]*)")?\s*\)/g;
+const MD_IMAGE_RE = new RegExp(
+  /!\[([^\]]*)\]\(\s*(@T@)(?:\s+"([^"]*)")?\s*\)/.source.split('@T@').join(LINK_TARGET_SRC),
+  'g'
+);
 
 /**
  * Markdown images ![alt](src) with their offsets in `text`. Images inside

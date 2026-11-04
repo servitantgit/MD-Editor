@@ -444,13 +444,21 @@ test('stripMarkdown: an inline ```x``` line does not hide the text below it', ()
   assert.equal(stripMarkdown('```x``` inline\nreal words below'), 'inline real words below');
 });
 
-test('INDEX_VERSION was bumped so stored backlinks understand <...> and %XX links', () => {
+test('INDEX_VERSION was bumped so parentheses in link targets are indexed correctly', () => {
   // Stored indexes built with the old rules must be rebuilt in every browser:
-  // 5 = backlink targets in <...> and percent-encoded; older values: AGENTS.md,
+  // 6 = balanced (...) inside a link or image target; older values: AGENTS.md,
   // "Bump INDEX_VERSION when indexing rules change".
-  assert.equal(INDEX_VERSION, 5);
+  assert.equal(INDEX_VERSION, 6);
 });
 
 test('stripMarkdown: code in a fence inside a blockquote does not leak into the index', () => {
   assert.equal(stripMarkdown('> intro\n> ```\n> QUOTECODE\n> ```\nafter words'), 'intro after words');
+});
+
+test('parens: stripMarkdown drops an image with parentheses in its path whole', () => {
+  assert.equal(stripMarkdown('![x](a_(b)_1.jpg) text'), 'text');
+});
+
+test('parens: stripMarkdown keeps the text of a link with parentheses in its path', () => {
+  assert.equal(stripMarkdown('[see](n_(1).md) more'), 'see more');
 });

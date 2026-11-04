@@ -21,8 +21,9 @@ export const BODY_CACHE_LIMIT = 200;
  * different version is dropped on load and rebuilt in the background.
  * 4: outgoing links stored for backlinks.
  * 5: backlink targets in <...> and percent-encoded ones (decoded once).
+ * 6: one level of balanced (...) inside a link or image target.
  */
-export const INDEX_VERSION = 5;
+export const INDEX_VERSION = 6;
 
 /** Characters of context kept before / after the highlighted term. */
 export const SNIPPET_BEFORE = 15;
@@ -85,9 +86,9 @@ export function stripMarkdown(body) {
     .join('');
   return prose
     .replace(/`[^`\n]*`/g, ' ') // inline code
-    .replace(/!\[[^\]]*\]\([^)]*\)/g, ' ') // images (whole)
+    .replace(/!\[[^\]]*\]\((?:\([^()]*\)|[^)])*?\)/g, ' ') // images (whole); one level of (...) in the path
     .replace(/!\[[^\]]*\]\[[^\]]*\]/g, ' ')
-    .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1') // links: keep the text
+    .replace(/\[([^\]]*)\]\((?:\([^()]*\)|[^)])*?\)/g, '$1') // links: keep the text
     .replace(/\[([^\]]*)\]\[[^\]]*\]/g, '$1')
     .replace(/^\s{0,3}>{1,}\s?/gm, '') // block quotes
     .replace(/^\s{0,3}([-*+]|\d+[.)])\s+/gm, '') // list bullets

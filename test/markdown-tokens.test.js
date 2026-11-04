@@ -9,6 +9,7 @@ import {
   TRANSPARENT_PIXEL,
 } from '../js/markdown-tokens.js';
 import { REF_TOKEN_RE, classifyRefMatch } from '../js/markdown-tokens.js';
+import { findMarkdownImages } from '../js/markdown-tokens.js';
 
 test('parseImgTagAttrs extracts src/alt/width from a raw <img> tag', () => {
   const attrs = parseImgTagAttrs('<img src="/a/b.png" alt="hello" width="320">');
@@ -196,4 +197,39 @@ test('link forms: a plain link with a title is unchanged (guard)', () => {
   assert.equal(t[0].target, 'B.md');
   assert.equal(t[0].title, 't');
   assert.notEqual(t[0].angle, true);
+});
+
+// Parentheses in a target: one level of balanced (...) is part of the path
+// (Asset/ATS_(BOB_Load)_image_0001.jpg). Every reader shares one target rule;
+// before, the target was cut at the first ")" (5f57fdf deleted 32 such images).
+test('parens: REF_TOKEN_RE keeps parentheses in an image target', () => {
+  const t = lfTokens('![x](../A/a_(b)_1.jpg)');
+  assert.equal(t.length, 1);
+  assert.equal(t[0].kind, 'img-md');
+  assert.equal(t[0].target, '../A/a_(b)_1.jpg');
+});
+
+test('parens: REF_TOKEN_RE keeps parentheses in a link target', () => {
+  const t = lfTokens('[x](A/n_(1).md)');
+  assert.equal(t.length, 1);
+  assert.equal(t[0].kind, 'link-md');
+  assert.equal(t[0].target, 'A/n_(1).md');
+});
+
+test('parens: Preview gets the whole image path', () => {
+  const html = injectCanonicalImageTags('![x](../A/a_(b)_1.jpg)');
+  assert.ok(html.includes('data-md-src="../A/a_(b)_1.jpg"'), html);
+  assert.ok(!html.includes('_1.jpg)'), html);
+});
+
+test('parens: Source image widgets get the whole image path', () => {
+  const found = findMarkdownImages('see ![x](../A/a_(b)_1.jpg) end');
+  assert.equal(found.length, 1);
+  assert.equal(found[0].src, '../A/a_(b)_1.jpg');
+  assert.equal(found[0].raw, '![x](../A/a_(b)_1.jpg)');
+});
+
+test('parens: a plain image path in Preview is unchanged (guard)', () => {
+  const html = injectCanonicalImageTags('![x](../A/b.png)');
+  assert.ok(html.includes('data-md-src="../A/b.png"'), html);
 });

@@ -7,9 +7,10 @@
 // REF_TOKEN_RE outside fences and code spans, external targets skipped, the
 // target decoded once, "/x" from the repo root, anything else from the folder
 // of the note, exact (case-sensitive) match against the tree.
-// Fail-safe: an unread note, a wiki image link or an HTML file pointing at a
-// picture makes the report invalid, and an invalid report lists NO unused
-// pictures, so nothing can be offered for deletion by mistake.
+// Fail-safe: an unread note, a wiki image link, an HTML file pointing at a
+// picture or an image link the parser cannot read (an ![...]( that is not
+// inside a parsed token) makes the report invalid, and an invalid report
+// lists NO unused pictures, so nothing can be offered for deletion by mistake.
 
 import { REF_TOKEN_RE, classifyRefMatch } from './markdown-tokens.js';
 import { splitByFences, findCodeSpans } from './md-fences.js';
@@ -19,6 +20,8 @@ const DOC_RE = /\.(md|html?)$/i;
 const HTML_RE = /\.html?$/i;
 const WIKI_RE = /(!?)\[\[([^\]]+)\]\]/g;
 const HTML_REF_RE = /\b(?:src|href)\s*=\s*["']([^"']+)["']/gi;
+/** The start of a markdown image, ![alt]( - counted against parsed tokens. */
+const IMG_OPEN_RE = /!\[[^\]]*\]\(/g;
 
 /** Calls onChunk(text, codeSpans) for every part of text outside fenced code. */
 function outsideFences(text, onChunk) {
@@ -89,11 +92,22 @@ export function auditImages({ files, texts } = {}) {
     if (hasWikiImageLink(text)) reasons.push('wiki image link: ' + doc.path);
 
     const dir = dirnameOf(doc.path);
+    // Fail-safe: every ![...]( outside code must sit inside a parsed token
+    // (an image nested in a link counts too). One the parser cannot read
+    // makes the report invalid: 5f57fdf deleted 32 used pictures whose links
+    // were cut at the first ")".
+    let opened = 0;
+    let parsed = 0;
+    const opens = (s) => (s.match(new RegExp(IMG_OPEN_RE.source, 'g')) || []).length;
     outsideFences(text, (chunk, spans) => {
+      const open = new RegExp(IMG_OPEN_RE.source, 'g');
+      let o;
+      while ((o = open.exec(chunk)) !== null) if (!inSpan(spans, o.index)) opened++;
       const re = new RegExp(REF_TOKEN_RE.source, 'g');
       let m;
       while ((m = re.exec(chunk)) !== null) {
         if (inSpan(spans, m.index)) continue;
+        parsed += opens(m[0]);
         const target = classifyRefMatch(m[0], m[1], m[2], m[3], m[4], m[5], m[6]).target || '';
         if (!isRepoTarget(target)) continue;
         const dec = decodeUriSafe(target);
@@ -103,6 +117,7 @@ export function auditImages({ files, texts } = {}) {
         else broken.push({ from: doc.path, target: path, caseHint: byLower.get(path.toLowerCase()) || null });
       }
     });
+    if (opened !== parsed) reasons.push('unparsed image link: ' + doc.path);
   }
 
   const images = list.filter((x) => isImagePath(x.path));
