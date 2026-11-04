@@ -444,11 +444,11 @@ test('stripMarkdown: an inline ```x``` line does not hide the text below it', ()
   assert.equal(stripMarkdown('```x``` inline\nreal words below'), 'inline real words below');
 });
 
-test('INDEX_VERSION was bumped so parentheses in link targets are indexed correctly', () => {
+test('INDEX_VERSION was bumped so backlinks use the shared external-link rule', () => {
   // Stored indexes built with the old rules must be rebuilt in every browser:
-  // 6 = balanced (...) inside a link or image target; older values: AGENTS.md,
+  // 7 = onenote:, file:// and //host links are not backlinks; older values: AGENTS.md,
   // "Bump INDEX_VERSION when indexing rules change".
-  assert.equal(INDEX_VERSION, 6);
+  assert.equal(INDEX_VERSION, 7);
 });
 
 test('stripMarkdown: code in a fence inside a blockquote does not leak into the index', () => {

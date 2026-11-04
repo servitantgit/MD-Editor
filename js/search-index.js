@@ -22,8 +22,9 @@ export const BODY_CACHE_LIMIT = 200;
  * 4: outgoing links stored for backlinks.
  * 5: backlink targets in <...> and percent-encoded ones (decoded once).
  * 6: one level of balanced (...) inside a link or image target.
+ * 7: backlinks skip any URL scheme (onenote:, file:) and //host links.
  */
-export const INDEX_VERSION = 6;
+export const INDEX_VERSION = 7;
 
 /** Characters of context kept before / after the highlighted term. */
 export const SNIPPET_BEFORE = 15;

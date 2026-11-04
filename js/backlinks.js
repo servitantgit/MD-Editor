@@ -5,9 +5,9 @@
 // Supported targets (v1):
 //   - [label](relative/or/root.md)  and  [label](/Notes/x.md)
 //   - [[wikilink]] / [[path/to/note]] / [[note|alias]]  (resolved loosely)
-// Skips http(s), mailto, anchors-only, images ![…](…).
+// Skips external links (isExternalOrAnchor: any URL scheme), anchors, images.
 
-import { dirnameOf, resolveRelativePath, decodeUriSafe } from './paths.js';
+import { dirnameOf, resolveRelativePath, decodeUriSafe, isExternalOrAnchor } from './paths.js';
 import { splitByFences, findCodeSpans } from './md-fences.js';
 import { REF_TOKEN_RE, classifyRefMatch } from './markdown-tokens.js';
 
@@ -20,8 +20,11 @@ const WIKI_LINK_RE = /\[\[([^\]]+)\]\]/g;
  */
 export function isInternalNoteHref(href) {
   const h = String(href || '').trim();
-  if (!h || h.startsWith('#') || h.startsWith('?')) return false;
-  if (/^(https?:|mailto:|tel:|data:|javascript:)/i.test(h)) return false;
+  // External = the shared rule of the rewriter, the audit, Preview and the link
+  // click (isExternalOrAnchor: any URL scheme such as onenote: or file:, an
+  // #anchor, data:; Architecture rule 3). Plus what only a note link must not
+  // be: a bare ?query and a //host URL.
+  if (isExternalOrAnchor(h) || h.startsWith('?') || h.startsWith('//')) return false;
   // Pure image targets are not "note" backlinks.
   if (/\.(png|jpe?g|gif|webp|svg|bmp|ico|pdf)$/i.test(h.split('#')[0].split('?')[0])) {
     return false;

@@ -179,3 +179,22 @@ test('link forms: <mailto:...> is not a backlink (guard)', () => {
 test('parens: backlinks keep parentheses in a link target', () => {
   assert.deepEqual(extractOutgoingLinks('A/m.md', '[x](n_(1).md)\n'), ['A/n_(1).md']);
 });
+
+// External links: backlinks use the shared rule isExternalOrAnchor (paths.js),
+// the one the rewriter, the audit, Preview and the link click use (rule 3).
+// Before, backlinks knew five schemes only, so 17 onenote: links and a file://
+// link in the notes were indexed as notes.
+test('external: isInternalNoteHref treats any URL scheme and //host as external', () => {
+  for (const h of ['onenote:#Page&x', 'onenote:SOFT%20PG.one#x', 'file:///c:/a.md', 'ftp://a/b.md', 'C:\\a.md', '//cdn/a.md']) {
+    assert.equal(isInternalNoteHref(h), false, h);
+  }
+});
+
+test('external: backlinks skip onenote: and file:// links', () => {
+  assert.deepEqual(extractOutgoingLinks('A/n.md', '[q](onenote:#DataMetrics&x) [f](file://143.37.203.201)\n'), []);
+});
+
+test('external: notes stay internal, query/image/pdf targets stay out (guard)', () => {
+  for (const h of ['B.md', '/A/b.md', 'a b.md', 'Notes/x']) assert.equal(isInternalNoteHref(h), true, h);
+  for (const h of ['?q', 'pic.png', 'doc.pdf', '#top', 'https://x.com']) assert.equal(isInternalNoteHref(h), false, h);
+});
