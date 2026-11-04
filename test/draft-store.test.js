@@ -254,3 +254,170 @@ test('an empty or partial tree never deletes a fresh draft', async () => {
   assert.ok(await store.get(SCOPE_PATH('new-file.md')), 'a just-created file is not in the lagging tree yet');
   assert.ok(await store.get(SCOPE_PATH('Notes/b.md')), 'a truncated tree does not list every file');
 });
+
+function draftConfirmationGate() {
+  let resolve;
+  const promise = new Promise((r) => { resolve = r; });
+  return { promise, resolve };
+}
+
+const draftConfirmationTurn = () => new Promise((resolve) => setImmediate(resolve));
+
+test('draft confirmation: matching text is deleted and missing text returns false', async () => {
+  const store = newStore();
+  try {
+    assert.equal(typeof store.deleteIfText, 'function', 'deleteIfText must exist');
+    await store.put(draft('a.md', 'SNAPSHOT'));
+    assert.equal(await store.deleteIfText(SCOPE_PATH('a.md'), 'SNAPSHOT'), true);
+    assert.equal(await store.get(SCOPE_PATH('a.md')), null);
+    assert.equal(await store.deleteIfText(SCOPE_PATH('a.md'), 'SNAPSHOT'), false);
+  } finally {
+    store.close();
+  }
+});
+
+test('draft confirmation: a different newer text is kept unchanged', async () => {
+  const store = newStore();
+  try {
+    assert.equal(typeof store.deleteIfText, 'function', 'deleteIfText must exist');
+    await store.put(draft('a.md', 'NEWER', { baseSha: 'new-base' }));
+    const before = await store.get(SCOPE_PATH('a.md'));
+    assert.equal(await store.deleteIfText(SCOPE_PATH('a.md'), 'SNAPSHOT'), false);
+    assert.deepEqual(await store.get(SCOPE_PATH('a.md')), before);
+  } finally {
+    store.close();
+  }
+});
+
+test('draft confirmation: an empty committed text is deleted, not treated as absent', async () => {
+  const store = newStore();
+  try {
+    assert.equal(typeof store.deleteIfText, 'function', 'deleteIfText must exist');
+    await store.put(draft('a.md', ''));
+    assert.equal(await store.deleteIfText(SCOPE_PATH('a.md'), ''), true);
+    assert.equal(await store.get(SCOPE_PATH('a.md')), null);
+  } finally {
+    store.close();
+  }
+});
+
+test('draft confirmation: memory fallback keeps newer text and deletes only a match', async () => {
+  const store = newStore({ indexedDB: null });
+  try {
+    assert.equal(typeof store.deleteIfText, 'function', 'deleteIfText must exist');
+    await store.put(draft('a.md', 'NEWER'));
+    assert.equal(store.degraded, true);
+    assert.equal(await store.deleteIfText(SCOPE_PATH('a.md'), 'SNAPSHOT'), false);
+    assert.equal((await store.get(SCOPE_PATH('a.md'))).text, 'NEWER');
+    assert.equal(await store.deleteIfText(SCOPE_PATH('a.md'), 'NEWER'), true);
+    assert.equal(await store.get(SCOPE_PATH('a.md')), null);
+  } finally {
+    store.close();
+  }
+});
+
+test('draft confirmation: read compare and delete use one readwrite transaction', async () => {
+  const store = newStore();
+  try {
+    assert.equal(typeof store.deleteIfText, 'function', 'deleteIfText must exist');
+    await store.put(draft('a.md', 'SNAPSHOT'));
+    const originalTx = store.backend._tx.bind(store.backend);
+    const operations = [];
+    store.backend._tx = (mode, fn) => {
+      const transaction = { mode, requests: [] };
+      operations.push(transaction);
+      return originalTx(mode, (objectStore, setResult) => {
+        const wrapped = new Proxy(objectStore, {
+          get(target, property) {
+            const value = Reflect.get(target, property);
+            if (typeof value !== 'function') return value;
+            return (...args) => {
+              if (property === 'get' || property === 'delete') {
+                transaction.requests.push(String(property));
+              }
+              return value.apply(target, args);
+            };
+          }
+        });
+        return fn(wrapped, setResult);
+      });
+    };
+    assert.equal(await store.deleteIfText(SCOPE_PATH('a.md'), 'SNAPSHOT'), true);
+    assert.deepEqual(operations, [
+      { mode: 'readwrite', requests: ['get', 'delete'] }
+    ]);
+    assert.equal(store.degraded, false);
+  } finally {
+    store.close();
+  }
+});
+
+test('draft confirmation: delete waits for an earlier pending put of the same key', async () => {
+  const store = newStore();
+  const entered = draftConfirmationGate();
+  const release = draftConfirmationGate();
+  let put;
+  let deletion;
+  try {
+    await store.open();
+    const originalPut = store.backend.put.bind(store.backend);
+    store.backend.put = async (...args) => {
+      entered.resolve();
+      await release.promise;
+      return originalPut(...args);
+    };
+    put = store.put(draft('a.md', 'SNAPSHOT'));
+    await entered.promise;
+    let deleteFinished = false;
+    deletion = store.delete(SCOPE_PATH('a.md')).then(() => {
+      deleteFinished = true;
+    });
+    await draftConfirmationTurn();
+    assert.equal(deleteFinished, false, 'delete must wait for the earlier put');
+    release.resolve();
+    await Promise.all([put, deletion]);
+    assert.equal(await store.get(SCOPE_PATH('a.md')), null, 'old put must not resurrect a deleted draft');
+  } finally {
+    release.resolve();
+    await Promise.allSettled([put, deletion].filter(Boolean));
+    store.close();
+  }
+});
+
+test('draft confirmation: a later put stays after queued conditional cleanup', async () => {
+  const store = newStore();
+  const entered = draftConfirmationGate();
+  const release = draftConfirmationGate();
+  let first;
+  let cleanup;
+  let later;
+  try {
+    assert.equal(typeof store.deleteIfText, 'function', 'deleteIfText must exist');
+    await store.open();
+    const originalPut = store.backend.put.bind(store.backend);
+    let firstPut = true;
+    store.backend.put = async (...args) => {
+      if (firstPut) {
+        firstPut = false;
+        entered.resolve();
+        await release.promise;
+      }
+      return originalPut(...args);
+    };
+    first = store.put(draft('a.md', 'SNAPSHOT'));
+    await entered.promise;
+    cleanup = store.deleteIfText(SCOPE_PATH('a.md'), 'SNAPSHOT');
+    later = store.put(draft('a.md', 'NEWER', { baseSha: 'committed-sha' }));
+    release.resolve();
+    await first;
+    assert.equal(await cleanup, true, 'cleanup must see the preceding snapshot');
+    await later;
+    const final = await store.get(SCOPE_PATH('a.md'));
+    assert.equal(final.text, 'NEWER');
+    assert.equal(final.baseSha, 'committed-sha');
+  } finally {
+    release.resolve();
+    await Promise.allSettled([first, cleanup, later].filter(Boolean));
+    store.close();
+  }
+});

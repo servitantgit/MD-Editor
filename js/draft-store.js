@@ -61,6 +61,7 @@ export class DraftStore {
       onDegrade,
     });
     this.now = now || (() => Date.now());
+    this._operations = new Map();
   }
 
   /** False once the store fell back to memory (drafts die with the tab). */
@@ -75,21 +76,42 @@ export class DraftStore {
    * the record instead of clearing the flag).
    */
   async put({ owner, repo, branch, path, text, baseSha = null, dirty = true }) {
-    return this.backend.put(
-      { key: draftKey(owner, repo, branch, path), path, text, baseSha, dirty },
-      // Under quota pressure the whole CURRENT scope is untouchable: those are
-      // the drafts the user is actually editing right now.
+    const key = draftKey(owner, repo, branch, path);
+    return this._enqueue(key, () => this.backend.put(
+      { key, path, text, baseSha, dirty },
+      // Protect the entire scope of the work being edited.
       { protectPrefix: scopePrefix(owner, repo, branch) }
-    );
+    ));
   }
 
   /** The stored draft for one file, or null. Never throws. */
   async get(ref) { return this.backend.get(refKey(ref)); }
 
-  async delete(ref) { return this.backend.delete(refKey(ref)); }
+  async delete(ref) { return this.deleteByKey(refKey(ref)); }
+
+  /** Delete only the confirmed text; preserve a different newer draft. */
+  async deleteIfText(ref, expectedText) {
+    const key = refKey(ref);
+    return this._enqueue(key, () => this.backend.deleteIfText(key, expectedText));
+  }
 
   /** Deletes by the stored key itself (used by the sweep, which reads records). */
-  async deleteByKey(key) { return this.backend.delete(key); }
+  async deleteByKey(key) {
+    return this._enqueue(key, () => this.backend.delete(key));
+  }
+
+  // Queue mutations per full scope/path key in this store instance.
+  // A rejected operation must not prevent the next operation from running.
+  _enqueue(key, operation) {
+    const previous = this._operations.get(key) || Promise.resolve();
+    const result = previous.then(operation);
+    const tail = result.then(() => {}, () => {});
+    this._operations.set(key, tail);
+    void tail.then(() => {
+      if (this._operations.get(key) === tail) this._operations.delete(key);
+    });
+    return result;
+  }
 
   /** Every stored draft, whatever repository it belongs to. */
   async all() { return this.backend.all(); }

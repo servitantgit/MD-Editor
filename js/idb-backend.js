@@ -29,6 +29,12 @@ export function createMemoryBackend() {
     async get(key) { return map.get(key) || null; },
     async put(record) { map.set(record.key, record); },
     async delete(key) { map.delete(key); },
+    async deleteIfText(key, expectedText) {
+      const record = map.get(key);
+      if (!record || record.text !== expectedText) return false;
+      map.delete(key);
+      return true;
+    },
     async all() { return Array.from(map.values()); },
   };
 }
@@ -209,6 +215,27 @@ export class IdbBackend {
     try {
       await this._tx('readwrite', (store) => { store.delete(key); });
     } catch (_) { /* best-effort; the TTL sweep will catch it eventually */ }
+  }
+
+  /** Compare and delete in ONE transaction; failures preserve the draft. */
+  async deleteIfText(key, expectedText) {
+    if (!(await this.open())) return this.memory.deleteIfText(key, expectedText);
+    try {
+      return await this._tx('readwrite', (store, setResult) => {
+        const request = store.get(key);
+        request.onsuccess = () => {
+          const record = request.result;
+          if (!record || record.text !== expectedText) {
+            setResult(false);
+            return;
+          }
+          store.delete(key);
+          setResult(true);
+        };
+      });
+    } catch (_) {
+      return false;
+    }
   }
 
   /** Every stored record. */
