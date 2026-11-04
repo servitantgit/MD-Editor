@@ -88,3 +88,13 @@ test('audit failure: an HTML file that points at a picture makes the report inva
   assert.deepEqual(r.unused, []);
   assert.deepEqual(r.reasons, ['html image ref: HTML/p.html']);
 });
+
+// Link forms: an image linked only as ![x](</Asset/a b.png>) is used; before,
+// REF_TOKEN_RE did not see it and the audit offered it for deletion.
+test('link forms: audit counts an image linked only in <...> as used', () => {
+  const r = run([f('A/n.md'), f('Asset/a b.png')], { 'A/n.md': '![x](</Asset/a b.png>)\n' });
+  assert.equal(r.valid, true);
+  assert.deepEqual(r.unused, []);
+  assert.deepEqual(r.broken, []);
+  assert.equal(r.used.get('Asset/a b.png'), 1);
+});

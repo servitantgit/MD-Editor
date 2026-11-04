@@ -186,3 +186,35 @@ test('wiki links: links to other notes are not touched', () => {
   const text = 'See [[Notes/Other note]] and [[Other note]].\n';
   assert.deepEqual(updateReferencesInFile(text, 'Other', ...RENAME, { wikiName: true }), { changed: false, text });
 });
+
+// Link forms: a link in <...> (written by buildFileLink) is updated on move and
+// keeps its form - brackets and a plain, unencoded path. An encoded link stays
+// encoded (encodeLinkPath), as before.
+test('link forms: a moved note updates a root link in <...> and keeps the form', () => {
+  assert.deepEqual(updateReferencesInFile('[x](</A/a b.md>)\n', 'Other', 'A/a b.md', 'B/c d.md'),
+    { changed: true, text: '[x](</B/c d.md>)\n' });
+});
+
+test('link forms: a relative link in <...> stays relative and in <...>', () => {
+  assert.deepEqual(updateReferencesInFile('[x](<./a b.md>)\n', 'A', 'A/a b.md', 'B/c d.md'),
+    { changed: true, text: '[x](<../B/c d.md>)\n' });
+});
+
+test('link forms: an image in <...> keeps its brackets after a move', () => {
+  assert.deepEqual(updateReferencesInFile('![p](</A/a b.png>)\n', 'Other', 'A/a b.png', 'B/c d.png'),
+    { changed: true, text: '![p](</B/c d.png>)\n' });
+});
+
+test('link forms: a moved file rewrites its own relative link in <...>', () => {
+  assert.equal(rewriteOwnRelativeLinks('[x](<../Other/a b.md>)\n', 'A', 'A/sub'), '[x](<../../Other/a b.md>)\n');
+});
+
+test('link forms: a plain root link from buildFileLink still updates (guard)', () => {
+  assert.deepEqual(updateReferencesInFile('[B](/A/B.md)\n', 'Other', 'A/B.md', 'C/B.md'),
+    { changed: true, text: '[B](/C/B.md)\n' });
+});
+
+test('link forms: an encoded link stays encoded after a move (guard)', () => {
+  assert.deepEqual(updateReferencesInFile('[x](/A/a%20b.md)\n', 'Other', 'A/a b.md', 'B/c d.md'),
+    { changed: true, text: '[x](/B/c%20d.md)\n' });
+});

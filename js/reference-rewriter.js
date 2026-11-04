@@ -30,7 +30,10 @@ export function rewriteOwnRelativeLinks(text, oldDir, newDir) {
 
     const decoded = decodeUriSafe(target);
     const resolvedAbs = resolveRelativePath(oldDir, decoded);
-    const newRel = encodeLinkPath(relativePathFromTo(newDir, resolvedAbs));
+    const rel = relativePathFromTo(newDir, resolvedAbs);
+    // A link in <...> keeps a plain path (as buildFileLink writes it); any other
+    // form is percent-encoded, as before.
+    const newRel = parsed.angle ? rel : encodeLinkPath(rel);
     return rebuildRefToken(parsed, newRel, full);
   });
 }
@@ -53,9 +56,12 @@ export function updateReferencesInFile(text, fileDir, oldPath, newPath, options 
     if (resolved !== oldPath) return full;
 
     changed = true;
+    // A link in <...> keeps a plain path (as buildFileLink writes it); any other
+    // form is percent-encoded, as before.
+    const enc = parsed.angle ? (p) => p : encodeLinkPath;
     const newTarget = isAbsoluteStyle
-      ? '/' + encodeLinkPath(newPath)
-      : encodeLinkPath(relativePathFromTo(fileDir, newPath));
+      ? '/' + enc(newPath)
+      : enc(relativePathFromTo(fileDir, newPath));
     return rebuildRefToken(parsed, newTarget, full);
   });
   const wiki = rewriteWikiLinks(newText, fileDir, oldPath, newPath, options);

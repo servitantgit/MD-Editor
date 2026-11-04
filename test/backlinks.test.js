@@ -7,6 +7,7 @@ import {
   createBacklinkIndex,
   isInternalNoteHref,
 } from '../js/backlinks.js';
+import { buildFileLink } from '../js/link-suggest.js';
 
 test('extractOutgoingLinks picks relative and root md links, skips images and external', () => {
   const body = [
@@ -134,4 +135,43 @@ test('backlinks: setLinks with extractOutgoingLinks gives the same backlinks as 
   assert.deepEqual(b.getBacklinks('A/B.md'), ['A/n.md']);
   assert.deepEqual(b.getBacklinks('Real.md'), ['A/n.md']);
   assert.equal(b.size, 1, 'a .txt file is not a link source');
+});
+
+// Link forms: the editor writes [x](</A/a b.md>) (buildFileLink), older notes
+// hold [x](/A/a%20b.md). Backlinks read both through REF_TOKEN_RE and decode the
+// target once (Architecture rules 3 and 7).
+test('link forms: backlinks read a link in <...> with spaces', () => {
+  assert.deepEqual(extractOutgoingLinks('AI corrected/SWAM/n.md', '[x](</AI corrected/SWAM/a b.md>)\n'), ['AI corrected/SWAM/a b.md']);
+});
+
+test('link forms: backlinks decode %20 in a root link', () => {
+  assert.deepEqual(extractOutgoingLinks('A/n.md', '[x](/AI%20corrected/a%20b.md)\n'), ['AI corrected/a b.md']);
+});
+
+test('link forms: backlinks decode %20 in a relative Cyrillic link', () => {
+  assert.deepEqual(extractOutgoingLinks('MICAM/n.md', '[x](./\u043f\u043e\u0432\u043d\u0430%20k.md)\n'), ['MICAM/\u043f\u043e\u0432\u043d\u0430 k.md']);
+});
+
+test('link forms: backlinks decode %25 once, not twice', () => {
+  assert.deepEqual(extractOutgoingLinks('A/n.md', '[x](a%25b.md)\n'), ['A/a%b.md']);
+});
+
+test('link forms: backlinks find every link built by buildFileLink', () => {
+  for (const p of ['AI corrected/SWAM/SWAM Weryfikacja temperatur.md', 'A/B.md', 'A/100% done.md']) {
+    const idx = createBacklinkIndex();
+    idx.setFile('Other/src.md', 'See ' + buildFileLink(p) + '.\n');
+    assert.deepEqual(idx.getBacklinks(p), ['Other/src.md'], p);
+  }
+});
+
+test('link forms: an invalid % sequence is kept as written (guard)', () => {
+  assert.deepEqual(extractOutgoingLinks('A/n.md', '[x](bad%ZZ.md)\n'), ['A/bad%ZZ.md']);
+});
+
+test('link forms: an image in <...> is not a backlink (guard)', () => {
+  assert.deepEqual(extractOutgoingLinks('A/n.md', '![p](</A/a b.png>)\n'), []);
+});
+
+test('link forms: <mailto:...> is not a backlink (guard)', () => {
+  assert.deepEqual(extractOutgoingLinks('A/n.md', '[m](<mailto:x@y.com>)\n'), []);
 });

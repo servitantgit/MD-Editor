@@ -7,11 +7,9 @@
 //   - [[wikilink]] / [[path/to/note]] / [[note|alias]]  (resolved loosely)
 // Skips http(s), mailto, anchors-only, images ![…](…).
 
-import { dirnameOf, resolveRelativePath } from './paths.js';
+import { dirnameOf, resolveRelativePath, decodeUriSafe } from './paths.js';
 import { splitByFences, findCodeSpans } from './md-fences.js';
-
-/** Markdown inline link, not an image. Captures the href. */
-const MD_LINK_RE = /(!)?\[([^\]]*)\]\(\s*<?([^)\s>]+)>?(?:\s+"[^"]*")?\s*\)/g;
+import { REF_TOKEN_RE, classifyRefMatch } from './markdown-tokens.js';
 
 /** Obsidian-style wikilinks: [[target]] or [[target|alias]]. */
 const WIKI_LINK_RE = /\[\[([^\]]+)\]\]/g;
@@ -79,14 +77,16 @@ export function extractOutgoingLinks(fromPath, body) {
   const inSpan = (spans, i) => spans.some(([a, b]) => i >= a && i < b);
 
   for (const { text, spans } of chunks) {
-    const re = new RegExp(MD_LINK_RE.source, 'g');
+    // Same parser as the reference rewriter (REF_TOKEN_RE: a plain target or
+    // <...>); the target is decoded once, here, by the consumer (rules 3 and 7).
+    const re = new RegExp(REF_TOKEN_RE.source, 'g');
     let m;
     while ((m = re.exec(text))) {
       if (inSpan(spans, m.index)) continue;
-      if (m[1] === '!') continue; // image
-      const href = m[3];
-      if (!isInternalNoteHref(href)) continue;
-      const abs = resolveNoteLink(fromPath, href);
+      const ref = classifyRefMatch(m[0], m[1], m[2], m[3], m[4], m[5], m[6]);
+      if (ref.kind !== 'link-md') continue; // images, raw <img>
+      if (!isInternalNoteHref(ref.target)) continue;
+      const abs = resolveNoteLink(fromPath, decodeUriSafe(ref.target));
       if (abs) out.add(abs);
     }
   }

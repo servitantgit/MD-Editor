@@ -8,6 +8,7 @@ import {
   setImageAttrsInLine,
   TRANSPARENT_PIXEL,
 } from '../js/markdown-tokens.js';
+import { REF_TOKEN_RE, classifyRefMatch } from '../js/markdown-tokens.js';
 
 test('parseImgTagAttrs extracts src/alt/width from a raw <img> tag', () => {
   const attrs = parseImgTagAttrs('<img src="/a/b.png" alt="hello" width="320">');
@@ -153,4 +154,46 @@ test('renderMarkdownSafe passes knownSrc down to the canonical image tags', asyn
   });
   assert.ok(html.includes('src="data:image/png;base64,QUJD"'), html);
   assert.ok(!html.includes('md-img-wrap loading'), html);
+});
+
+// Link forms (Architecture rule 3): buildFileLink writes [x](</A/a b.md>) for a
+// path with a space or parenthesis; every reader parses it through REF_TOKEN_RE.
+function lfTokens(text) {
+  const re = new RegExp(REF_TOKEN_RE.source, 'g');
+  const out = [];
+  let m;
+  while ((m = re.exec(text))) out.push(classifyRefMatch(m[0], m[1], m[2], m[3], m[4], m[5], m[6]));
+  return out;
+}
+
+test('link forms: REF_TOKEN_RE reads a link target in <...> with spaces', () => {
+  const t = lfTokens('[x](</A/a b.md>)');
+  assert.equal(t.length, 1);
+  assert.equal(t[0].kind, 'link-md');
+  assert.equal(t[0].target, '/A/a b.md');
+  assert.equal(t[0].angle, true);
+});
+
+test('link forms: REF_TOKEN_RE reads an image target in <...> with spaces', () => {
+  const t = lfTokens('![p](</A/a b.png>)');
+  assert.equal(t.length, 1);
+  assert.equal(t[0].kind, 'img-md');
+  assert.equal(t[0].target, '/A/a b.png');
+  assert.equal(t[0].angle, true);
+});
+
+test('link forms: <...> without a space also loses its brackets', () => {
+  const t = lfTokens('[x](</A/a.md>)');
+  assert.equal(t.length, 1);
+  assert.equal(t[0].target, '/A/a.md');
+  assert.equal(t[0].angle, true);
+});
+
+test('link forms: a plain link with a title is unchanged (guard)', () => {
+  const t = lfTokens('[x](B.md "t")');
+  assert.equal(t.length, 1);
+  assert.equal(t[0].kind, 'link-md');
+  assert.equal(t[0].target, 'B.md');
+  assert.equal(t[0].title, 't');
+  assert.notEqual(t[0].angle, true);
 });

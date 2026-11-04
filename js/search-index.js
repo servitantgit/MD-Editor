@@ -20,8 +20,9 @@ export const BODY_CACHE_LIMIT = 200;
  * result is stored with the index for backlinks). A stored index with a
  * different version is dropped on load and rebuilt in the background.
  * 4: outgoing links stored for backlinks.
+ * 5: backlink targets in <...> and percent-encoded ones (decoded once).
  */
-export const INDEX_VERSION = 4;
+export const INDEX_VERSION = 5;
 
 /** Characters of context kept before / after the highlighted term. */
 export const SNIPPET_BEFORE = 15;

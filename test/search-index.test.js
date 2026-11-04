@@ -444,11 +444,11 @@ test('stripMarkdown: an inline ```x``` line does not hide the text below it', ()
   assert.equal(stripMarkdown('```x``` inline\nreal words below'), 'inline real words below');
 });
 
-test('INDEX_VERSION was bumped so stored indexes gain backlink data (links)', () => {
+test('INDEX_VERSION was bumped so stored backlinks understand <...> and %XX links', () => {
   // Stored indexes built with the old rules must be rebuilt in every browser:
-  // 4 = outgoing links stored for backlinks; what 3 and older meant: AGENTS.md,
+  // 5 = backlink targets in <...> and percent-encoded; older values: AGENTS.md,
   // "Bump INDEX_VERSION when indexing rules change".
-  assert.equal(INDEX_VERSION, 4);
+  assert.equal(INDEX_VERSION, 5);
 });
 
 test('stripMarkdown: code in a fence inside a blockquote does not leak into the index', () => {

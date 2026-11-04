@@ -10,9 +10,15 @@ import { mapOutsideFences, splitByFences, findCodeSpans } from './md-fences.js';
 export const TRANSPARENT_PIXEL =
   'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==';
 
-/** Images (markdown ![]() or raw <img>) or plain markdown links [](). */
+/**
+ * Images (markdown ![]() or raw <img>) or plain markdown links [](). A target
+ * is either free of spaces or wrapped in <...> (buildFileLink writes that form
+ * for a path with a space or a parenthesis). One parser for backlinks, the
+ * reference rewriter and the image audit (Architecture rule 3). The group count
+ * must not change: callers pass g1..g6 to classifyRefMatch.
+ */
 export const REF_TOKEN_RE =
-  /!\[([^\]]*)\]\(\s*(\S+?)(?:\s+"([^"]*)")?\s*\)|(?<!!)\[([^\]]*)\]\(\s*(\S+?)(?:\s+"([^"]*)")?\s*\)|<img\b[^>]*\/?>/g;
+  /!\[([^\]]*)\]\(\s*(\S+?|<[^\n>]+>)(?:\s+"([^"]*)")?\s*\)|(?<!!)\[([^\]]*)\]\(\s*(\S+?|<[^\n>]+>)(?:\s+"([^"]*)")?\s*\)|<img\b[^>]*\/?>/g;
 
 /** Only images (markdown ![]() or raw <img>) — used for preview/PDF. */
 export const IMG_TOKEN_RE = /!\[([^\]]*)\]\(\s*(\S+?)(?:\s+"([^"]*)")?\s*\)|<img\b[^>]*\/?>/g;
@@ -26,16 +32,27 @@ export function parseImgTagAttrs(tagHtml) {
   return { src: get('src'), alt: get('alt'), width: get('width') };
 }
 
+/**
+ * A target written in <...> (buildFileLink does that for a path with a space or
+ * a parenthesis): readers get it without the brackets and angle: true, so
+ * rebuildRefToken can put them back. Other targets are returned as written.
+ */
+function unwrapAngle(t) {
+  return t.length > 2 && t.startsWith('<') && t.endsWith('>') ? { target: t.slice(1, -1), angle: true } : { target: t };
+}
+
 /** Classifies a single REF_TOKEN_RE/IMG_TOKEN_RE match and returns {kind, target, extra...}. */
 export function classifyRefMatch(full, g1, g2, g3, g4, g5, g6) {
-  if (g2 !== undefined) return { kind: 'img-md', target: g2, alt: g1 || '', title: g3 || '' };
-  if (g5 !== undefined) return { kind: 'link-md', target: g5, text: g4 || '', title: g6 || '' };
+  if (g2 !== undefined) return { kind: 'img-md', ...unwrapAngle(g2), alt: g1 || '', title: g3 || '' };
+  if (g5 !== undefined) return { kind: 'link-md', ...unwrapAngle(g5), text: g4 || '', title: g6 || '' };
   const attrs = parseImgTagAttrs(full);
   return { kind: 'img-html', target: attrs.src, alt: attrs.alt, width: attrs.width };
 }
 
 /** Rebuilds a token back into text with a NEW target (same syntax kind as before). */
 export function rebuildRefToken(parsed, newTarget, fullOriginal) {
+  // A target read from <...> goes back in <...> (classifyRefMatch angle).
+  if (parsed.angle && (parsed.kind === 'img-md' || parsed.kind === 'link-md')) newTarget = '<' + newTarget + '>';
   switch (parsed.kind) {
     case 'img-md':
       return `![${parsed.alt || ''}](${newTarget}${parsed.title ? ` "${parsed.title}"` : ''})`;
