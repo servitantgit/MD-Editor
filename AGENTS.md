@@ -1241,8 +1241,8 @@ rule; when a fixed bug reveals a new class, add a rule here.
    successful remote write must not delete newer local text. Use ordered
    mutations and an atomic conditional cleanup, not a separate read then
    unconditional delete. Check the owning generation before the actual
-   deletion, not only after awaiting cleanup. Storage and snapshot APIs
-   are implemented; Commit UI integration is still pending (see below).
+   deletion, not only after awaiting cleanup. Commit uses returned blob SHAs
+   to confirm snapshots and rebase remaining drafts (see below).
 
 ## General rule before considering a task done
 
@@ -1335,7 +1335,7 @@ pre-fix code (`35cf2dd`) showed two unsafe orders: a pending put could finish
 after delete and resurrect a draft; a separate get/compare/delete could
 delete newer text written between the read and the delete.
 
-`DraftStore` now queues put/delete/deleteByKey/deleteIfText per full
+`DraftStore` now queues put/delete/deleteByKey/deleteIfText/rebase per full
 `owner/repo@branch:path` key within ONE store instance. Other keys are
 independent; a rejected operation does not poison the queue. This is not
 cross-tab or cross-instance locking.
@@ -1380,10 +1380,48 @@ Tests: `test/autosave-confirmation.test.js`,
 552/552 unit tests, module integration probes and the existing E2E suite
 passed. The E2E run verifies existing behaviour, not new Commit wiring.
 
-**Integration is not finished.** Commit UI and the existing single-file
-Save notification path are unchanged and do not use these snapshot APIs.
-Commit clearing newer edits or leaving Autosave dirty after success is
-not yet fixed in the user-facing application.
+**Commit UI integrated in `a7105e5`.** Probes on `35cf2dd` confirmed
+two bugs: ordinary Commit left Autosave dirty and a checkpoint recreated
+its deleted draft; typing during Commit lost the WorkingTree entry, dot
+and recovery draft even though GitHub received only the earlier snapshot.
+
+Commit now captures client, branch, session generation and text snapshots.
+It validates every returned blob SHA before confirmation. A best-effort
+tree refresh is overlaid with those SHAs, so that response cannot supply
+old SHAs for the committed paths. Active Autosave and tab state confirm
+the sent text; newer edits keep their dirty state and committed base.
+Background/closed files use conditional draft cleanup followed by rebase.
+A closed tab is not recreated. Duplicate Commit requests are ignored.
+
+`DraftStore.rebase(ref, sha, stillCurrent)` updates only `baseSha` of
+an existing record, preserving its text, dirty flag and savedAt. It uses
+the per-key queue and ONE IndexedDB readwrite transaction (get then put).
+Missing records, revoked permission and transaction failures return false.
+It never creates a missing draft. The memory fallback has the same rule.
+This avoids a get/put in Commit UI that could overwrite newer text.
+
+Commit checks session generation/client/branch after async work and before
+applying confirmation; draft operations also check permission at mutation.
+Remote failure keeps local work and the message for a manual retry:
+`Commit not confirmed: <reason>. Local changes kept; check History before retrying.`
+A lost response does not prove the branch was unchanged.
+
+**Deliberate limits:** existing single-file Save notifications are unchanged.
+No global lock for Save/upload/move/delete, no automatic retry or ref
+reconciliation after a lost response, and no detection/merge of external
+file edits that were not loaded. GitHub ref updates remain `force: false`.
+The per-instance draft queue is not cross-tab locking. Demo was not changed.
+
+Tests: `test/commit-confirmation.test.js` (success, typing during request,
+empty text, duplicate request, changed generation, background/closed files;
+failure and closed matching file are guards), `test/draft-rebase.test.js`,
+`test/commit-api-contract.test.js` (guard: exact blob SHAs and force false).
+E2E scenario J uses a separate mocked repository and holds PATCH ref while
+typing; it checks two exact snapshots in one commit, absent drafts after
+idle/reload, a rebased newer draft and the next Commit of remaining changes.
+E2E RED on old code was not run; RED was demonstrated by module tests.
+Baseline: `a7105e5`, 567/567 unit tests, full E2E including J passed.
+Manual production verification is not yet confirmed.
 
 ## Draft sweep: never delete a draft because its path is missing from the tree
 

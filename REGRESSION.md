@@ -9,6 +9,10 @@ Prefer automated coverage in `test/*.test.js` and `e2e_smoke_test.py` when pract
 - [ ] After ~10s idle the status becomes `○ Local only — Save or Commit to push` and **still no** PUT.
 - [ ] **Save** pushes the current file once; status `✓ Saved to GitHub`.
 - [ ] Editing several files fills the **Commit** badge; Commit panel lists them; Commit/Push writes them and clears badges.
+- [ ] Commit two edited notes: one GitHub commit contains both exact texts; dots and badge clear. After more than 10s idle and reload, no phantom draft banner appears.
+- [ ] Type more while Commit is pending: GitHub gets the sent snapshot; newer text keeps its dot, badge and recovery draft. The next Commit saves those remaining changes.
+- [ ] Commit a background/closed note with newer local text: its recovery draft keeps that text on the newly committed blob SHA; a closed tab is not recreated.
+- [ ] A failed Commit keeps local edits, drafts and the message. A lost response may still mean GitHub updated: check History before retrying.
 - [ ] Switching tabs or hiding the browser tab does **not** auto-push (draft stays local).
 - [ ] Switching **back** to a dirty tab restores the same text, cursor and undo (no silent refetch).
 - [ ] Closing a dirty tab does **not** force a GitHub commit; neighbour tab activates; draft recoverable if needed.
