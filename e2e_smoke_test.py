@@ -2360,6 +2360,92 @@ with sync_playwright() as p:
     assert j_remote[j_a]["text"] == n_body
     print("\u2713 Editing the Find field enables literal replacement; Escape clears marks without remote writes")
 
+    # --- O. WRAP / FOLD GUARDS ---
+    # Existing behaviour passed a browser probe; application code is unchanged.
+    print("\n--- O. Wrap / Fold: display-only actions and Find navigation ---")
+
+    def o_cm(expression):
+        return page.evaluate(
+            "() => { const cm = document.querySelector('.CodeMirror').CodeMirror; "
+            + expression + " }")
+
+    def o_collapsed():
+        return o_cm("return cm.getAllMarks().filter(m => m.collapsed).length;")
+
+    page.click('#layout-toggle .layout-btn[data-mode="source"]')
+    o_writes_before = len(j_contents_writes)
+    o_refs_before = len(j_refs)
+    o_long_text = "ordinary words " * 100
+    page.evaluate("text => document.querySelector('.CodeMirror').CodeMirror.setValue(text)",
+                  o_long_text)
+    o_history = o_cm("return cm.historySize();")
+    o_wrap_before = o_cm("return cm.getOption('lineWrapping');")
+    page.click("#btn-wrap")
+    assert o_cm("return cm.getOption('lineWrapping');") is not o_wrap_before
+    assert editor_text() == o_long_text
+    assert o_cm("return cm.historySize();") == o_history
+    page.click("#btn-wrap")
+    assert o_cm("return cm.getOption('lineWrapping');") == o_wrap_before
+
+    if not o_cm("return cm.getOption('lineWrapping');"):
+        page.click("#btn-wrap")
+    o_wrapped_height = o_cm(
+        "return cm.heightAtLine(1, 'local') - cm.heightAtLine(0, 'local');")
+    page.click("#btn-wrap")
+    o_unwrapped_height = o_cm(
+        "return cm.heightAtLine(1, 'local') - cm.heightAtLine(0, 'local');")
+    assert o_wrapped_height > o_unwrapped_height, (o_wrapped_height, o_unwrapped_height)
+    assert editor_text() == o_long_text
+    assert o_cm("return cm.historySize();") == o_history
+    # Restore the initial Wrap option before testing Fold.
+    if o_cm("return cm.getOption('lineWrapping');") != o_wrap_before:
+        page.click("#btn-wrap")
+    print("\u2713 Wrap changes visual line height and toggles back without changing text or undo")
+
+    o_note = (
+        "# First\n"
+        + "\n".join("First section line " + str(i) for i in range(30))
+        + "\n## Child\nTARGET_NEEDLE\nChild body\n"
+        + "# Second\n"
+        + "\n".join("Second section line " + str(i) for i in range(30))
+        + "\n"
+    )
+    page.evaluate("text => document.querySelector('.CodeMirror').CodeMirror.setValue(text)",
+                  o_note)
+    o_history = o_cm("return cm.historySize();")
+    assert o_collapsed() == 0
+    o_full_height = o_cm("return cm.getScrollInfo().height;")
+    page.click("#btn-fold")
+    assert o_collapsed() == 3, o_collapsed()
+    o_folded_height = o_cm("return cm.getScrollInfo().height;")
+    assert o_folded_height < o_full_height, (o_full_height, o_folded_height)
+    assert editor_text() == o_note
+    assert o_cm("return cm.historySize();") == o_history
+    page.click("#btn-fold")
+    assert o_collapsed() == 0
+    assert editor_text() == o_note
+    assert o_cm("return cm.historySize();") == o_history
+    print("\u2713 Fold collapses three sections and expands them on the next click; text and undo unchanged")
+
+    page.click("#btn-fold")
+    assert o_collapsed() > 0
+    page.keyboard.press("Control+f")
+    page.fill("#find-input", "TARGET_NEEDLE")
+    page.press("#find-input", "Enter")
+    l_count("1 / 1")
+    assert o_cm("return cm.getSelection();") == "TARGET_NEEDLE"
+    assert o_cm(
+        "return cm.findMarksAt(cm.getCursor('from')).filter(m => m.collapsed).length;"
+    ) == 0, "Find target remains hidden inside a fold"
+    assert editor_text() == o_note
+    assert o_cm("return cm.historySize();") == o_history
+    page.press("#find-input", "Escape")
+    assert l_snapshot()["marks"] == 0 and l_snapshot()["currentMarks"] == 0
+    assert len(j_contents_writes) == o_writes_before
+    assert len(j_refs) == o_refs_before
+    assert j_remote[j_a]["text"] == n_body
+    print("\u2713 Find unfolds and selects its hidden target without text edits or remote writes")
+
     assert not page_errors, f"unhandled page errors: {page_errors}"
     browser.close()
 
