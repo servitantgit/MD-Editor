@@ -2044,6 +2044,117 @@ with sync_playwright() as p:
     assert j_remote[j_b]["text"] == k_current_b
     print("\u2713 Restored draft survives reload; Keep local recovers it without any remote write")
 
+    # --- L. FIND HIGHLIGHTS AND REPLACEMENT ---
+    # Module RED and browser probes established the new requirements.
+    print("\n--- L. Find: highlights, navigation, replacement and cleanup ---")
+    page.click('#layout-toggle .layout-btn[data-mode="source"]')
+    page.evaluate("""() => {
+        const cm = document.querySelector('.CodeMirror').CodeMirror;
+        cm.setValue('cat CAT cat');
+        cm.setCursor({line:0,ch:0});
+    }""")
+    l_write_count = len(k_writes)
+
+    def l_snapshot():
+        return page.evaluate("""() => {
+            const cm = document.querySelector('.CodeMirror').CodeMirror;
+            return {
+                text:cm.getValue(), selection:cm.getSelection(),
+                count:document.getElementById('find-count').textContent,
+                marks:cm.getAllMarks().filter(
+                    m => m.className === 'md-find-match').length,
+                currentMarks:cm.getAllMarks().filter(
+                    m => m.className === 'md-find-current').length
+            };
+        }""")
+
+    def l_count(value):
+        page.wait_for_function(
+            "v => document.getElementById('find-count').textContent === v",
+            arg=value, timeout=5000)
+
+    page.keyboard.press("Control+f")
+    page.wait_for_selector("#find-bar:not(.hidden)")
+    assert page.evaluate("document.activeElement.id") == "find-input"
+    page.fill("#find-input", "cat")
+    page.press("#find-input", "Enter")
+    l_count("1 / 3")
+    l_first = l_snapshot()
+    assert l_first["text"] == "cat CAT cat"
+    assert l_first["selection"] == "cat" and l_first["marks"] == 3
+    assert l_first["currentMarks"] == 1
+    l_colors = page.evaluate("""() => ({
+        matches:[...document.querySelectorAll('.md-find-match')]
+            .map(e => getComputedStyle(e).backgroundColor),
+        current:[...document.querySelectorAll('.md-find-current')]
+            .map(e => getComputedStyle(e).backgroundColor)
+    })""")
+    assert "rgb(102, 83, 0)" in l_colors["matches"], l_colors
+    assert "rgb(179, 92, 0)" in l_colors["current"], l_colors
+    page.click("#find-next")
+    l_count("2 / 3")
+    assert l_snapshot()["selection"] == "CAT"
+    page.press("#find-input", "Shift+Enter")
+    l_count("1 / 3")
+    assert l_snapshot()["selection"] == "cat"
+    page.click("#find-next")
+    l_count("2 / 3")
+    print("\u2713 Find highlights all matches and the current one; next/previous update the counter")
+
+    page.keyboard.press("Control+h")
+    assert page.evaluate("document.activeElement.id") == "replace-input"
+    page.fill("#replace-input", "dog")
+    page.click("#find-replace")
+    l_count("0 / 2")
+    l_replaced = l_snapshot()
+    assert l_replaced["text"] == "cat dog cat" and l_replaced["marks"] == 2, l_replaced
+    page.click("#find-replace-all")
+    l_count("0 / 0")
+    l_all = l_snapshot()
+    assert l_all["text"] == "dog dog dog" and l_all["marks"] == 0, l_all
+    page.evaluate("document.querySelector('.CodeMirror').CodeMirror.undo()")
+    l_count("0 / 2")
+    l_undo = l_snapshot()
+    assert l_undo["text"] == "cat dog cat" and l_undo["marks"] == 2, l_undo
+    print("\u2713 Replace/All and Undo preserve exact text and refresh the match count")
+
+    page.evaluate("""() => {
+        const cm = document.querySelector('.CodeMirror').CodeMirror;
+        window.__lOriginalScrollIntoView = cm.scrollIntoView;
+        const original = cm.scrollIntoView.bind(cm);
+        window.__lFindNavigationCalls = 0;
+        cm.scrollIntoView = (...args) => {
+            window.__lFindNavigationCalls++;
+            return original(...args);
+        };
+        cm.replaceRange(' cat', {line:0,ch:cm.getLine(0).length});
+        window.__lFindNavigationCalls = 0;
+    }""")
+    try:
+        l_count("0 / 3")
+        page.wait_for_timeout(300)
+        assert page.evaluate("window.__lFindNavigationCalls") == 0
+        l_edited = l_snapshot()
+        assert l_edited["text"] == "cat dog cat cat" and l_edited["marks"] == 3, l_edited
+    finally:
+        page.evaluate("""() => {
+            const cm = document.querySelector('.CodeMirror').CodeMirror;
+            cm.scrollIntoView = window.__lOriginalScrollIntoView;
+            delete window.__lOriginalScrollIntoView;
+            delete window.__lFindNavigationCalls;
+        }""")
+    page.press("#find-input", "Escape")
+    page.wait_for_selector("#find-bar", state="hidden")
+    l_closed = l_snapshot()
+    assert l_closed["marks"] == 0 and l_closed["currentMarks"] == 0, l_closed
+    assert l_closed["count"] == "", l_closed
+    page.wait_for_timeout(300)
+    assert l_snapshot()["marks"] == 0
+    assert len(k_writes) == l_write_count
+    assert len(j_refs) == k_ref_count
+    assert len(j_contents_writes) == k_content_count
+    print("\u2713 Editing refreshes highlights without navigation; Escape removes them without remote writes")
+
     assert not page_errors, f"unhandled page errors: {page_errors}"
     browser.close()
 

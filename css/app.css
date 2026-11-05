@@ -1879,6 +1879,15 @@ button.secondary:hover { background: #21262d; }
   min-width: 4.5em;
   text-align: right;
 }
+/* Search decoration changes colors only, never editor geometry. */
+.EasyMDEContainer .CodeMirror .md-find-match {
+  background-color: #665300 !important;
+  color: #ffffff !important;
+}
+.EasyMDEContainer .CodeMirror .md-find-current {
+  background-color: #b35c00 !important;
+  color: #ffffff !important;
+}
 .html-preview-frame {
   width: 100%;
   height: 100%;

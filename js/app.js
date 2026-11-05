@@ -667,6 +667,7 @@ function showApp(owner, repo) {
       });
     },
     onImageUploadRequest: () => els.imageFileInput.click(),
+    onFindStateChange: renderFindState,
     // Every keystroke arms the autosave timers. `suppressEditorChange` is what
     // keeps a programmatic .value() (opening a file, reloading after a
     // conflict) from being mistaken for typing.
@@ -1345,6 +1346,16 @@ function setupMoreFileMenu() {
   }
 }
 
+function renderFindState(state) {
+  if (!els.findCount) return;
+  if (!els.findBar || els.findBar.classList.contains('hidden')
+      || (!state.query && state.mode !== 'search')) {
+    els.findCount.textContent = '';
+    return;
+  }
+  els.findCount.textContent = state.current + ' / ' + state.total;
+}
+
 function setupFindBar() {
   if (!els.findBar || els.findBar.dataset.bound) return;
   els.findBar.dataset.bound = '1';
@@ -1352,10 +1363,7 @@ function setupFindBar() {
   const runFind = (backwards) => {
     if (!editorHandle) return;
     const q = els.findInput ? els.findInput.value : '';
-    const count = editorHandle.findInFile(q, { backwards: !!backwards });
-    if (els.findCount) {
-      els.findCount.textContent = q ? (count ? `${count} found` : 'no matches') : '';
-    }
+    editorHandle.findInFile(q, { backwards: !!backwards });
   };
 
   const openFind = () => {
@@ -1370,7 +1378,10 @@ function setupFindBar() {
     if (!els.findBar) return;
     els.findBar.classList.add('hidden');
     if (els.findCount) els.findCount.textContent = '';
-    if (editorHandle) editorHandle.easyMDE.codemirror.focus();
+    if (editorHandle) {
+      editorHandle.clearFind();
+      editorHandle.easyMDE.codemirror.focus();
+    }
   };
 
   if (els.btnFind) els.btnFind.addEventListener('click', openFind);
@@ -1383,10 +1394,7 @@ function setupFindBar() {
       if (!editorHandle) return;
       const q = els.findInput ? els.findInput.value : '';
       const r = els.replaceInput ? els.replaceInput.value : '';
-      const count = editorHandle.replaceInFile(q, r);
-      if (els.findCount) {
-        els.findCount.textContent = q ? (count ? `${count} left` : 'done') : '';
-      }
+      editorHandle.replaceInFile(q, r);
     });
   }
   if (els.findReplaceAll) {
@@ -1394,10 +1402,7 @@ function setupFindBar() {
       if (!editorHandle) return;
       const q = els.findInput ? els.findInput.value : '';
       const r = els.replaceInput ? els.replaceInput.value : '';
-      const n = editorHandle.replaceAllInFile(q, r);
-      if (els.findCount) {
-        els.findCount.textContent = n ? `replaced ${n}` : (q ? 'no matches' : '');
-      }
+      editorHandle.replaceAllInFile(q, r);
     });
   }
 

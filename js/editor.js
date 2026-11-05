@@ -13,6 +13,7 @@ import { applyTaskList, findTaskLines } from './markdown-commands.js';
 import { findMarkdownImages } from './markdown-tokens.js';
 import { buildHtmlSrcdoc } from './html-preview.js';
 import { linkFromPaste, isInsideCode } from './paste-link.js';
+import { createFindController } from './find-controller.js';
 
 /**
  * @param {HTMLTextAreaElement} textareaEl
@@ -42,6 +43,42 @@ export function createEditor(textareaEl, deps) {
   let inlineImageMarks = [];
   let inlineImageTimer = null;
   let lastInlineImageKey = '';
+  let findController = null;
+  let findRefreshTimer = null;
+
+  function publishFindState() {
+    const state = findController ? findController.getState()
+      : { mode: 'find', query: '', total: 0, current: 0 };
+    if (typeof deps.onFindStateChange === 'function') {
+      try { deps.onFindStateChange(state); } catch (_) {
+        // UI failures must not interrupt editor or draft handling.
+      }
+    }
+    return state;
+  }
+
+  // Display-only refresh: never navigate while the user edits.
+  function scheduleFindRefresh() {
+    clearTimeout(findRefreshTimer);
+    findRefreshTimer = null;
+    if (!findController) return;
+    const state = findController.getState();
+    if (state.mode !== 'find' || !state.query) return;
+    findRefreshTimer = setTimeout(() => {
+      findRefreshTimer = null;
+      if (findController) {
+        findController.refresh();
+        publishFindState();
+      }
+    }, 150);
+  }
+
+  function ensureFindController() {
+    if (!findController) {
+      findController = createFindController(easyMDE.codemirror, { unfoldAtLine });
+    }
+    return findController;
+  }
 
   const easyMDE = new EasyMDE({
     element: textareaEl,
@@ -441,6 +478,7 @@ export function createEditor(textareaEl, deps) {
   const onChange = () => {
     scheduleInlineImages();
     if (deps.onChange) deps.onChange(easyMDE.codemirror.getValue());
+    scheduleFindRefresh();
   };
   easyMDE.codemirror.on('change', onChange);
 
@@ -792,6 +830,7 @@ wrapper.addEventListener('contextmenu', (e) => {
    * rebuilt for the new one (and the old marks cleared, not left behind).
    */
   function showDoc(doc) {
+    clearFind();
     const previous = easyMDE.codemirror.swapDoc(doc);
     refreshLayout();
     renderActivePreview();
@@ -869,6 +908,11 @@ wrapper.addEventListener('contextmenu', (e) => {
    * run — teardown code should never be the thing that throws.
    */
   function destroy() {
+    clearFind();
+    if (findController) {
+      findController.destroy();
+      findController = null;
+    }
     resizeObserver.disconnect();
     try { window.removeEventListener('message', onParentMessage); } catch (_) {}
     clearTimeout(inlineImageTimer);
@@ -957,35 +1001,12 @@ closeImageMenu();
 
   /** Simple in-file find (no addon dependency). Returns match count. */
   function findInFile(query, { backwards = false } = {}) {
-    const cm = easyMDE.codemirror;
-    const q = String(query || '');
-    if (!q) return 0;
-    const text = cm.getValue();
-    const lower = text.toLowerCase();
-    const needle = q.toLowerCase();
-    let count = 0;
-    let pos = 0;
-    while ((pos = lower.indexOf(needle, pos)) !== -1) {
-      count++;
-      pos += needle.length;
-    }
-    if (count === 0) return 0;
-
-    const fromIdx = cm.indexFromPos(cm.getCursor(backwards ? 'from' : 'to'));
-    let idx;
-    if (backwards) {
-      idx = lower.lastIndexOf(needle, Math.max(0, fromIdx - 1));
-      if (idx < 0) idx = lower.lastIndexOf(needle);
-    } else {
-      idx = lower.indexOf(needle, fromIdx);
-      if (idx < 0) idx = lower.indexOf(needle);
-    }
-    if (idx < 0) return count;
-    const from = cm.posFromIndex(idx);
-    const to = cm.posFromIndex(idx + q.length);
-    cm.setSelection(from, to);
-    cm.scrollIntoView({ from, to }, 80);
-    return count;
+    const controller = ensureFindController();
+    const q = String(query ?? '');
+    const state = controller.getState();
+    if (state.mode !== 'find' || state.query !== q) controller.setQuery(q);
+    controller.next({ backwards });
+    return publishFindState().total;
   }
 
   /** Replace the current selection if it matches query; otherwise find next and stop. */
@@ -1032,7 +1053,11 @@ closeImageMenu();
   }
 
   function clearFind() {
-    // selection stays
+    clearTimeout(findRefreshTimer);
+    findRefreshTimer = null;
+    if (findController) findController.clear();
+    publishFindState();
+    // Keep the ordinary editor selection; remove only search marks.
   }
 
   /** Toggle CodeMirror line wrapping. Returns new state. */
