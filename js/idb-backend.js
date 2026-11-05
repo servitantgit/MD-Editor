@@ -40,6 +40,17 @@ export function createMemoryBackend() {
       map.delete(key);
       return true;
     },
+    async rebase(key, sha, stillCurrent = () => true) {
+      const record = map.get(key);
+      if (!record) return false;
+      try {
+        if (stillCurrent() !== true) return false;
+      } catch (_) {
+        return false;
+      }
+      map.set(key, { ...record, baseSha: sha });
+      return true;
+    },
     async all() { return Array.from(map.values()); },
   };
 }
@@ -241,6 +252,33 @@ export class IdbBackend {
             return;
           }
           store.delete(key);
+          setResult(true);
+        };
+      });
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /** Atomically update only the base SHA; never recreate a missing draft. */
+  async rebase(key, sha, stillCurrent = () => true) {
+    try {
+      if (stillCurrent() !== true) return false;
+      if (!(await this.open())) {
+        return this.memory.rebase(key, sha, stillCurrent);
+      }
+      if (stillCurrent() !== true) return false;
+      return await this._tx('readwrite', (store, setResult) => {
+        const request = store.get(key);
+        request.onsuccess = () => {
+          const record = request.result;
+          let allowed = false;
+          try { allowed = stillCurrent() === true; } catch (_) {}
+          if (!allowed || !record) {
+            setResult(false);
+            return;
+          }
+          store.put({ ...record, baseSha: sha });
           setResult(true);
         };
       });

@@ -44,6 +44,7 @@ export function createCommitHistoryUI(deps) {
   const els = deps.els;
   let commitPanel = null;
   let historyPanel = null;
+  let commitBusy = false;
   /** @type {{ path: string, text: string, mode: string, commitSha?: string }|null} */
   let diffOverlayState = null;
 
@@ -54,7 +55,7 @@ export function createCommitHistoryUI(deps) {
     if (n > 0) {
       els.commitBadge.textContent = String(n);
       els.commitBadge.classList.remove('hidden');
-      els.btnCommit.disabled = false;
+      els.btnCommit.disabled = commitBusy;
     } else {
       els.commitBadge.classList.add('hidden');
       els.btnCommit.disabled = true;
@@ -100,84 +101,105 @@ export function createCommitHistoryUI(deps) {
   }
 
   async function doCommit(message, andPush) {
+    if (commitBusy) return;
     const workingTree = deps.getWorkingTree();
     const state = deps.getState();
-    const changes = workingTree.listChanges();
-    if (!changes.length) return;
+    const client = state.client;
+    const branch = state.branch;
+    const generation = deps.getSessionGeneration();
+    const current = () => deps.getSessionGeneration() === generation
+      && deps.getState().client === client && deps.getState().branch === branch;
+    if (!workingTree.listChanges().length) return;
+    const autosave = deps.ensureAutosave();
+    const draftStore = deps.getDraftStore();
+    commitBusy = true;
     commitPanel.setBusy(true);
-    deps.setSaveStatus(andPush ? 'Committing & pushing…' : 'Committing…', false);
+    refreshCommitBadge();
+    deps.setSaveStatus(andPush ? 'Committing & pushing...' : 'Committing...', false);
     try {
       const editorHandle = deps.getEditorHandle();
       if (state.currentPath && editorHandle) {
-        workingTree.setDirty(
-          state.currentPath,
-          editorHandle.easyMDE.value(),
-          state.currentSha || null
-        );
+        workingTree.setDirty(state.currentPath, editorHandle.easyMDE.value(),
+          state.currentSha || null);
       }
       const latest = workingTree.listChanges();
       const files = latest.map((c) => ({
-        path: c.path,
-        contentB64: utf8ToB64(c.text),
+        path: c.path, contentB64: utf8ToB64(c.text)
       }));
-      const result = await state.client.commitFiles(state.branch, message, files);
-
-      for (const c of latest) workingTree.clear(c.path);
-      refreshCommitBadge();
-      const fileTree = deps.getFileTree();
-      if (fileTree) fileTree.setDirtyMap(workingTree.statusMap());
-
-      if (state.currentPath && latest.some((c) => c.path === state.currentPath)) {
-        try {
-          const tree = await state.client.getTree(state.branch);
-          state.allFiles = tree;
-          const hit = tree.find((f) => f.path === state.currentPath);
-          if (hit) state.currentSha = hit.sha;
-          if (fileTree) {
-            fileTree.setFiles(tree);
-            fileTree.setDirtyMap(workingTree.statusMap());
-          }
-        } catch (_) {
-          await deps.loadTree();
-        }
-      } else {
-        await deps.loadTree();
+      const result = await client.commitFiles(branch, message, files);
+      if (!current()) return;
+      if (!result || !result.commit || typeof result.commit.sha !== 'string'
+          || !Array.isArray(result.files)) {
+        throw new Error('invalid Commit result');
       }
-
-      const tabDocs = deps.getTabDocs();
+      const shas = new Map();
+      for (const file of result.files) {
+        if (shas.has(file.path)) throw new Error('duplicate committed path');
+        shas.set(file.path, file.sha);
+      }
       for (const c of latest) {
-        const entry = tabDocs.get(c.path);
-        if (entry) entry.unsaved = false;
-        if (c.path === state.currentPath) deps.setActiveFileUnsaved(false);
+        if (typeof shas.get(c.path) !== 'string' || !shas.get(c.path)) {
+          throw new Error('missing committed blob SHA for ' + c.path);
+        }
       }
-      deps.renderTabs();
 
+      // Tree refresh is best-effort AFTER remote success. Blob SHAs come
+      // from the commit result, never from a possibly lagging tree.
+      let tree = state.allFiles;
+      try { tree = await client.getTree(branch); } catch (_) {}
+      if (!current()) return;
+      const byPath = new Map((tree || []).map((file) => [file.path, file]));
+      for (const c of latest) {
+        byPath.set(c.path, { ...byPath.get(c.path), path: c.path, sha: shas.get(c.path) });
+      }
+      state.allFiles = [...byPath.values()];
+      const fileTree = deps.getFileTree();
+      if (fileTree) fileTree.setFiles(state.allFiles);
+
+      for (const c of latest) {
+        if (!current()) return;
+        const snapshot = { path: c.path, text: c.text, sha: shas.get(c.path) };
+        if (autosave && !autosave.destroyed && autosave.path === c.path
+            && state.currentPath === c.path) {
+          await autosave.confirmSnapshot(snapshot);
+        } else if (draftStore) {
+          const ref = {
+            owner: client.owner, repo: client.repo, branch, path: c.path
+          };
+          await draftStore.deleteIfText(ref, c.text, current);
+          if (!current()) return;
+          await draftStore.rebase(ref, snapshot.sha, current);
+        }
+        if (!current()) return;
+        deps.confirmSnapshot(snapshot);
+        // Mirror the session flag into app.js (Discard and status chrome).
+        if (state.currentPath === c.path) {
+          const tab = deps.getTabDocs().get(c.path);
+          if (tab) deps.setActiveFileUnsaved(tab.unsaved);
+        }
+      }
+      if (!current()) return;
+      refreshCommitBadge();
+      if (fileTree) fileTree.setDirtyMap(workingTree.statusMap());
+      deps.renderTabs();
       commitPanel.clearMessage();
       commitPanel.close();
       if (els.btnCommit) els.btnCommit.classList.remove('active-panel');
       hideDiffOverlay();
-
-      const draftStore = deps.getDraftStore();
-      for (const c of latest) {
-        deps.noteCommit(c.path, null);
-        if (draftStore && state.client) {
-          draftStore.delete({
-            owner: state.client.owner,
-            repo: state.client.repo,
-            branch: state.branch,
-            path: c.path,
-          }).catch(() => {});
-        }
-      }
-      const short = result.commit.sha.slice(0, 7);
+      const remaining = workingTree.getChangeCount();
       deps.setSaveStatus(
-        (andPush ? 'Committed & pushed ' : 'Committed ') + short + ' · ' + latest.length + ' file(s)',
-        false
-      );
+        (andPush ? 'Committed & pushed ' : 'Committed ')
+        + result.commit.sha.slice(0, 7) + ' - ' + latest.length + ' file(s)'
+        + (remaining ? '; newer local changes remain' : ''), false);
     } catch (e) {
-      deps.setSaveStatus('Commit failed: ' + e.message, true);
+      if (current()) {
+        deps.setSaveStatus('Commit not confirmed: ' + e.message
+          + '. Local changes kept; check History before retrying.', true);
+      }
     } finally {
+      commitBusy = false;
       commitPanel.setBusy(false);
+      if (current()) refreshCommitBadge();
     }
   }
 
@@ -340,6 +362,7 @@ export function createCommitHistoryUI(deps) {
     if (els.btnCommit && !els.btnCommit.dataset.bound) {
       els.btnCommit.dataset.bound = '1';
       els.btnCommit.addEventListener('click', () => {
+        if (commitBusy) return;
         if (commitPanel && typeof commitPanel.isOpen === 'function' && commitPanel.isOpen()) {
           commitPanel.close();
           els.btnCommit.classList.remove('active-panel');

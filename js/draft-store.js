@@ -102,6 +102,22 @@ export class DraftStore {
     });
   }
 
+  /** Change only the base SHA of an existing draft; preserve its text. */
+  async rebase(ref, sha, stillCurrent = () => true) {
+    if (typeof sha !== 'string' || !sha) {
+      throw new Error('draft rebase: committed SHA required');
+    }
+    const key = refKey(ref);
+    return this._enqueue(key, () => {
+      try {
+        if (stillCurrent() !== true) return false;
+      } catch (_) {
+        return false;
+      }
+      return this.backend.rebase(key, sha, stillCurrent);
+    });
+  }
+
   /** Deletes by the stored key itself (used by the sweep, which reads records). */
   async deleteByKey(key) {
     return this._enqueue(key, () => this.backend.delete(key));

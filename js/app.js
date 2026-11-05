@@ -196,6 +196,7 @@ let tabsSession = null;
 let workingTree = new WorkingTree();
 /** @type {ReturnType<typeof createCommitHistoryUI>|null} */
 let commitHistoryUI = null;
+let commitSessionGeneration = 0;
 let layoutMode = localStorage.getItem('md_layout') || 'source';
 
 function ensureTabsSession() {
@@ -579,6 +580,7 @@ function startDemo() {
 }
 
 function showApp(owner, repo) {
+  commitSessionGeneration++;
   // A different repo means a different file list. Reset it here, not only on
   // logout, so a re-login cannot hand the new session the previous repo's tree
   // (which would make runSearchSync diff against the wrong paths).
@@ -841,6 +843,8 @@ function ensureCommitHistoryUI() {
     },
     getWorkingTree: () => workingTree,
     getState: () => state,
+    getSessionGeneration: () => commitSessionGeneration,
+    confirmSnapshot: (snapshot) => ensureTabsSession().confirmSnapshot(snapshot),
     getEditorHandle: () => editorHandle,
     getTabs: () => ensureTabsSession().getTabs(),
     getTabDocs: () => ensureTabsSession().getTabDocs(),

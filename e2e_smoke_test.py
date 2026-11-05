@@ -1712,6 +1712,213 @@ with sync_playwright() as p:
     page.wait_for_selector(".file-item.folder[data-path='DragSrc']", timeout=5000)
     print("✓ dragging a folder onto the root strip moves it to the repository root")
 
+    # --- J. COMMIT SNAPSHOT CONFIRMATION ---
+    # RED is established by module tests, not an old-code run of this scenario.
+    print("\n--- J. Commit: snapshots, recovery drafts and delayed ref update ---")
+    page.close()
+    page = browser.new_page(viewport={"width": 1440, "height": 1000})
+    page.on("pageerror", lambda exc: page_errors.append(str(exc)))
+
+    j_a = "Notes/Test note.md"
+    j_b = "Notes/Second note.md"
+    j_remote = {
+        j_a: {"text": "# Commit A\n\nA ORIGINAL\n", "sha": "j-old-a"},
+        j_b: {"text": "# Commit B\n\nB ORIGINAL\n", "sha": "j-old-b"},
+    }
+    j_blobs = {}
+    j_trees = []
+    j_commits = []
+    j_refs = []
+    j_contents_writes = []
+    j_hold = {"enabled": False, "route": None, "body": None}
+
+    def j_accept_ref(route, body):
+        for entry in j_trees[-1]["tree"]:
+            j_remote[entry["path"]] = {
+                "text": j_blobs[entry["sha"]], "sha": entry["sha"]
+            }
+        route.fulfill(status=200, content_type="application/json", body=json.dumps({
+            "object": {"sha": body["sha"]}
+        }))
+
+    def j_api(route, request):
+        url = request.url.split("?", 1)[0]
+        method = request.method
+        body = json.loads(request.post_data or "{}")
+        if "/contents/" in url and method in ("PUT", "DELETE"):
+            j_contents_writes.append({"url": url, "method": method})
+            raise AssertionError("Commit must not use Contents writes")
+        for path, suffix in [
+            (j_a, "/contents/Notes/Test%20note.md"),
+            (j_b, "/contents/Notes/Second%20note.md")
+        ]:
+            if method == "GET" and url.endswith(suffix):
+                item = j_remote[path]
+                route.fulfill(status=200, content_type="application/json",
+                    body=json.dumps({
+                        "content": base64.b64encode(item["text"].encode("utf-8")).decode(),
+                        "sha": item["sha"]
+                    }))
+                return
+        if method == "GET" and "/git/trees/" in url:
+            # Deliberately stale tree SHAs: Commit result supplies confirmed SHAs.
+            route.fulfill(status=200, content_type="application/json",
+                body=json.dumps({"tree": [
+                    {"path": j_a, "type": "blob", "sha": "j-old-a"},
+                    {"path": j_b, "type": "blob", "sha": "j-old-b"}
+                ]}))
+            return
+        if method == "POST" and url.endswith("/git/blobs"):
+            sha = "j-blob-" + str(len(j_blobs) + 1)
+            j_blobs[sha] = base64.b64decode(body["content"]).decode("utf-8")
+            route.fulfill(status=200, content_type="application/json",
+                body=json.dumps({"sha": sha}))
+            return
+        if method == "POST" and url.endswith("/git/trees"):
+            j_trees.append(body)
+            route.fulfill(status=200, content_type="application/json",
+                body=json.dumps({"sha": "j-tree-" + str(len(j_trees))}))
+            return
+        if method == "POST" and url.endswith("/git/commits"):
+            j_commits.append(body)
+            route.fulfill(status=200, content_type="application/json",
+                body=json.dumps({"sha": "j-commit-" + str(len(j_commits))}))
+            return
+        if method == "PATCH" and "/git/refs/heads/" in url:
+            j_refs.append(body)
+            assert body["force"] is False, body
+            if j_hold["enabled"]:
+                assert j_hold["route"] is None, "duplicate pending ref update"
+                j_hold["route"] = route
+                j_hold["body"] = body
+            else:
+                j_accept_ref(route, body)
+            return
+        handle_github_api(route, request)
+
+    page.route(re.compile(r"https://api\.github\.com/.*"), j_api)
+    for cdn_url in CDN_MOCKS:
+        page.route(cdn_url, handle_cdn)
+    page.route(re.compile(r"https://cdnjs\.cloudflare\.com/.*"),
+        lambda r, _: r.fulfill(status=200, content_type="text/css", body=b""))
+    page.route(re.compile(r"https://maxcdn\.bootstrapcdn\.com/.*"),
+        lambda r, _: r.fulfill(status=200, content_type="text/css", body=b""))
+    page.goto("http://localhost:8080/", wait_until="networkidle")
+    page.evaluate("""() => {
+        sessionStorage.setItem('gh_token', 'ghp_faketoken');
+        sessionStorage.setItem('gh_owner', 'test-owner');
+        sessionStorage.setItem('gh_repo', 'test-repo');
+        sessionStorage.setItem('gh_branch', 'main');
+    }""")
+    page.reload(wait_until="networkidle")
+    page.wait_for_selector("#app-main:not(.hidden)", timeout=8000)
+
+    def j_drafts():
+        return page.evaluate("""async () => {
+            const db = await new Promise((resolve, reject) => {
+                const r = indexedDB.open('md-editor-drafts');
+                r.onsuccess = () => resolve(r.result);
+                r.onerror = () => reject(r.error);
+            });
+            try {
+                return await new Promise((resolve, reject) => {
+                    const tx = db.transaction('drafts', 'readonly');
+                    const r = tx.objectStore('drafts').getAll();
+                    let records;
+                    r.onsuccess = () => { records = r.result; };
+                    tx.oncomplete = () => resolve(records.filter(
+                        x => x.key.startsWith('test-owner/test-repo@main:')));
+                    tx.onerror = () => reject(tx.error);
+                });
+            } finally { db.close(); }
+        }""")
+
+    def j_commit(message):
+        page.click("#btn-commit")
+        page.wait_for_selector("#commit-panel:not(.hidden)")
+        page.fill("#commit-message", message)
+        page.click("#btn-commit-push")
+
+    def j_wait_finished():
+        page.wait_for_function(
+            "document.getElementById('commit-panel').classList.contains('hidden')",
+            timeout=10000)
+
+    open_in_tree("Test note.md")
+    page.wait_for_function("document.getElementById('btn-save').disabled === false")
+    page.evaluate(f"{CM}.setValue('# Commit A\\n\\nA SNAPSHOT\\n')")
+    open_in_tree("Second note.md")
+    page.wait_for_function("document.getElementById('current-file').textContent === 'Notes/Second note.md'")
+    page.evaluate(f"{CM}.setValue('# Commit B\\n\\nB SNAPSHOT\\n')")
+    page.click("#tab-bar .tab:has-text('Test note.md') .tab-label")
+    page.wait_for_function("document.getElementById('current-file').textContent === 'Notes/Test note.md'")
+    assert page.inner_text("#commit-badge") == "2"
+    j_commit("J two files")
+    j_wait_finished()
+    assert len(j_blobs) == 2 and len(j_trees) == 1 and len(j_commits) == 1 and len(j_refs) == 1
+    assert j_commits[0]["message"] == "J two files"
+    assert {e["path"] for e in j_trees[0]["tree"]} == {j_a, j_b}
+    assert j_remote[j_a]["text"] == "# Commit A\n\nA SNAPSHOT\n"
+    assert j_remote[j_b]["text"] == "# Commit B\n\nB SNAPSHOT\n"
+    assert page.locator("#tab-bar .tab.dirty").count() == 0
+    assert page.locator("#commit-badge.hidden").count() == 1
+    assert page.is_disabled("#btn-discard")
+    assert j_drafts() == []
+    j_delay = page.evaluate("""async () => {
+        const a = await import('./js/autosave.js');
+        return a.IDLE_MS + a.LOCAL_WRITE_DEBOUNCE_MS + 1;
+    }""")
+    page.wait_for_timeout(j_delay)
+    assert j_drafts() == [], "committed drafts returned after idle"
+    page.reload(wait_until="networkidle")
+    page.wait_for_function("document.getElementById('btn-save').disabled === false")
+    assert page.locator("#draft-banner:not(.hidden)").count() == 0
+    assert "A SNAPSHOT" in editor_text()
+    assert not j_contents_writes
+    print("\u2713 Commit writes two exact snapshots once; drafts stay absent after idle and reload")
+
+    page.evaluate(f"{CM}.setValue('# Commit A\\n\\nJ SENT SNAPSHOT\\n')")
+    j_hold["enabled"] = True
+    j_commit("J delayed ref")
+    wait_until(lambda: j_hold["route"] is not None, what="PATCH ref to be held")
+    assert len(j_refs) == 2 and len(j_commits) == 2
+    page.evaluate(f"""() => {{
+        const cm = {CM};
+        const line = cm.lastLine();
+        cm.setCursor({{line, ch: cm.getLine(line).length}});
+        cm.focus();
+    }}""")
+    page.keyboard.type("J LATE TEXT")
+    page.wait_for_timeout(500)
+    assert "J LATE TEXT" in editor_text()
+    j_hold["enabled"] = False
+    j_accept_ref(j_hold["route"], j_hold["body"])
+    j_hold["route"] = None
+    j_wait_finished()
+    assert "J LATE TEXT" not in j_remote[j_a]["text"]
+    assert j_remote[j_a]["text"] == "# Commit A\n\nJ SENT SNAPSHOT\n"
+    assert page.locator("#tab-bar .tab.active.dirty").count() == 1
+    assert page.inner_text("#commit-badge") == "1"
+    assert not page.is_disabled("#btn-discard")
+    j_saved = j_drafts()
+    assert len(j_saved) == 1 and j_saved[0]["path"] == j_a, j_saved
+    assert j_saved[0]["text"] == editor_text(), j_saved
+    assert j_saved[0]["baseSha"] == j_remote[j_a]["sha"], j_saved
+    assert "newer local changes remain" in page.inner_text("#save-status")
+    assert not j_contents_writes
+    print("\u2713 Typing during held PATCH ref keeps the newer text, dot, badge and rebased draft")
+
+    j_final_text = editor_text()
+    j_commit("J remaining changes")
+    j_wait_finished()
+    assert len(j_refs) == 3 and len(j_commits) == 3 and len(j_trees) == 3
+    assert len(j_trees[-1]["tree"]) == 1
+    assert j_remote[j_a]["text"] == j_final_text
+    assert j_drafts() == []
+    assert page.locator("#tab-bar .tab.dirty").count() == 0
+    assert not j_contents_writes
+    print("\u2713 Next Commit saves the remaining changes and clears their draft")
+
     assert not page_errors, f"unhandled page errors: {page_errors}"
     browser.close()
 
