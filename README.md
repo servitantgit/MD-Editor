@@ -185,9 +185,14 @@ python3 e2e_smoke_test.py         # editing, hybrid autosave + 409, tabs, create
 - **Full-text search** — a search box in the sidebar header (`Ctrl`/`Cmd+K`
   focuses it from anywhere). Results replace the file tree as you type, each
   row showing the file path plus a one-line snippet with the matched term
-  highlighted; clicking one opens the note. The index is built in the browser
-  and persisted in IndexedDB for 30 days; clearing the input brings the tree
-  back exactly as it was.
+  highlighted. Clicking a result highlights located matched words in the
+  current text and jumps to the first occurrence of the longest word.
+  Find provides next/previous and a current/total counter; Map shows match
+  positions. Preview switches to Source. Search uses actual prefix/fuzzy
+  tokens; editing Find switches to literal phrase search and enables Replace.
+  Path-only matches or text that cannot be mapped to source may have no
+  document highlight. The index persists in IndexedDB for 30 days;
+  clearing the sidebar input restores the tree exactly as it was.
 - **Backlinks** — the **Backlinks** panel lists the notes that link to the
   open one: markdown links and `[[wiki links]]`; links inside code are ignored.
 - **Link suggestions** — typing `[[` opens a list of notes that filters as you

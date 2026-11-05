@@ -621,6 +621,81 @@ reload). Every `setup*` function it calls must therefore be idempotent:
   exactly one PUT into the new repository plus working mobile toggle buttons — it
   goes red if any of the above rules regress.
   
+## Search navigation: source matches, Find and minimap
+
+Implemented in `c027574` (metadata/ranges), `603c261` (Find),
+`15d53b6` (minimap) and `7574a14` (Search integration).
+
+**Search metadata and positions.** Results retain MiniSearch `terms`,
+`queryTerms` and `match`. Search UI stores the rendered query and metadata
+per row in a WeakMap, not by reading the changing input at click time.
+`search-matches.js` uses the index tokenizer and term processor. It locates
+original tokens before normalization and returns UTF-16 source offsets.
+Markdown exclusions use shared fence/code-span/reference helpers.
+Indexing functions/options are unchanged; `INDEX_VERSION` remains 7.
+
+Actual prefix/fuzzy tokens are located, not invented query occurrences.
+Only body/title tokens are matched in document text, not path-only tokens.
+All located occurrences are highlighted. The initial jump chooses the
+longest original token by code-point count, then the earliest offset.
+A longer expanded token can win over a shorter exact token deliberately.
+Short/numeric tokens are not silently discarded.
+
+**Find controller.** Literal phrase Find uses non-atomic match marks plus
+a distinct current mark, neither added to text undo history. Next/previous
+use live `mark.find()` positions, skip deleted marks and wrap. Explicit
+navigation unfolds the target and scrolls CodeMirror only.
+Recalculation never navigates. Editor refreshes matches after text changes
+with a 150ms debounce and publishes the current/total state.
+`0 / N` means there are matches but no current selection after refresh.
+clearFind, showDoc and destroy clear owned marks, timers and Search context.
+Never clear unrelated image widgets or Fold marks.
+
+**Opening a Search result.** The app awaits openFile and checks action
+sequence, session/client, active path and enabled Save before applying
+Search. Existing layout/widget animation frames finish before selection.
+Preview switches to Source and saves that preference; Source/Live remain
+unchanged. Current local text is used without forcing an unsaved tab reload.
+Search-mode Replace/All are disabled. Editing Find or opening ordinary Find
+via its button/Ctrl+F/Ctrl+H leaves token mode. Enter/Shift+Enter navigate
+the active mode.
+
+**Minimap is paint-only.** It reads live mark rows through the Editor
+getter, deduplicates rows and paints the current tick LAST, above nearby
+ordinary ticks. Search never opens a hidden map; opening it reads the
+existing search state. Pointer/scroll code and scroll-sync.js are unchanged.
+Keep EasyMDE sync off and preserve F13: no independent Preview cursor jump.
+
+**Lesson: dense ticks.** Intermediate line-order painting let a later
+ordinary tick hide the current tick. A browser pixel probe found it; a
+dense-row test was observed RED, then GREEN with current-last painting.
+
+**Deliberate limits.** No mapping for tokens joined by removed Markdown
+formatting (`**print**er` becomes `printer` in the index). Reference-style
+and other forms outside REF_TOKEN_RE have no second parser. The index uses
+more permissive link stripping, so exclusions can differ. Raw HTML remains
+searchable; non-Markdown files do not apply Markdown exclusions.
+Text hidden by atomic image widgets is not guaranteed visible highlighting;
+do not destroy a widget to expose it. Zero ranges produce a status message.
+Partial results highlight available ranges without a separate partial notice.
+No Preview/HTML iframe highlighting. Demo-specific code is unchanged.
+
+**Testing lesson.** Backtick is a Unicode symbol, not punctuation:
+the MiniSearch tokenizer can retain it in a token. An initial non-Markdown
+test expected the wrong offsets; a read-only tokenizer probe established
+the correct contract before that expectation was corrected.
+
+Tests cover source ranges/Unicode, metadata, navigation, Editor refresh,
+cleanup and map drawing. E2E L covers Find/Replace/Undo, M covers canvas
+pixels and Live sync, N covers Search prefix navigation and local edits.
+New E2E scenarios were not run on old code; RED was demonstrated by
+module tests and browser requirement probes.
+Baseline: `7574a14`, 612/612 unit tests and full E2E passed.
+Real-data sample: 80 queries, 949 body hits, 5820 validated ranges;
+3 hits without ranges (0.32%), 11 partially mapped; sensitive notes excluded.
+These counts are sample results, not guarantees for every future query.
+Manual production verification of the full feature is not yet confirmed.
+
 ## Search index — IndexedDB quirks and the no-Cache-Control rule (again)
 
 Added for the client-side full-text search (MiniSearch + IndexedDB). The four

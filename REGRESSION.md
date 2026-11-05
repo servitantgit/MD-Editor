@@ -72,6 +72,12 @@ Prefer automated coverage in `test/*.test.js` and `e2e_smoke_test.py` when pract
 ## Search / backlinks / history
 
 - [ ] Search replaces the tree with hits; clear restores the tree.
+- [ ] Search result: all located tokens are highlighted; longest original token is selected first; next/previous and current/total work.
+- [ ] Prefix/fuzzy results highlight actual matched tokens. Search-mode Replace/All are disabled; editing Find enables literal replacement.
+- [ ] Search from Preview switches to saved Source. Reopening an edited result preserves local text and undo history.
+- [ ] Editing/Undo refreshes matches without navigation; closing Find or switching documents clears owned highlights and map ticks.
+- [ ] Map opened after Search shows ticks; the current tick remains visible on dense rows. Tick painting does not scroll panes.
+- [ ] Live sync works both ways with Find active and Map open, and after closing Find/Map. Typing with images does not restore placeholders or collapse Preview.
 - [ ] Backlinks panel lists notes that link to the current file.
 - [ ] Backlinks also lists notes in OTHER folders that use `[[Folder/Note]]` or `[[Note]]`.
 - [ ] History panel toggles open/closed; does not leave a stuck open state after Escape.
