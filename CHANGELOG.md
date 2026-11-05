@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **History / Restore regression coverage.** Three module guards check the selected commit and diff, Cancel, local-only Restore and its pre-commit diff. Browser scenario K restores another note, switches tabs and recovers the draft after reload without remote writes. Application code is unchanged; 570 unit tests and the full E2E suite passed (`2c8434a`)
 - **Snapshot confirmation APIs for Autosave and tabs.** Adopt committed blob SHAs, clear only matching local text and retain newer edits on the committed base. Conditional draft cleanup checks an optional synchronous permission callback before deletion. Empty text is supported. Added in `7396e21` and connected to Commit UI in `a7105e5`; existing single-file Save notifications are unchanged
 - **Draft storage confirmation foundation.** Draft mutations are ordered per scoped path within one store instance; `deleteIfText` conditionally clears confirmed text. Added in `733f527`, extended with permission checks in `7396e21` and atomic `rebase` of existing drafts in `a7105e5`. This is not cross-tab locking
 - **Image audit** (`tools/image-audit.mjs`, `js/image-audit.js`): lists pictures no note links to, image links to a missing file and identical copies. It reads the repository from git HEAD and withholds the unused list whenever anything is unclear (an unread note, a wiki image link, an HTML image reference)

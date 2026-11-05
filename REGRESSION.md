@@ -75,6 +75,10 @@ Prefer automated coverage in `test/*.test.js` and `e2e_smoke_test.py` when pract
 - [ ] Backlinks panel lists notes that link to the current file.
 - [ ] Backlinks also lists notes in OTHER folders that use `[[Folder/Note]]` or `[[Note]]`.
 - [ ] History panel toggles open/closed; does not leave a stuck open state after Escape.
+- [ ] History: selected commit shows the correct filename and added/removed lines.
+- [ ] Restore: Cancel leaves the open text and local changes untouched.
+- [ ] Restore B while A is open: B gets the selected historical version as local changes; A remains unchanged and nothing is pushed.
+- [ ] Switch B/A/B after Restore, then reload: the recovery banner and Keep local preserve the restored text. Wait for file opening to complete before checking text.
 - [ ] Search results start right under the search box (no empty gap above them).
 - [ ] A search shows the result count above the hits; "50 of N results" when the list is capped.
 - [ ] A `# comment` inside a code block does not become the note title in search results.

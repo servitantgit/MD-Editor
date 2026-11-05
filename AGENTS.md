@@ -799,6 +799,20 @@ PUTs once; draft survives reload; 409 retry / Reload / Overwrite still work. It
 never waits out a 5-minute max (CI flake) and never claims a cold-start reload
 keeps an in-memory-only index.
 
+## Browser tests: wait for the completed file open, not just its label
+
+`openFile()` updates the current-file label before asynchronous draft
+lookup and document installation finish. A matching label is not proof
+that CodeMirror is showing that file yet. After a tab switch, browser
+tests wait for the target label AND `btn-save.disabled === false`, then
+assert the exact document text. Do not replace that assertion with a
+fixed sleep or accept either document.
+
+Lesson from the E2E K preparation for `2c8434a`: the new test sometimes
+read A while the label already named B. In-memory diagnostics changed
+timing and passed; waiting for completed opening fixed the test without
+changing application code. A diagnostic PASS alone did not prove it safe.
+
 ## Tabs: who owns what, and the rules that keep them safe
 
 **Split of responsibilities.** `js/tabs.js` is a pure model (ordered paths + the
@@ -1327,6 +1341,27 @@ insignificant relative to the main task. Before push:
 14. Follow the step order of the task. RED is produced by running the new tests
     BEFORE the code change, not by changing the code and then reverting it with
     `git checkout` or `git stash`. If the order cannot be followed: STOP and ask.
+
+## History / Restore: ordinary scenario coverage
+
+`2c8434a` adds guards, not a behaviour change. Ordinary module and browser
+probes found no failure in the scenarios covered below:
+- History lists the requested branch and shows the selected commit,
+  filename and patch.
+- Cancel on Restore makes no content request and changes no local work.
+- Restore fetches the selected commit version and puts its exact text
+  into the editor as local changes, with a dirty tab, Commit badge and
+  recovery draft; no remote write is made.
+- The pre-commit diff compares restored text with the current base blob.
+- Restoring B while A is open leaves A unchanged. Switching B/A/B keeps
+  restored text; after reload, Keep local recovers its draft.
+
+Coverage: `test/history-restore.test.js` has three module guards; E2E
+scenario K checks the other-file Restore, tab switches and reload in
+Chromium with mocked GitHub. Baseline: 570/570 unit tests and full E2E
+including J/K passed. Manual production verification of History/Restore
+is not yet confirmed. This is not a claim that all error paths, empty
+historical versions or concurrent actions have been tested.
 
 ## Draft confirmation: ordered mutations and atomic conditional cleanup
 
