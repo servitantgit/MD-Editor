@@ -1,6 +1,7 @@
 import { test, mock } from 'node:test';
 import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
+import MiniSearch from 'minisearch';
 import { createEditor } from '../js/editor.js';
 
 function fixture() {
@@ -217,5 +218,135 @@ test('Editor Find: map getter exposes live search rows and clears them with Find
     assert.deepEqual(f.editor.getFindMapState(), {
       lines: [], currentLine: null
     });
+  } finally { f.close(); }
+});
+
+const searchTokenOptions = {
+  path: 'note.md',
+  tokenize: MiniSearch.getDefault('tokenize'),
+  processTerm: MiniSearch.getDefault('processTerm')
+};
+
+test('Editor Search: actual tokens are highlighted and longest original token is selected first', () => {
+  const f = fixture();
+  try {
+    assert.equal(typeof f.editor.findFromSearch, 'function',
+      'Editor must accept Search context');
+    f.editAndNotify('cat printing cat printing');
+    f.editor.findFromSearch({
+      query: 'cat print',
+      terms: ['cat', 'printing'],
+      queryTerms: ['cat', 'print'],
+      match: { cat: ['body'], printing: ['body'] }
+    }, searchTokenOptions);
+
+    assert.equal(f.searchMarks().length, 4);
+    const current = f.marks.filter(m =>
+      !m.dead && m.options.className === 'md-find-current');
+    assert.equal(current.length, 1);
+    assert.deepEqual(current[0].find(), {
+      from: { line: 0, ch: 4 },
+      to: { line: 0, ch: 12 }
+    });
+    assert.deepEqual(f.findStates.at(-1), {
+      mode: 'search', query: '', total: 4, current: 2
+    });
+    assert.deepEqual(f.editor.getFindMapState(), {
+      lines: [0], currentLine: 0
+    });
+  } finally { f.close(); }
+});
+
+test('Editor Search: path-only result clears old highlights without matching unrelated body text', () => {
+  const f = fixture();
+  try {
+    assert.equal(typeof f.editor.findFromSearch, 'function',
+      'Editor must accept Search context');
+    f.editor.findInFile('cat');
+    assert.equal(f.searchMarks().length, 3);
+    f.editor.findFromSearch({
+      query: 'cat',
+      terms: ['cat'],
+      queryTerms: ['cat'],
+      match: { cat: ['path'] }
+    }, searchTokenOptions);
+
+    assert.equal(f.searchMarks().length, 0);
+    assert.equal(f.marks.filter(m =>
+      !m.dead && m.options.className === 'md-find-current').length, 0);
+    assert.deepEqual(f.findStates.at(-1), {
+      mode: 'search', query: '', total: 0, current: 0
+    });
+    assert.deepEqual(f.editor.getFindMapState(), {
+      lines: [], currentLine: null
+    });
+  } finally { f.close(); }
+});
+
+test('Editor Search: Search highlights refresh after editing without choosing another current match', async () => {
+  mock.timers.enable({ apis: ['setTimeout'] });
+  let f;
+  try {
+    f = fixture();
+    f.editAndNotify('printing');
+    f.editor.findFromSearch({
+      query: 'print',
+      terms: ['printing'],
+      queryTerms: ['print'],
+      match: { printing: ['body'] }
+    }, searchTokenOptions);
+    assert.equal(f.searchMarks().length, 1);
+    assert.equal(f.findStates.at(-1).current, 1);
+
+    f.editAndNotify('printing printing');
+    await settleFindTimers();
+
+    assert.equal(f.searchMarks().length, 2,
+      'Search must recalculate source ranges after the text changes');
+    assert.deepEqual(f.findStates.at(-1), {
+      mode: 'search', query: '', total: 2, current: 0
+    });
+    assert.equal(f.marks.filter(m =>
+      !m.dead && m.options.className === 'md-find-current').length, 0,
+      'Display refresh must not select another match automatically');
+  } finally {
+    if (f) f.close();
+    mock.timers.reset();
+  }
+});
+
+test('Editor Search: nextFind preserves Search mode and navigates actual tokens cyclically', () => {
+  const f = fixture();
+  try {
+    assert.equal(typeof f.editor.nextFind, 'function',
+      'Editor must expose navigation without restarting literal Find');
+    f.editAndNotify('cat printing cat printing');
+    f.editor.findFromSearch({
+      query: 'cat print',
+      terms: ['cat', 'printing'],
+      queryTerms: ['cat', 'print'],
+      match: { cat: ['body'], printing: ['body'] }
+    }, searchTokenOptions);
+    assert.equal(f.findStates.at(-1).current, 2);
+
+    f.editor.nextFind();
+    assert.deepEqual(f.findStates.at(-1), {
+      mode: 'search', query: '', total: 4, current: 3
+    });
+    let current = f.marks.filter(m =>
+      !m.dead && m.options.className === 'md-find-current');
+    assert.deepEqual(current[0].find(), {
+      from: { line: 0, ch: 13 }, to: { line: 0, ch: 16 }
+    });
+
+    f.editor.nextFind({ backwards: true });
+    assert.equal(f.findStates.at(-1).current, 2);
+    f.editor.nextFind();
+    f.editor.nextFind();
+    f.editor.nextFind();
+    assert.deepEqual(f.findStates.at(-1), {
+      mode: 'search', query: '', total: 4, current: 1
+    });
+    assert.equal(f.searchMarks().length, 4);
   } finally { f.close(); }
 });

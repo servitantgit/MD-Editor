@@ -17,6 +17,7 @@ import { createLoginUI } from './login-ui.js';
 import { SearchStore } from './search-store.js';
 import { SearchSync } from './search-sync.js';
 import { createSearchUI, formatAge } from './search-ui.js';
+import { createSearcherOptions } from './search-index.js';
 import { DraftStore } from './draft-store.js';
 import { bindLifecycleListeners } from './lifecycle.js';
 import { Autosave } from './autosave.js';
@@ -240,7 +241,11 @@ function ensureTabsSession() {
 }
 
 // Thin shims so existing call sites (file-ops, commit-history, loadTree) stay stable.
-function openFile(path, opts) { return ensureTabsSession().openFile(path, opts); }
+let searchOpenSequence = 0;
+function openFile(path, opts) {
+  searchOpenSequence++;
+  return ensureTabsSession().openFile(path, opts);
+}
 function closeTab(path) { return ensureTabsSession().closeTab(path); }
 function dropTabs(paths) { return ensureTabsSession().dropTabs(paths); }
 function markStale(paths) { ensureTabsSession().markStale(paths); }
@@ -916,6 +921,49 @@ function setupAutosaveUI(owner, repo) {
  * the tree and the editor must be usable immediately, and on a returning login
  * the hydrated index already answers queries from memory.
  */
+async function openSearchResult(path, context) {
+  if (!context) return openFile(path);
+  const client = state.client;
+  const generation = commitSessionGeneration;
+  const opening = openFile(path);
+  const sequence = searchOpenSequence;
+  const current = () => sequence === searchOpenSequence
+    && generation === commitSessionGeneration && state.client === client
+    && state.currentPath === path && editorHandle && !els.btnSave.disabled;
+  try {
+    await opening;
+    if (!current()) return;
+    if (layoutMode === 'preview') applyLayoutMode('source');
+    els.findBar.classList.remove('hidden');
+    els.findInput.value = context.query;
+    const editor = editorHandle;
+    // Existing layout and inline-widget restoration use animation frames.
+    // Let those finish before applying the explicit search selection.
+    for (let i = 0; i < 3; i++) {
+      await new Promise(requestAnimationFrame);
+      if (!current() || editorHandle !== editor) return;
+    }
+    const options = createSearcherOptions();
+    const result = editor.findFromSearch(context, {
+      path,
+      tokenize: options.tokenize || window.MiniSearch.getDefault('tokenize'),
+      processTerm: options.processTerm || window.MiniSearch.getDefault('processTerm')
+    });
+    if (!result.total) {
+      const contentMatch = Object.values(context.match).some(fields =>
+        fields.includes('body') || fields.includes('title'));
+      setSaveStatus(contentMatch
+        ? 'Found terms could not be located in the current text'
+        : 'Match is in the file name or path', false);
+    }
+  } catch (e) {
+    if (generation === commitSessionGeneration && state.client === client
+        && sequence === searchOpenSequence) {
+      setSaveStatus('Search navigation failed: ' + e.message, true);
+    }
+  }
+}
+
 function setupSearch(owner, repo) {
   if (typeof window.MiniSearch !== 'function') {
     // The CDN <script> failed to load. Search is the only feature that can be
@@ -981,7 +1029,7 @@ function setupSearch(owner, repo) {
     treeEl: els.fileTreeEl,
     resultsEl: els.searchResults,
     getSync: () => searchSync,
-    onOpenFile: openFile,
+    onOpenFile: openSearchResult,
     onReindex: () => runSearchSync(state.allFiles, { force: true }),
   });
 
@@ -1347,6 +1395,9 @@ function setupMoreFileMenu() {
 }
 
 function renderFindState(state) {
+  const searchMode = state.mode === 'search';
+  if (els.findReplace) els.findReplace.disabled = searchMode;
+  if (els.findReplaceAll) els.findReplaceAll.disabled = searchMode;
   // Paint-only refresh, including when Find is cleared or hidden.
   if (minimapHandle) minimapHandle.refresh();
   if (!els.findCount) return;
@@ -1361,16 +1412,28 @@ function renderFindState(state) {
 function setupFindBar() {
   if (!els.findBar || els.findBar.dataset.bound) return;
   els.findBar.dataset.bound = '1';
+  let queryTimer = null;
 
   const runFind = (backwards) => {
     if (!editorHandle) return;
+    clearTimeout(queryTimer);
+    queryTimer = null;
     const q = els.findInput ? els.findInput.value : '';
-    editorHandle.findInFile(q, { backwards: !!backwards });
+    if (editorHandle.getFindState().mode === 'search') {
+      editorHandle.nextFind({ backwards: !!backwards });
+    } else {
+      editorHandle.findInFile(q, { backwards: !!backwards });
+    }
   };
 
   const openFind = () => {
     if (!els.findBar) return;
+    clearTimeout(queryTimer);
+    queryTimer = null;
     els.findBar.classList.remove('hidden');
+    if (editorHandle && editorHandle.getFindState().mode === 'search') {
+      editorHandle.setFindQuery(els.findInput.value);
+    }
     if (els.findInput) {
       els.findInput.focus();
       els.findInput.select();
@@ -1378,6 +1441,8 @@ function setupFindBar() {
   };
   const closeFind = () => {
     if (!els.findBar) return;
+    clearTimeout(queryTimer);
+    queryTimer = null;
     els.findBar.classList.add('hidden');
     if (els.findCount) els.findCount.textContent = '';
     if (editorHandle) {
@@ -1409,6 +1474,23 @@ function setupFindBar() {
   }
 
   if (els.findInput) {
+    els.findInput.addEventListener('input', () => {
+      clearTimeout(queryTimer);
+      queryTimer = null;
+      const editor = editorHandle;
+      if (!editor) return;
+      const doc = editor.getDoc();
+      const query = els.findInput.value;
+      // Changing the field leaves token-mode immediately; repaint is debounced.
+      editor.clearFind();
+      queryTimer = setTimeout(() => {
+        queryTimer = null;
+        if (editorHandle !== editor || editor.getDoc() !== doc
+            || els.findBar.classList.contains('hidden')
+            || els.findInput.value !== query) return;
+        editor.setFindQuery(query);
+      }, 150);
+    });
     els.findInput.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') {
         e.preventDefault();

@@ -45,6 +45,8 @@ export function createSearchUI(deps) {
   // has typed something else must not patch a stale row.
   let renderGeneration = 0;
   let destroyed = false;
+  // Context belongs to the rendered row, not the changing search input.
+  const resultContexts = new WeakMap();
 
   function showTree() {
     resultsEl.innerHTML = '';
@@ -95,6 +97,13 @@ export function createSearchUI(deps) {
       row.className = 'search-result';
       row.dataset.path = hit.path;
       row.title = hit.path;
+      resultContexts.set(row, {
+        query,
+        terms: [...hit.terms],
+        queryTerms: [...hit.queryTerms],
+        match: Object.fromEntries(Object.entries(hit.match)
+          .map(([term, fields]) => [term, [...fields]])),
+      });
 
       const pathEl = document.createElement('div');
       pathEl.className = 'search-result-path';
@@ -146,8 +155,8 @@ export function createSearchUI(deps) {
 
   function onResultClick(e) {
     const row = e.target.closest('.search-result');
-    if (!row) return;
-    onOpenFile(row.dataset.path);
+    if (destroyed || !row || !resultsEl.contains(row)) return;
+    onOpenFile(row.dataset.path, resultContexts.get(row));
   }
 
   inputEl.addEventListener('input', onInput);

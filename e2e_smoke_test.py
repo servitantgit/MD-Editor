@@ -2244,6 +2244,122 @@ with sync_playwright() as p:
     assert len(j_contents_writes) == k_content_count
     print("\u2713 Closing Find clears canvas ticks; Live sync still works with the map closed")
 
+    # --- N. SEARCH RESULT NAVIGATION ---
+    # Module RED and browser RED established metadata, highlighting and UI requirements.
+    print("\n--- N. Search result: prefix tokens, Source navigation and minimap ---")
+    page.close()
+    page = browser.new_page(viewport={"width": 1440, "height": 1000})
+    page.on("pageerror", lambda exc: page_errors.append(str(exc)))
+    n_body = ("# Search navigation\n\ncat\n"
+              + "\n".join("ordinary row " + str(i) for i in range(180))
+              + "\nprinting\nordinary separator\nprinting\n")
+    j_remote[j_a] = {"text": n_body, "sha": "n-head-a"}
+    j_remote[j_b] = {"text": "# Other note\n\nUnrelated content\n", "sha": "n-head-b"}
+    n_contents_before = len(j_contents_writes)
+    n_refs_before = len(j_refs)
+    page.route(re.compile(r"https://api\.github\.com/.*"), j_api)
+    for cdn_url in CDN_MOCKS:
+        page.route(cdn_url, handle_cdn)
+    page.route(re.compile(r"https://cdnjs\.cloudflare\.com/.*"),
+        lambda r, _: r.fulfill(status=200, content_type="text/css", body=b""))
+    page.route(re.compile(r"https://maxcdn\.bootstrapcdn\.com/.*"),
+        lambda r, _: r.fulfill(status=200, content_type="text/css", body=b""))
+    page.goto("http://localhost:8080/", wait_until="networkidle")
+    page.evaluate("""() => {
+        sessionStorage.setItem('gh_token', 'ghp_faketoken');
+        sessionStorage.setItem('gh_owner', 'test-owner');
+        sessionStorage.setItem('gh_repo', 'test-repo');
+        sessionStorage.setItem('gh_branch', 'main');
+    }""")
+    page.reload(wait_until="networkidle")
+    page.wait_for_selector("#app-main:not(.hidden)")
+    open_in_tree("Test note.md")
+    page.wait_for_function("document.getElementById('btn-save').disabled === false")
+    assert editor_text() == n_body
+    n_history = page.evaluate(f"{CM}.historySize()")
+    page.click('#layout-toggle .layout-btn[data-mode="preview"]')
+    page.fill("#search-input", "cat print")
+    page.wait_for_selector(".search-result[data-path='Notes/Test note.md']", timeout=10000)
+    page.click(".search-result[data-path='Notes/Test note.md']")
+    l_count("2 / 3")
+    n_first = l_snapshot()
+    assert n_first["selection"] == "printing" and n_first["marks"] == 3, n_first
+    assert editor_text() == n_body
+    assert page.evaluate(f"{CM}.historySize()") == n_history
+    assert page.evaluate("localStorage.getItem('md_layout')") == "source"
+    assert page.locator('#layout-toggle .layout-btn[data-mode="source"].active').count() == 1
+    assert page.evaluate(f"{CM}.getScrollInfo().top") > 500
+    assert page.is_disabled("#find-replace") and page.is_disabled("#find-replace-all")
+    assert page.input_value("#find-input") == "cat print"
+    print("\u2713 Search opens Source and selects the actual longest prefix token without editing text")
+
+    page.click("#find-next")
+    l_count("3 / 3")
+    assert l_snapshot()["selection"] == "printing"
+    page.press("#find-input", "Shift+Enter")
+    l_count("2 / 3")
+    if not page.locator("#minimap-wrap:not(.hidden)").count():
+        page.click("#btn-minimap")
+    wait_until(lambda: m_pixels()["normal"] > 0 and m_pixels()["current"] > 0,
+               what="Search result ticks on minimap")
+    print("\u2713 Search-mode next/previous and minimap show all matched tokens")
+
+    page.evaluate("""() => {
+        const cm = document.querySelector('.CodeMirror').CodeMirror;
+        window.__nOriginalScroll = cm.scrollIntoView;
+        const original = cm.scrollIntoView.bind(cm);
+        window.__nNavigationCalls = 0;
+        cm.scrollIntoView = (...args) => {
+            window.__nNavigationCalls++;
+            return original(...args);
+        };
+        cm.replaceRange('printing\\n', {
+            line: cm.lastLine(), ch: cm.getLine(cm.lastLine()).length
+        });
+        window.__nNavigationCalls = 0;
+    }""")
+    try:
+        l_count("0 / 4")
+        page.wait_for_timeout(250)
+        assert page.evaluate("window.__nNavigationCalls") == 0
+        assert l_snapshot()["marks"] == 4
+        assert page.is_disabled("#find-replace")
+    finally:
+        page.evaluate("""() => {
+            const cm = document.querySelector('.CodeMirror').CodeMirror;
+            cm.scrollIntoView = window.__nOriginalScroll;
+            delete window.__nOriginalScroll;
+            delete window.__nNavigationCalls;
+        }""")
+    page.click("#find-next")
+    l_count("1 / 4")
+    assert l_snapshot()["selection"] == "cat"
+    # Click the same indexed result again: search must use current local text,
+    # not replace it with the older remote body.
+    n_local = editor_text()
+    page.click(".search-result[data-path='Notes/Test note.md']")
+    l_count("2 / 4")
+    assert editor_text() == n_local
+    assert l_snapshot()["selection"] == "printing"
+    print("\u2713 Local edits refresh Search highlights without navigation and survive reopening the result")
+
+    page.fill("#find-input", "printing")
+    l_count("0 / 3")
+    assert not page.is_disabled("#find-replace")
+    assert not page.is_disabled("#find-replace-all")
+    page.press("#find-input", "Enter")
+    l_count("1 / 3")
+    assert l_snapshot()["selection"] == "printing"
+    page.press("#find-input", "Escape")
+    page.wait_for_selector("#find-bar", state="hidden")
+    assert l_snapshot()["marks"] == 0 and l_snapshot()["currentMarks"] == 0
+    wait_until(lambda: m_pixels() == {"normal": 0, "current": 0},
+               what="Search canvas ticks to clear")
+    assert len(j_contents_writes) == n_contents_before
+    assert len(j_refs) == n_refs_before
+    assert j_remote[j_a]["text"] == n_body
+    print("\u2713 Editing the Find field enables literal replacement; Escape clears marks without remote writes")
+
     assert not page_errors, f"unhandled page errors: {page_errors}"
     browser.close()
 

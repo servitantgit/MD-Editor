@@ -14,6 +14,7 @@ import { findMarkdownImages } from './markdown-tokens.js';
 import { buildHtmlSrcdoc } from './html-preview.js';
 import { linkFromPaste, isInsideCode } from './paste-link.js';
 import { createFindController } from './find-controller.js';
+import { findSearchMatches, chooseInitialMatch } from './search-matches.js';
 
 /**
  * @param {HTMLTextAreaElement} textareaEl
@@ -45,6 +46,7 @@ export function createEditor(textareaEl, deps) {
   let lastInlineImageKey = '';
   let findController = null;
   let findRefreshTimer = null;
+  let activeSearch = null;
 
   function publishFindState() {
     const state = findController ? findController.getState()
@@ -63,11 +65,15 @@ export function createEditor(textareaEl, deps) {
     findRefreshTimer = null;
     if (!findController) return;
     const state = findController.getState();
-    if (state.mode !== 'find' || !state.query) return;
+    if (state.mode === 'find' ? !state.query : !activeSearch) return;
     findRefreshTimer = setTimeout(() => {
       findRefreshTimer = null;
       if (findController) {
-        findController.refresh();
+        if (findController.getState().mode === 'search' && activeSearch) {
+          findController.setRanges(searchRanges(), { initial: -1 });
+        } else {
+          findController.refresh();
+        }
         publishFindState();
       }
     }, 150);
@@ -999,8 +1005,51 @@ closeImageMenu();
     });
   }
 
+  /** Highlight the actual Search tokens in the currently displayed text. */
+  function searchRanges() {
+    return findSearchMatches(easyMDE.codemirror.getValue(), activeSearch);
+  }
+
+  function findFromSearch(context, options) {
+    const terms = Object.entries(context.match || {})
+      .filter(([, fields]) => fields.includes('body') || fields.includes('title'))
+      .map(([term]) => term);
+    const search = {
+      path: options.path, terms,
+      tokenize: options.tokenize, processTerm: options.processTerm
+    };
+    const ranges = findSearchMatches(easyMDE.codemirror.getValue(), search);
+    const controller = ensureFindController();
+    clearTimeout(findRefreshTimer);
+    findRefreshTimer = null;
+    activeSearch = search;
+    controller.setRanges(ranges, { initial: chooseInitialMatch(ranges) });
+    controller.next();
+    return publishFindState();
+  }
+
   /** Simple in-file find (no addon dependency). Returns match count. */
+  // Navigate tracked matches without changing Find/Search mode.
+  function getFindState() {
+    return findController ? findController.getState()
+      : { mode: 'find', query: '', total: 0, current: 0 };
+  }
+
+  function setFindQuery(query) {
+    clearTimeout(findRefreshTimer);
+    findRefreshTimer = null;
+    activeSearch = null;
+    ensureFindController().setQuery(String(query ?? ''));
+    return publishFindState();
+  }
+
+  function nextFind({ backwards = false } = {}) {
+    if (findController) findController.next({ backwards });
+    return publishFindState();
+  }
+
   function findInFile(query, { backwards = false } = {}) {
+    activeSearch = null;
     const controller = ensureFindController();
     const q = String(query ?? '');
     const state = controller.getState();
@@ -1061,6 +1110,7 @@ closeImageMenu();
   function clearFind() {
     clearTimeout(findRefreshTimer);
     findRefreshTimer = null;
+    activeSearch = null;
     if (findController) findController.clear();
     publishFindState();
     // Keep the ordinary editor selection; remove only search marks.
@@ -1162,6 +1212,10 @@ closeImageMenu();
     setLanguage,
     setToolbarForKind,
     findInFile,
+    findFromSearch,
+    nextFind,
+    getFindState,
+    setFindQuery,
     replaceInFile,
     replaceAllInFile,
     clearFind,
