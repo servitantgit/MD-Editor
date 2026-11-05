@@ -102,6 +102,45 @@ export function createTabsSession(deps) {
     }
   }
 
+  /** Confirm only the text actually sent; no storage or remote operations. */
+  function confirmSnapshot({ path, text, sha }) {
+    if (typeof path !== 'string' || !path || typeof text !== 'string'
+        || typeof sha !== 'string' || !sha) {
+      throw new Error('tabs confirmSnapshot: path, text and SHA required');
+    }
+    const state = deps.getState();
+    const tab = tabDocs.get(path);
+    const wt = deps.getWorkingTree && deps.getWorkingTree();
+    const change = wt && wt.get(path);
+    let localText;
+    if (tab && tab.doc && typeof tab.doc.getValue === 'function') {
+      localText = tab.doc.getValue();
+    } else if (change) {
+      localText = change.text;
+    }
+    // Do not recreate a closed or deleted file without local state.
+    if (typeof localText !== 'string') return false;
+    const clean = localText === text;
+    if (tab) {
+      tab.sha = sha;
+      tab.unsaved = !clean;
+      tab.commitSeen = clean;
+    }
+    if (state.currentPath === path) {
+      state.currentSha = sha;
+      activeFileUnsaved = !clean;
+    }
+    if (wt) {
+      if (clean) wt.clear(path);
+      else wt.setDirty(path, localText, sha);
+    }
+    if (deps.refreshCommitBadge) deps.refreshCommitBadge();
+    const ft = deps.getFileTree && deps.getFileTree();
+    if (ft && wt) ft.setDirtyMap(wt.statusMap());
+    renderTabs();
+    return clean;
+  }
+
   function restoreChrome() {
     const state = deps.getState();
     const path = state.currentPath;
@@ -391,6 +430,7 @@ export function createTabsSession(deps) {
     persistTabs,
     renderTabs,
     noteCommit,
+    confirmSnapshot,
     restoreTabsOnce,
     renderEmptyState,
     restoreChrome,

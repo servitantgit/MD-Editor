@@ -29,9 +29,14 @@ export function createMemoryBackend() {
     async get(key) { return map.get(key) || null; },
     async put(record) { map.set(record.key, record); },
     async delete(key) { map.delete(key); },
-    async deleteIfText(key, expectedText) {
+    async deleteIfText(key, expectedText, stillCurrent = () => true) {
       const record = map.get(key);
       if (!record || record.text !== expectedText) return false;
+      try {
+        if (stillCurrent() !== true) return false;
+      } catch (_) {
+        return false;
+      }
       map.delete(key);
       return true;
     },
@@ -218,14 +223,20 @@ export class IdbBackend {
   }
 
   /** Compare and delete in ONE transaction; failures preserve the draft. */
-  async deleteIfText(key, expectedText) {
-    if (!(await this.open())) return this.memory.deleteIfText(key, expectedText);
+  async deleteIfText(key, expectedText, stillCurrent = () => true) {
     try {
+      if (stillCurrent() !== true) return false;
+      if (!(await this.open())) {
+        return this.memory.deleteIfText(key, expectedText, stillCurrent);
+      }
+      if (stillCurrent() !== true) return false;
       return await this._tx('readwrite', (store, setResult) => {
         const request = store.get(key);
         request.onsuccess = () => {
           const record = request.result;
-          if (!record || record.text !== expectedText) {
+          let allowed = false;
+          try { allowed = stillCurrent() === true; } catch (_) {}
+          if (!allowed || !record || record.text !== expectedText) {
             setResult(false);
             return;
           }

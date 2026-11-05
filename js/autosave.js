@@ -104,6 +104,7 @@ export class Autosave {
     this.path = null;
     this.baseSha = null;
     this.destroyed = false;
+    this._confirmationGeneration = 0;
 
     this._text = '';
     this._draftTimer = null;
@@ -145,6 +146,7 @@ export class Autosave {
     if (this.destroyed) {
       return { hasDraft: false, draftText: null, remoteText, text: remoteText, draftSavedAt: 0 };
     }
+    this._confirmationGeneration++;
     this._clearTimers();
     this._pending = null;
     this.path = path;
@@ -282,6 +284,39 @@ export class Autosave {
       this._setStatus(STATUS.drafted);
     }
     return written;
+  }
+
+  /**
+   * Adopt a snapshot already committed by the multi-file Commit caller.
+   * This method owns only the active Autosave and its draft, not tabs/WT.
+   * No remote write and no onRemoteCommit callback.
+   */
+  async confirmSnapshot({ path, text, sha }) {
+    if (this.destroyed || !path || this.path !== path) return false;
+    if (this.state === STATE.PUSHING) return false;
+    if (typeof text !== 'string' || typeof sha !== 'string' || !sha) {
+      throw new Error('confirmSnapshot: text and committed SHA required');
+    }
+    const generation = this._confirmationGeneration;
+    const current = () => !this.destroyed && this.path === path
+      && this._confirmationGeneration === generation;
+    this._clearTimers();
+    this.baseSha = sha;
+    this._backgroundErrors.delete(path);
+
+    await this.store.deleteIfText(this._draftRef(path), text,
+      () => current() && this.state !== STATE.PUSHING);
+    if (!current() || this.state === STATE.PUSHING) return false;
+
+    if (this._text !== text) {
+      this._markDirty();
+      await this._writeDraft();
+      return false;
+    }
+    this._clearTimers();
+    this.state = STATE.CLEAN;
+    this._setStatus(STATUS.saved);
+    return true;
   }
 
   // ===== committing to GitHub =====
@@ -526,6 +561,7 @@ export class Autosave {
    */
   release() {
     if (this.destroyed) return;
+    this._confirmationGeneration++;
     this._clearTimers();
     this.path = null;
     this.baseSha = null;

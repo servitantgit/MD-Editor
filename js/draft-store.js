@@ -90,9 +90,16 @@ export class DraftStore {
   async delete(ref) { return this.deleteByKey(refKey(ref)); }
 
   /** Delete only the confirmed text; preserve a different newer draft. */
-  async deleteIfText(ref, expectedText) {
+  async deleteIfText(ref, expectedText, stillCurrent = () => true) {
     const key = refKey(ref);
-    return this._enqueue(key, () => this.backend.deleteIfText(key, expectedText));
+    return this._enqueue(key, () => {
+      try {
+        if (stillCurrent() !== true) return false;
+      } catch (_) {
+        return false;
+      }
+      return this.backend.deleteIfText(key, expectedText, stillCurrent);
+    });
   }
 
   /** Deletes by the stored key itself (used by the sweep, which reads records). */
