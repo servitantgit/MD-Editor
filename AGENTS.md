@@ -1240,8 +1240,9 @@ rule; when a fixed bug reveals a new class, add a rule here.
 9. **Confirm the sent snapshot, not just its path.** Draft cleanup after a
    successful remote write must not delete newer local text. Use ordered
    mutations and an atomic conditional cleanup, not a separate read then
-   unconditional delete. The storage foundation is in `733f527`; Commit UI
-   integration is still pending (see "Draft confirmation" below).
+   unconditional delete. Check the owning generation before the actual
+   deletion, not only after awaiting cleanup. Storage and snapshot APIs
+   are implemented; Commit UI integration is still pending (see below).
 
 ## General rule before considering a task done
 
@@ -1339,20 +1340,50 @@ delete newer text written between the read and the delete.
 independent; a rejected operation does not poison the queue. This is not
 cross-tab or cross-instance locking.
 
-`deleteIfText(ref, expectedText)` returns true only when it deletes a
-matching record. Missing or different text returns false; empty text is
-a valid match. IndexedDB reads, compares and deletes in ONE readwrite
-transaction; an aborted transaction returns false and preserves the draft.
-The memory fallback performs the same conditional operation.
+`deleteIfText(ref, expectedText, stillCurrent)` returns true only when
+it deletes a matching record. Missing or different text returns false;
+empty text is a valid match. The optional synchronous `stillCurrent`
+callback must return exactly true; false or an exception prevents deletion.
+It is checked after the queue wait and immediately before deletion in
+the IndexedDB read callback or memory operation. IndexedDB reads, compares
+and deletes in ONE readwrite transaction; abort returns false and preserves
+the draft. Existing two-argument calls remain supported.
 
 Tests: `test/draft-store.test.js` (seven tests seen RED before the fix),
 `test/draft-confirmation-guards.test.js` (independent keys, queue recovery
 and real transaction abort; guard tests). Baseline after `733f527`:
 538/538 unit tests and the existing E2E smoke suite passed.
 
-**Integration is not finished.** Commit UI and Autosave still use their
-existing confirmation paths. The storage foundation alone does not fix
-Commit clearing newer edits or leaving Autosave dirty after success.
+**Snapshot APIs added in `7396e21`.**
+- `Autosave.confirmSnapshot({ path, text, sha })` adopts an already
+  committed snapshot without a remote write or another `onRemoteCommit`
+  callback. Matching active text becomes clean with timers cancelled;
+  newer text remains dirty and is checkpointed on the committed SHA.
+  Another path, destroy or a changed open/release generation invalidates
+  confirmation; cleanup checks that generation before deletion.
+- `TabsSession.confirmSnapshot({ path, text, sha })` is synchronous:
+  it updates the blob SHA and clears only matching local text. Newer
+  document text remains dirty in WorkingTree on the committed base.
+  A closed file uses its WorkingTree entry without recreating a tab.
+  Empty text is valid in both APIs.
+
+**Lesson from the intermediate implementation.** Checking generation
+only after awaiting deletion protected status but still deleted a draft
+after destroy or same-path reopen. Two tests were observed RED on that
+intermediate working copy, then GREEN with the permission callback.
+They guard recovery data, not just the visible status.
+
+Tests: `test/autosave-confirmation.test.js`,
+`test/autosave-confirmation-generation.test.js`,
+`test/tabs-confirmation.test.js`; transaction permission guards in
+`test/draft-confirmation-current.test.js`. After `7396e21`:
+552/552 unit tests, module integration probes and the existing E2E suite
+passed. The E2E run verifies existing behaviour, not new Commit wiring.
+
+**Integration is not finished.** Commit UI and the existing single-file
+Save notification path are unchanged and do not use these snapshot APIs.
+Commit clearing newer edits or leaving Autosave dirty after success is
+not yet fixed in the user-facing application.
 
 ## Draft sweep: never delete a draft because its path is missing from the tree
 
