@@ -193,7 +193,13 @@ export function createBodyCache(limit = BODY_CACHE_LIMIT) {
 
 /** Everything the UI needs from one search hit, in a plain object. */
 function toResult(hit) {
-  return { path: hit.path, title: hit.title, score: hit.score };
+  return {
+    path: hit.path, title: hit.title, score: hit.score,
+    terms: [...hit.terms],
+    queryTerms: [...hit.queryTerms],
+    match: Object.fromEntries(Object.entries(hit.match)
+      .map(([term, fields]) => [term, [...fields]])),
+  };
 }
 
 /**
