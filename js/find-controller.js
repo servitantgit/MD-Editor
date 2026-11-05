@@ -57,6 +57,23 @@ export function createFindController(cm, opts = {}) {
     });
   }
 
+  // Read current mark positions; cached offsets become stale after edits.
+  function getMapState() {
+    const rows = new Set();
+    for (const entry of entries) {
+      const range = rangeOf(entry);
+      if (!range) continue;
+      const lastLine = range.to.line > range.from.line && range.to.ch === 0
+        ? range.to.line - 1 : range.to.line;
+      for (let line = range.from.line; line <= lastLine; line++) rows.add(line);
+    }
+    const currentRange = active ? rangeOf(active) : null;
+    return {
+      lines: [...rows].sort((a, b) => a - b),
+      currentLine: currentRange ? currentRange.from.line : null
+    };
+  }
+
   function getState() {
     const live = liveEntries();
     const index = active ? live.indexOf(active) : -1;
@@ -159,5 +176,5 @@ export function createFindController(cm, opts = {}) {
     destroyed = true;
   }
 
-  return { setQuery, setRanges, next, refresh, getState, clear, destroy };
+  return { setQuery, setRanges, next, refresh, getState, getMapState, clear, destroy };
 }

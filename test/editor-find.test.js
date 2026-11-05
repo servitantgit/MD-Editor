@@ -200,3 +200,22 @@ test('Editor Find: state callback updates after editing and clears with search',
     mock.timers.reset();
   }
 });
+
+test('Editor Find: map getter exposes live search rows and clears them with Find', () => {
+  const f = fixture();
+  try {
+    assert.equal(typeof f.editor.getFindMapState, 'function',
+      'Editor must expose the map state getter');
+    assert.deepEqual(f.editor.getFindMapState(), {
+      lines: [], currentLine: null
+    });
+    f.editor.findInFile('cat');
+    assert.deepEqual(f.editor.getFindMapState(), {
+      lines: [0], currentLine: 0
+    });
+    f.editor.clearFind();
+    assert.deepEqual(f.editor.getFindMapState(), {
+      lines: [], currentLine: null
+    });
+  } finally { f.close(); }
+});

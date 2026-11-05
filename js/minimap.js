@@ -22,6 +22,8 @@ export function createMinimap(cm, canvasEl, opts = {}) {
     viewport: 'rgba(88, 166, 255, 0.20)',
     viewportBorder: 'rgba(88, 166, 255, 0.65)',
     cursor: '#f0883e',
+    search: '#ffd54f',
+    searchCurrent: '#ff8c42',
     ...(opts.colors || {}),
   };
 
@@ -30,6 +32,8 @@ export function createMinimap(cm, canvasEl, opts = {}) {
   let raf = 0;
   let paintTimer = 0;
   let boundPreview = null;
+  const getSearchState = typeof opts.getSearchState === 'function'
+    ? opts.getSearchState : () => ({ lines: [], currentLine: null });
   const ro = typeof ResizeObserver !== 'undefined'
     ? new ResizeObserver(() => schedulePaint())
     : null;
@@ -180,6 +184,28 @@ export function createMinimap(cm, canvasEl, opts = {}) {
       ctx.fillStyle = colors.cursor;
       ctx.fillRect(0, cy - ratio, w, 2 * ratio);
     } catch (_) { /* ignore */ }
+
+    // Search ticks are paint-only; never change pane scroll positions.
+    let searchState;
+    try { searchState = getSearchState(); } catch (_) { searchState = null; }
+    const matchingLines = new Set(
+      (Array.isArray(searchState?.lines) ? searchState.lines : [])
+        .filter((line) => Number.isInteger(line) && line >= 0 && line < lineCount)
+    );
+    const tickWidth = Math.min(w, 6 * ratio);
+    const tickHeight = 2 * ratio;
+    for (const line of matchingLines) {
+      if (line === searchState.currentLine) continue;
+      const y = ((line + 0.5) / lineCount) * h;
+      ctx.fillStyle = colors.search;
+      ctx.fillRect(w - tickWidth, y - tickHeight / 2, tickWidth, tickHeight);
+    }
+    // Paint the current tick last so dense neighboring rows cannot hide it.
+    if (matchingLines.has(searchState?.currentLine)) {
+      const y = ((searchState.currentLine + 0.5) / lineCount) * h;
+      ctx.fillStyle = colors.searchCurrent;
+      ctx.fillRect(w - tickWidth, y - tickHeight / 2, tickWidth, tickHeight);
+    }
   }
 
   /** Map pointer Y on the canvas to a document line and centre the viewport there. */

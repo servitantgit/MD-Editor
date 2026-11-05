@@ -1052,6 +1052,12 @@ closeImageMenu();
     return n;
   }
 
+  // Read tracked positions without creating a search controller.
+  function getFindMapState() {
+    return findController ? findController.getMapState()
+      : { lines: [], currentLine: null };
+  }
+
   function clearFind() {
     clearTimeout(findRefreshTimer);
     findRefreshTimer = null;
@@ -1159,6 +1165,7 @@ closeImageMenu();
     replaceInFile,
     replaceAllInFile,
     clearFind,
+    getFindMapState,
     toggleLineWrapping,
     toggleHeadingFolds,
     unfoldAtLine,

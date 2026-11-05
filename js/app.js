@@ -1347,6 +1347,8 @@ function setupMoreFileMenu() {
 }
 
 function renderFindState(state) {
+  // Paint-only refresh, including when Find is cleared or hidden.
+  if (minimapHandle) minimapHandle.refresh();
   if (!els.findCount) return;
   if (!els.findBar || els.findBar.classList.contains('hidden')
       || (!state.query && state.mode !== 'search')) {
@@ -1615,6 +1617,8 @@ function ensureMinimap() {
     getPreviewEl: () => document.querySelector('.editor-area .EasyMDEContainer .editor-preview-side')
       || document.querySelector('.editor-preview-side'),
     isPreviewActive: () => layoutMode === 'preview',
+    getSearchState: () => editorHandle
+      ? editorHandle.getFindMapState() : { lines: [], currentLine: null },
   });
 }
 

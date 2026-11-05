@@ -2155,6 +2155,95 @@ with sync_playwright() as p:
     assert len(j_contents_writes) == k_content_count
     print("\u2713 Editing refreshes highlights without navigation; Escape removes them without remote writes")
 
+    # --- M. SEARCH TICKS AND LIVE SYNC ---
+    # Drawing and dense-row ordering have module RED coverage.
+    print("\n--- M. Minimap search ticks and unchanged Live sync ---")
+    page.evaluate("(text) => document.querySelector('.CodeMirror').CodeMirror.setValue(text)", MD_CONTENT)
+    page.click('#layout-toggle .layout-btn[data-mode="split"]')
+    page.wait_for_function("""() => {
+        const pv = document.querySelector('.editor-area .EasyMDEContainer .editor-preview-side');
+        return pv && pv.querySelectorAll('.md-img-wrap').length >= 2
+            && !pv.querySelector('.md-img-wrap.loading')
+            && pv.scrollHeight > pv.clientHeight + 200;
+    }""", timeout=10000)
+    if page.locator("#minimap-wrap:not(.hidden)").count():
+        page.click("#btn-minimap")
+
+    def m_pixels():
+        return page.evaluate("""() => {
+            const c = document.getElementById('minimap');
+            const d = c.getContext('2d').getImageData(0,0,c.width,c.height).data;
+            let normal = 0, current = 0;
+            for (let i = 0; i < d.length; i += 4) {
+                if (d[i] === 255 && d[i+1] === 213 && d[i+2] === 79) normal++;
+                if (d[i] === 255 && d[i+1] === 140 && d[i+2] === 66) current++;
+            }
+            return {normal, current};
+        }""")
+
+    def m_settle():
+        return page.evaluate("""() => new Promise((resolve, reject) => {
+            const cm = document.querySelector('.CodeMirror').CodeMirror;
+            const pv = document.querySelector('.editor-area .EasyMDEContainer .editor-preview-side');
+            let last = '', same = 0, frames = 0;
+            const step = () => {
+                const value = cm.getScrollInfo().top + ':' + pv.scrollTop;
+                same = value === last ? same + 1 : 0;
+                last = value;
+                if (same >= 8) return resolve({
+                    source: cm.getScrollInfo().top, preview: pv.scrollTop
+                });
+                if (++frames > 300) return reject(new Error('M: panes did not settle'));
+                requestAnimationFrame(step);
+            };
+            requestAnimationFrame(step);
+        })""")
+
+    def m_check_sync(label):
+        page.evaluate("document.querySelector('.CodeMirror').CodeMirror.scrollTo(null,1000)")
+        m_settle()
+        page.evaluate("document.querySelector('.CodeMirror').CodeMirror.scrollTo(null,1600)")
+        forward = m_settle()
+        assert forward["source"] > 0 and forward["preview"] > 100, (label, forward)
+        page.evaluate("""() => {
+            document.querySelector('.editor-area .EasyMDEContainer .editor-preview-side').scrollTop = 0;
+        }""")
+        backward = m_settle()
+        assert backward["source"] < 50, (label, backward)
+
+    page.keyboard.press("Control+f")
+    page.fill("#find-input", "Line 10")
+    page.press("#find-input", "Enter")
+    assert page.locator("#minimap-wrap.hidden").count() == 1
+    assert editor_text() == MD_CONTENT
+    page.click("#btn-minimap")
+    wait_until(lambda: m_pixels()["normal"] > 0 and m_pixels()["current"] > 0,
+               what="search ticks after opening minimap")
+    m_first_count = page.inner_text("#find-count")
+    page.click("#find-next")
+    assert page.inner_text("#find-count") != m_first_count
+    # Wait for the following paint, not merely the counter update.
+    page.wait_for_timeout(200)
+    m_next_pixels = m_pixels()
+    assert m_next_pixels["normal"] > 0 and m_next_pixels["current"] > 0, m_next_pixels
+    assert editor_text() == MD_CONTENT
+    print("\u2713 Minimap shows all search rows and retains the current tick after Next")
+
+    m_check_sync("map open, Find active")
+    print("\u2713 Live sync works both ways with search marks and the minimap open")
+
+    page.click("#find-close")
+    wait_until(lambda: m_pixels() == {"normal": 0, "current": 0},
+               what="search ticks to clear")
+    assert l_snapshot()["marks"] == 0 and l_snapshot()["currentMarks"] == 0
+    assert editor_text() == MD_CONTENT
+    page.click("#btn-minimap")
+    m_check_sync("map closed")
+    assert len(k_writes) == l_write_count
+    assert len(j_refs) == k_ref_count
+    assert len(j_contents_writes) == k_content_count
+    print("\u2713 Closing Find clears canvas ticks; Live sync still works with the map closed")
+
     assert not page_errors, f"unhandled page errors: {page_errors}"
     browser.close()
 
