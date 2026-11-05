@@ -1919,6 +1919,131 @@ with sync_playwright() as p:
     assert not j_contents_writes
     print("\u2713 Next Commit saves the remaining changes and clears their draft")
 
+    # --- K. HISTORY / RESTORE GUARD ---
+    # Ordinary behaviour already passed a browser probe; no new feature or fix.
+    print("\n--- K. History / Restore: another note, tabs and draft recovery ---")
+    k_commit = "abc1234abcdef"
+    k_historical = "# Commit B\n\nK HISTORICAL VERSION\n"
+    k_current_b = j_remote[j_b]["text"]
+    k_current_a = j_remote[j_a]["text"]
+    k_reads = []
+    k_writes = []
+    k_ref_count = len(j_refs)
+    k_content_count = len(j_contents_writes)
+
+    def k_api(route, request):
+        from urllib.parse import urlsplit, unquote, parse_qs
+        url = urlsplit(request.url)
+        path = unquote(url.path)
+        query = parse_qs(url.query)
+        if request.method != "GET":
+            k_writes.append({"method": request.method, "path": path})
+            route.abort()
+            return
+        if path == "/repos/test-owner/test-repo/commits":
+            reply = [{
+                "sha": k_commit,
+                "commit": {
+                    "message": "K historical edit",
+                    "author": {"name": "Tester", "date": "2026-11-01T12:00:00Z"}
+                }
+            }]
+        elif path == "/repos/test-owner/test-repo/commits/" + k_commit:
+            reply = {
+                "sha": k_commit, "commit": {"message": "K historical edit"},
+                "files": [{
+                    "filename": j_b, "sha": "k-historical-blob",
+                    "status": "modified", "additions": 1, "deletions": 1,
+                    "patch": "@@ -1,3 +1,3 @@\n # Commit B\n \n-B SNAPSHOT\n+K HISTORICAL VERSION"
+                }]
+            }
+        elif path == "/repos/test-owner/test-repo/contents/" + j_b and query.get("ref") == [k_commit]:
+            k_reads.append({"path": j_b, "ref": k_commit})
+            reply = {
+                "content": base64.b64encode(k_historical.encode("utf-8")).decode(),
+                "sha": "k-historical-blob"
+            }
+        else:
+            route.fallback()
+            return
+        route.fulfill(status=200, content_type="application/json",
+                      body=json.dumps(reply))
+
+    page.route(re.compile(r"https://api\.github\.com/.*"), k_api)
+    # Reload first: the active tab is A; B is a lazy restored background tab.
+    page.reload(wait_until="networkidle")
+    page.wait_for_function("document.getElementById('btn-save').disabled === false")
+    assert page.inner_text("#current-file") == j_a
+    assert editor_text() == k_current_a
+    assert j_drafts() == []
+
+    page.click("#btn-history")
+    page.wait_for_selector("#history-list .hist-item[data-sha='" + k_commit + "']")
+    assert page.locator("#history-list .hist-msg").inner_text() == "K historical edit"
+    page.click("#history-list .hist-item[data-sha='" + k_commit + "']")
+    page.wait_for_selector("#history-detail .btn-restore")
+    assert page.locator("#history-detail .diff-fname").inner_text() == j_b
+    assert page.locator("#history-detail .diff-del").inner_text() == "-B SNAPSHOT"
+    assert page.locator("#history-detail .diff-add").inner_text() == "+K HISTORICAL VERSION"
+
+    page.once("dialog", lambda dialog: dialog.dismiss())
+    page.click("#history-detail .btn-restore")
+    assert editor_text() == k_current_a
+    assert page.inner_text("#current-file") == j_a
+    assert k_reads == []
+    assert j_drafts() == []
+    assert not k_writes
+    print("\u2713 History shows the selected file and diff; cancelling Restore changes nothing")
+
+    page.once("dialog", lambda dialog: dialog.accept())
+    page.click("#history-detail .btn-restore")
+    page.wait_for_function(
+        "document.getElementById('current-file').textContent === 'Notes/Second note.md'")
+    page.wait_for_function(
+        "document.querySelector('.CodeMirror').CodeMirror.getValue().includes('K HISTORICAL VERSION')")
+    assert editor_text() == k_historical
+    assert page.locator("#tab-bar .tab.active.dirty").count() == 1
+    assert page.inner_text("#commit-badge") == "1"
+    assert not page.is_disabled("#btn-discard")
+    assert k_reads == [{"path": j_b, "ref": k_commit}]
+    assert j_remote[j_b]["text"] == k_current_b
+    assert not k_writes
+
+    page.click("#tab-bar .tab:has-text('Test note.md') .tab-label")
+    page.wait_for_function(
+        "document.getElementById('current-file').textContent === 'Notes/Test note.md'")
+    page.wait_for_function("document.getElementById('btn-save').disabled === false")
+    assert editor_text() == k_current_a, f"K tab A text mismatch: {editor_text()!r}"
+    page.click("#tab-bar .tab:has-text('Second note.md') .tab-label")
+    page.wait_for_function(
+        "document.getElementById('current-file').textContent === 'Notes/Second note.md'")
+    page.wait_for_function("document.getElementById('btn-save').disabled === false")
+    assert editor_text() == k_historical, f"K tab B text mismatch: {editor_text()!r}"
+    assert page.locator("#tab-bar .tab.active.dirty").count() == 1
+    k_draft = j_drafts()
+    assert len(k_draft) == 1 and k_draft[0]["path"] == j_b, k_draft
+    assert k_draft[0]["text"] == k_historical, k_draft
+    assert k_draft[0]["baseSha"] == j_remote[j_b]["sha"], k_draft
+    assert not k_writes
+    print("\u2713 Restore opens the other note as local work; tab switches preserve it and leave A unchanged")
+
+    page.reload(wait_until="networkidle")
+    page.wait_for_function("document.getElementById('btn-save').disabled === false")
+    assert page.inner_text("#current-file") == j_b
+    page.wait_for_selector("#draft-banner:not(.hidden)")
+    assert editor_text() == k_current_b
+    page.click("#draft-keep")
+    page.wait_for_function(
+        "document.querySelector('.CodeMirror').CodeMirror.getValue().includes('K HISTORICAL VERSION')")
+    assert editor_text() == k_historical
+    assert page.locator("#tab-bar .tab.active.dirty").count() == 1
+    assert not k_writes
+    assert len(j_refs) == k_ref_count
+    assert len(j_contents_writes) == k_content_count
+    assert j_remote[j_a]["text"] == k_current_a
+    assert j_remote[j_b]["text"] == k_current_b
+    print("\u2713 Restored draft survives reload; Keep local recovers it without any remote write")
+
     assert not page_errors, f"unhandled page errors: {page_errors}"
     browser.close()
 
