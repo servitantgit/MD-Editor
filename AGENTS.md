@@ -874,6 +874,22 @@ PUTs once; draft survives reload; 409 retry / Reload / Overwrite still work. It
 never waits out a 5-minute max (CI flake) and never claims a cold-start reload
 keeps an in-memory-only index.
 
+## Wrap / Fold: ordinary browser guards
+
+`033d1c3` adds E2E scenario O; application code is unchanged.
+The ordinary browser probe and full E2E passed these checks:
+- Wrap changes the visual height of a long line, toggles back and
+  preserves exact text and text undo history.
+- Fold collapses three heading sections in the fixture; the next
+  click expands them without changing text or text undo history.
+- Find selects its exact target inside a folded section and unfolds
+  the section hiding it, with no text edit or remote write.
+
+These are guards of existing behaviour, not RED tests for a new fix.
+Baseline: 612/612 unit tests and full E2E including O passed.
+Fold state across tab switches and manual production verification
+are not established by this coverage. Scroll-sync code is unchanged.
+
 ## Browser tests: wait for the completed file open, not just its label
 
 `openFile()` updates the current-file label before asynchronous draft

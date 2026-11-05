@@ -21,6 +21,10 @@ Prefer automated coverage in `test/*.test.js` and `e2e_smoke_test.py` when pract
 
 ## Editor / preview
 
+- [ ] Wrap toggles visual long-line wrapping without adding line breaks to the file or changing text undo history.
+- [ ] Fold collapses heading sections; the next click expands them. Text and text undo history remain unchanged.
+- [ ] Find selects the exact match inside a folded section and unfolds the section hiding it, without editing text.
+
 - [ ] Source / Live / Preview layouts: Preview is full width with source hidden; Live is 50/50; Source is editor only.
 - [ ] Preview follows the active tab after a switch (no stale document).
 - [ ] Inline images: Space/Backspace near an image keep the caret local (no jump to end).
