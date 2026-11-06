@@ -71,6 +71,8 @@ Prefer automated coverage in `test/*.test.js` and `e2e_smoke_test.py` when pract
 - [ ] Moving or renaming a note does not change links or images inside fenced code blocks.
 - [ ] Moving a note leaves `` `[a](b.md)` `` (inline code) unchanged, but still updates ``[`b.md`](b.md)``.
 - [ ] Renaming, moving (drag) or deleting a folder makes exactly ONE commit in the GitHub history (`Rename folder X to Y` / `Delete folder X`); links into the folder are updated in that same commit.
+- [ ] A folder dragged from the desktop onto a folder row lands inside that folder in ONE commit (`Upload folder X`); onto the root strip it lands in the root. Empty files are uploaded; `.git`, `Thumbs.db` and `desktop.ini` are skipped.
+- [ ] Dropping a folder whose paths already exist (any letter case) writes nothing and names the conflict; dragging folders inside the tree still moves them.
 - [ ] Renaming a note updates `[[Old name]]` (only if no other note has that name) and `[[Folder/Old name|alias]]` in other notes; moving it updates `[[Folder/Name]]` and leaves `[[Name]]` as it is.
 
 ## Search / backlinks / history

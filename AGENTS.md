@@ -890,6 +890,44 @@ Baseline: 612/612 unit tests and full E2E including O passed.
 Fold state across tab switches and manual production verification
 are not established by this coverage. Scroll-sync code is unchanged.
 
+## Folder upload from disk: target folder, one commit
+
+`49fd159` fixes `js/folder-upload.js` (added in `d365b89`, never tested):
+folders dragged from the OS were written to the repository root, one
+Contents PUT per file, ignoring the folder under the cursor.
+- The dropzone reacts only when `dataTransfer.types` includes `Files`.
+  Internal tree drags carry strings only and are left to the tree: no
+  preventDefault, no overlay.
+- Target, read synchronously at drop time: folder row -> that folder;
+  file row -> its folder; `[data-target-folder]` strip -> active folder;
+  root strip or anything else -> root.
+- One `commitFiles` call (Git Data API, ref update with `force: false`);
+  no `putFile`. Message `Upload folder X` / `Upload X` / `Upload N items`
+  (N = top-level items).
+- Before writing: a fresh `getTree`. Case-insensitive conflicts (same
+  path, file over a folder, folder over a file, or a clash inside the
+  drop) cancel the whole upload; nothing is written.
+- Skipped: the `.git` folder, `desktop.ini`, `Thumbs.db`, `.DS_Store`,
+  `~$*` (Office lock files); counted as items. 0-byte files are uploaded (GitHub accepted an
+  empty blob: probe returned 201 and SHA e69de29).
+- One upload at a time (flag reset in finally). Client, branch and session
+  generation are captured at drop; a session change skips reload and
+  status, and the commit stays in the repo dropped into (deliberate).
+
+Deliberately not handled: a tree change between the conflict check and
+the commit (the non-forced ref update protects the branch); GitHub size
+limits and memory for large files; a truncated tree (B2); empty folders
+(git stores none). A real OS drop cannot be automated: E2E Q uses fake
+entries; the real drop was verified manually in production.
+
+Lesson: inherited code without tests looked like a working feature in
+CHANGELOG but wrote to the wrong place, so the user saw it as broken.
+A listed feature is not covered until a test or a probe proves it.
+
+Baseline: 636/636 unit tests (17 RED and 4 guards in
+`test/folder-upload.test.js`) and full E2E including I and Q.
+Production verified by the user.
+
 ## Sidebar Search: clear button
 
 `c37bcc0` adds `#btn-search-clear` (type="button", aria-label "Clear search")
