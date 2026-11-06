@@ -81,3 +81,130 @@ test('resolveAllImages respects stillCurrent() and aborts stale updates (race-co
   // src must NOT have updated, because the render is already stale
   assert.match(img.getAttribute('src'), /^data:image\/gif/);
 });
+
+// Drag-to-resize in Preview (attachResizeHandles in js/image-preview.js) and
+// the <img ... width="N"> line it writes. Real pointer events, real layout and
+// undo are checked by hand in production (see AGENTS.md).
+async function resizeFixture() {
+  const { attachResizeHandles } = await import('../js/image-preview.js');
+  const text = 'intro\n![a](x.png) and ![b](../Asset/y.png)\nend';
+  const dom = new JSDOM('<!doctype html><body><div id="p"></div></body>');
+  const el = dom.window.document.getElementById('p');
+  el.innerHTML = markdownToCanonicalHtml(text, marked);
+  const lines = text.split('\n');
+  const edits = [];
+  const cm = {
+    getLine: (i) => lines[i],
+    replaceRange(t, from, to) {
+      edits.push({ t, from, to });
+      lines[from.line] = lines[from.line].slice(0, from.ch) + t + lines[from.line].slice(to.ch);
+    },
+  };
+  attachResizeHandles(el, cm);
+  attachResizeHandles(el, cm);
+  const wraps = el.querySelectorAll('.md-img-wrap');
+  const wrap = wraps[1];
+  const img = wrap.querySelector('img');
+  const handle = wrap.querySelector('.md-img-resize-handle');
+  const badge = wrap.querySelector('.md-img-size-badge');
+  img.getBoundingClientRect = () => ({ width: parseInt(img.style.width, 10) || 200 });
+  const captured = [];
+  handle.setPointerCapture = (id) => captured.push(id);
+  const fire = (type, x) => {
+    const e = new dom.window.Event(type, { bubbles: true, cancelable: true });
+    Object.defineProperty(e, 'clientX', { value: x });
+    Object.defineProperty(e, 'pointerId', { value: 7 });
+    handle.dispatchEvent(e);
+    return e;
+  };
+  return { dom, lines, edits, wraps, wrap, img, badge, captured, fire };
+}
+
+test('resize (guard): dragging the handle of the second image writes its width into that image only, once', async () => {
+  const f = await resizeFixture();
+  try {
+    assert.equal(f.wraps.length, 2);
+    assert.equal(f.img.getAttribute('data-md-line'), '1');
+    assert.equal(f.img.getAttribute('data-md-occ'), '1');
+    assert.equal(f.img.getAttribute('data-md-src'), '../Asset/y.png');
+    assert.equal(f.img.getAttribute('alt'), 'b');
+
+    const down = f.fire('pointerdown', 100);
+    assert.equal(down.defaultPrevented, true);
+    assert.equal(f.wrap.classList.contains('resizing'), true);
+    assert.deepEqual(f.captured, [7]);
+
+    f.fire('pointermove', 150);
+    assert.equal(f.img.style.width, '250px');
+    assert.equal(f.img.style.height, 'auto');
+    assert.equal(f.badge.textContent, '250px');
+
+    f.fire('pointerup', 150);
+    assert.equal(f.wrap.classList.contains('resizing'), false);
+    assert.deepEqual(f.edits, [{
+      t: '![a](x.png) and <img src="../Asset/y.png" alt="b" width="250">',
+      from: { line: 1, ch: 0 },
+      to: { line: 1, ch: 36 },
+    }], 'one edit although attachResizeHandles ran twice');
+    assert.equal(f.lines[1], '![a](x.png) and <img src="../Asset/y.png" alt="b" width="250">');
+
+    f.fire('pointermove', 400);
+    assert.equal(f.img.style.width, '250px', 'moving after release must not resize');
+    assert.equal(f.edits.length, 1);
+  } finally {
+    f.dom.window.close();
+  }
+});
+
+test('resize (guard): the width never goes below 20px', async () => {
+  const f = await resizeFixture();
+  try {
+    f.fire('pointerdown', 100);
+    f.fire('pointermove', -5000);
+    assert.equal(f.img.style.width, '20px');
+    assert.equal(f.badge.textContent, '20px');
+    f.fire('pointerup', -5000);
+    assert.equal(f.lines[1], '![a](x.png) and <img src="../Asset/y.png" alt="b" width="20">');
+  } finally {
+    f.dom.window.close();
+  }
+});
+
+test('resize (guard): the <img> line written by resize is read by Preview, move/rename and the image audit', async () => {
+  // Architecture rule 3. Names without & or " on purpose: an & in an <img>
+  // src or alt is not decoded (see AGENTS.md).
+  const { setImageAttrsInLine, injectCanonicalImageTags } = await import('../js/markdown-tokens.js');
+  const { updateReferencesInFile, rewriteOwnRelativeLinks } = await import('../js/reference-rewriter.js');
+  const { auditImages } = await import('../js/image-audit.js');
+  const NOTE = 'A/B/n.md';
+  const cases = [
+    ['../../Asset/1700_my__shot___1_.png', 'Asset/1700_my__shot___1_.png', 'my shot (1).png', '../Asset/1700_my__shot___1_.png'],
+    ['../../Asset/ATS_(BOB_Load)_image_0001.jpg', 'Asset/ATS_(BOB_Load)_image_0001.jpg', 'x', '../Asset/ATS_(BOB_Load)_image_0001.jpg'],
+    ['../../Asset/a%20b.png', 'Asset/a b.png', 'x', '../Asset/a%20b.png'],
+  ];
+  for (const [src, path, alt, srcAfterNoteMove] of cases) {
+    const tag = (s, w) => '<img src="' + s + '" alt="' + alt + '" width="' + w + '">';
+    const md = '![' + alt + '](' + src + ')';
+    const resized = setImageAttrsInLine(md, 0, { src, alt, width: 300 });
+    assert.equal(resized, tag(src, 300), path);
+    const text = 'before\n' + resized + '\nafter\n';
+
+    const canon = injectCanonicalImageTags(text);
+    assert.ok(canon.includes('data-md-src="' + src + '"'), 'Preview keeps the src: ' + path);
+    assert.ok(canon.includes('width="300"'), 'Preview keeps the width: ' + path);
+
+    const moved = updateReferencesInFile(text, 'A/B', path, 'Asset/moved.png');
+    assert.equal(moved.changed, true, 'moving the image updates the tag: ' + path);
+    assert.equal(moved.text.split('\n')[1], tag('../../Asset/moved.png', 300));
+
+    assert.equal(rewriteOwnRelativeLinks(text, 'A/B', 'A').split('\n')[1], tag(srcAfterNoteMove, 300));
+
+    const audit = auditImages({ files: [{ path: NOTE, sha: 'n' }, { path, sha: 'p' }], texts: new Map([[NOTE, text]]) });
+    assert.equal(audit.valid, true, path);
+    assert.equal(audit.used.get(path), 1, path);
+    assert.deepEqual(audit.unused, []);
+    assert.deepEqual(audit.reasons, []);
+
+    assert.equal(setImageAttrsInLine(resized, 0, { src, alt, width: 150 }), tag(src, 150), 'resize again changes only the width');
+  }
+});

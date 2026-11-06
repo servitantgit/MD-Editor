@@ -686,3 +686,241 @@ test('paste (guard): image items go to onImagePaste in order and cancel the past
 
   handle.destroy();
 });
+
+// The image context menu in Source (showImageMenu in js/editor.js) driven
+// through the real createEditor. EasyMDE/CodeMirror are fakes: the text is an
+// array of lines and marks keep real positions. Real CodeMirror marks, undo,
+// the clipboard and the new tab are checked by hand in production.
+const MENU_TOKEN = '![a](../img/x.png)';
+const MENU_DOC = ['intro', MENU_TOKEN, 'end'];
+const MENU_TEXT_DOC = ['intro', 'see ' + MENU_TOKEN + ' here', 'end'];
+const menuLabel = (s) => s.replace(/[^\x20-\x7E]/g, '').trim();
+
+async function imageMenuEditor(initial, { resolveTo = 'https://cdn.test/x.png', trapLongTimers = false } = {}) {
+  const names = ['EasyMDE', 'ResizeObserver', 'requestAnimationFrame', 'document', 'window', 'DOMParser'];
+  const saved = {};
+  for (const n of names) saved[n] = globalThis[n];
+  const savedNavigator = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+  const savedCreateObjectURL = URL.createObjectURL;
+  const savedSetTimeout = globalThis.setTimeout;
+  const restore = () => {
+    for (const n of names) {
+      if (saved[n] === undefined) delete globalThis[n];
+      else globalThis[n] = saved[n];
+    }
+    if (savedNavigator) Object.defineProperty(globalThis, 'navigator', savedNavigator);
+    else delete globalThis.navigator;
+    URL.createObjectURL = savedCreateObjectURL;
+    globalThis.setTimeout = savedSetTimeout;
+  };
+
+  const dom = new JSDOM('<!doctype html><body></body>', { url: 'https://md-edit.test/' });
+  const win = dom.window;
+  let lines = initial.slice();
+  let sel = { line: 0, ch: 0 };
+  const log = { clip: [], opened: [], blobs: [], edits: 0, focus: 0, longTimers: 0 };
+  const text = () => lines.join('\n');
+  const idx = (p) => lines.slice(0, p.line).reduce((s, l) => s + l.length + 1, 0) + p.ch;
+  const pos = (i) => {
+    let line = 0;
+    while (line < lines.length - 1 && i > lines[line].length) { i -= lines[line].length + 1; line++; }
+    return { line, ch: i };
+  };
+  const widgets = [];
+  const inputField = win.document.createElement('textarea');
+  win.document.body.appendChild(inputField);
+  const cm = {
+    handlers: {},
+    on(ev, fn) { (this.handlers[ev] ||= []).push(fn); },
+    off(ev, fn) { this.handlers[ev] = (this.handlers[ev] || []).filter((x) => x !== fn); },
+    refresh() {},
+    getInputField: () => inputField,
+    getValue: text,
+    posFromIndex: pos,
+    markText(from, to, opts) {
+      const m = {
+        from, to, cleared: false,
+        clear() { this.cleared = true; },
+        find() { return this.cleared ? undefined : { from: this.from, to: this.to }; },
+      };
+      if (opts && opts.replacedWith) widgets.push(opts.replacedWith);
+      return m;
+    },
+    getRange: (a, b) => text().slice(idx(a), idx(b)),
+    replaceRange(t, a, b = a) {
+      const s = text();
+      lines = (s.slice(0, idx(a)) + t + s.slice(idx(b))).split('\n');
+      log.edits++;
+    },
+    getLine: (i) => lines[i],
+    lastLine: () => lines.length - 1,
+    setCursor(p) { sel = p; },
+    listSelections: () => [{ anchor: sel, head: sel }],
+    setSelection(a) { sel = a; },
+    operation(fn) { fn(); },
+    focus() { log.focus++; },
+  };
+  globalThis.EasyMDE = function () { return { codemirror: cm, toTextArea() {}, value: text }; };
+  globalThis.ResizeObserver = class { observe() {} unobserve() {} disconnect() {} };
+  globalThis.requestAnimationFrame = (fn) => { fn(); return 0; };
+  globalThis.document = win.document;
+  globalThis.window = win;
+  globalThis.DOMParser = win.DOMParser;
+  win.open = (url, target, features) => { log.opened.push([url, target, features]); return null; };
+  Object.defineProperty(globalThis, 'navigator', {
+    configurable: true,
+    value: { clipboard: { writeText: async (t) => { log.clip.push(t); } } },
+  });
+  URL.createObjectURL = (blob) => { log.blobs.push([blob.type, blob.size]); return 'blob:fake/1'; };
+  if (trapLongTimers) {
+    // openImageLink revokes the blob URL after 60 s; do not keep the test alive.
+    globalThis.setTimeout = (fn, ms, ...args) => {
+      if (ms >= 60000) { log.longTimers++; return 0; }
+      return savedSetTimeout(fn, ms, ...args);
+    };
+  }
+  const tick = () => new Promise((r) => savedSetTimeout(r, 0));
+
+  let handle = null;
+  try {
+    const { createEditor } = await import('../js/editor.js');
+    let currentPath = null;
+    handle = createEditor(win.document.createElement('textarea'), {
+      marked: {},
+      imageResolver: { resolve: async () => resolveTo },
+      getCurrentPath: () => currentPath,
+      onImageUploadRequest: () => {},
+      onImagePaste: () => {},
+    });
+    currentPath = 'docs/n.md';
+    handle.refreshInlineImages();
+    await tick();
+  } catch (e) {
+    try { if (handle) handle.destroy(); } catch (_) { /* ignore */ }
+    win.close();
+    restore();
+    throw e;
+  }
+
+  const menu = () => win.document.querySelector('.image-context-menu');
+  return {
+    win, log, widgets, handle, tick, menu,
+    lines: () => lines.slice(),
+    sel: () => sel,
+    open: () => widgets[0].dispatchEvent(new win.MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 10, clientY: 20 })),
+    items: () => Array.from(menu().querySelectorAll('button')).map((b) => [menuLabel(b.textContent), b.disabled]),
+    pick(name) {
+      const b = Array.from(menu().querySelectorAll('button')).find((x) => menuLabel(x.textContent) === name);
+      assert.ok(b, 'menu item ' + name);
+      b.dispatchEvent(new win.MouseEvent('click', { bubbles: true }));
+    },
+    teardown() {
+      try { handle.destroy(); } finally { win.close(); restore(); }
+    },
+  };
+}
+
+test('image menu (guard): six items in order, Move up/down disabled at the edges, closes on Escape, outside click and destroy', async () => {
+  let env = await imageMenuEditor(MENU_DOC);
+  try {
+    assert.equal(env.widgets.length, 1);
+    assert.equal(env.open(), false, 'the browser menu must be cancelled');
+    assert.deepEqual(env.items(), [
+      ['Move up', false], ['Move down', false], ['Cut', false],
+      ['Copy', false], ['Delete from text', false], ['Open image', false],
+    ]);
+    env.win.document.dispatchEvent(new env.win.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    assert.equal(env.menu(), null, 'Escape closes the menu');
+    env.open();
+    env.win.document.body.dispatchEvent(new env.win.MouseEvent('click', { bubbles: true }));
+    assert.equal(env.menu(), null, 'an outside click closes the menu');
+    env.open();
+    assert.ok(env.menu());
+    env.handle.destroy();
+    assert.equal(env.menu(), null, 'destroy closes the menu');
+  } finally {
+    env.teardown();
+  }
+
+  env = await imageMenuEditor([MENU_TOKEN]);
+  try {
+    env.open();
+    assert.deepEqual(env.items(), [
+      ['Move up', true], ['Move down', true], ['Cut', false],
+      ['Copy', false], ['Delete from text', false], ['Open image', false],
+    ]);
+  } finally {
+    env.teardown();
+  }
+});
+
+test('image menu (guard): Copy, Cut and Delete from text act on the image token only', async () => {
+  const cases = [
+    ['Copy', MENU_DOC, MENU_DOC, 0, [MENU_TOKEN]],
+    ['Cut', MENU_DOC, ['intro', '', 'end'], 1, [MENU_TOKEN]],
+    ['Delete from text', MENU_DOC, ['intro', '', 'end'], 1, []],
+    ['Cut', MENU_TEXT_DOC, ['intro', 'see  here', 'end'], 1, [MENU_TOKEN]],
+    ['Delete from text', MENU_TEXT_DOC, ['intro', 'see  here', 'end'], 1, []],
+  ];
+  for (const [name, doc, want, edits, clip] of cases) {
+    const env = await imageMenuEditor(doc);
+    try {
+      env.open();
+      env.pick(name);
+      await env.tick();
+      assert.deepEqual(env.lines(), want, name + ' lines');
+      assert.equal(env.log.edits, edits, name + ' edits');
+      assert.deepEqual(env.log.clip, clip, name + ' clipboard');
+      assert.equal(env.menu(), null, name + ' closes the menu');
+      assert.equal(env.log.focus, 1, name + ' returns focus to the editor');
+    } finally {
+      env.teardown();
+    }
+  }
+});
+
+test('image menu (guard): Move up/down move the whole line; Open image opens the URL, a data: URL as a blob', async () => {
+  const moves = [
+    ['Move up', MENU_DOC, [MENU_TOKEN, 'intro', 'end'], { line: 0, ch: 0 }],
+    ['Move down', MENU_DOC, ['intro', 'end', MENU_TOKEN], { line: 2, ch: 0 }],
+    ['Move up', MENU_TEXT_DOC, ['see ' + MENU_TOKEN + ' here', 'intro', 'end'], { line: 0, ch: 4 }],
+  ];
+  for (const [name, doc, want, sel] of moves) {
+    const env = await imageMenuEditor(doc);
+    try {
+      env.open();
+      env.pick(name);
+      await env.tick();
+      assert.deepEqual(env.lines(), want, name + ' lines');
+      assert.equal(env.log.edits, 1, name + ' is one edit');
+      assert.deepEqual(env.sel(), sel, name + ' cursor');
+    } finally {
+      env.teardown();
+    }
+  }
+
+  let env = await imageMenuEditor(MENU_TEXT_DOC);
+  try {
+    env.open();
+    env.pick('Open image');
+    await env.tick();
+    assert.deepEqual(env.log.opened, [['https://cdn.test/x.png', '_blank', 'noopener']]);
+    assert.deepEqual(env.lines(), MENU_TEXT_DOC);
+    assert.equal(env.log.edits, 0);
+  } finally {
+    env.teardown();
+  }
+
+  env = await imageMenuEditor(MENU_TEXT_DOC, { resolveTo: 'data:image/png;base64,QUJD', trapLongTimers: true });
+  try {
+    env.open();
+    env.pick('Open image');
+    await env.tick();
+    assert.deepEqual(env.log.blobs, [['image/png', 3]]);
+    assert.deepEqual(env.log.opened, [['blob:fake/1', '_blank', 'noopener']]);
+    assert.equal(env.log.longTimers, 1, 'the blob URL is revoked later');
+    assert.deepEqual(env.lines(), MENU_TEXT_DOC);
+  } finally {
+    env.teardown();
+  }
+});
