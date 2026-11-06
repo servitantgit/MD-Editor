@@ -647,3 +647,42 @@ test('paste: in a non-markdown file a URL over a selection is a normal paste', a
   assert.deepEqual(pastes, [], 'no image upload');
   handle.destroy();
 });
+
+test('paste (guard): image items go to onImagePaste in order and cancel the paste; plain text is left alone', async () => {
+  const dom = new JSDOM('<!doctype html><body></body>');
+  const { inputField } = installEnvironment(dom);
+  const { createEditor } = await import('../js/editor.js');
+  const pastes = [];
+  const textarea = dom.window.document.createElement('textarea');
+  const handle = createEditor(textarea, {
+    marked: {},
+    imageResolver: { resolve: async () => '' },
+    getCurrentPath: () => null,
+    onImageUploadRequest: () => {},
+    onImagePaste: (f) => pastes.push(f),
+  });
+  const paste = (items, text) => {
+    const e = new dom.window.Event('paste', { bubbles: true, cancelable: true });
+    Object.defineProperty(e, 'clipboardData', { value: { items, getData: () => text } });
+    inputField.dispatchEvent(e);
+    return e;
+  };
+  const fileA = { name: 'a.png' };
+  const fileB = { name: 'b.jpg' };
+
+  const images = paste([
+    { kind: 'file', type: 'image/png', getAsFile: () => fileA },
+    { kind: 'file', type: 'image/jpeg', getAsFile: () => null },
+    { kind: 'file', type: 'image/jpeg', getAsFile: () => fileB },
+  ], '');
+  assert.equal(images.defaultPrevented, true, 'an image paste must not also insert text');
+  assert.equal(pastes.length, 2);
+  assert.equal(pastes[0], fileA);
+  assert.equal(pastes[1], fileB);
+
+  const plain = paste([{ kind: 'string', type: 'text/plain', getAsFile: () => null }], 'plain text');
+  assert.equal(plain.defaultPrevented, false, 'plain text is a normal paste');
+  assert.equal(pastes.length, 2, 'plain text must not reach onImagePaste');
+
+  handle.destroy();
+});
