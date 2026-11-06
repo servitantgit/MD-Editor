@@ -2552,6 +2552,101 @@ with sync_playwright() as p:
     assert len(j_refs) == p_refs_before
     print("\u2713 Mobile clear button fits the field; click and keyboard clear Search without changing local work")
 
+    # --- Q. FOLDER UPLOAD FROM DISK ---
+    print("\n--- Q. Folder upload: target folder, one commit, conflicts ---")
+    page.set_viewport_size({"width": 1440, "height": 1000})
+    page.wait_for_timeout(300)
+    assert not j_hold["enabled"], "scenario J left the ref hold on"
+    page.wait_for_selector(".file-item.folder[data-path='Notes']", timeout=5000)
+    q_writes_before = len(j_contents_writes)
+
+    def q_wait(cond, what, seconds=10):
+        for _ in range(int(seconds * 20)):
+            if cond():
+                return
+            page.wait_for_timeout(50)
+        raise AssertionError("timed out waiting for " + what + "; status: " + q_status())
+
+    def q_status():
+        return page.evaluate("() => (document.getElementById('save-status') || {}).textContent || ''")
+
+    def q_drop(selector, items):
+        # Synthetic OS drop: a real DataTransfer exposes no webkitGetAsEntry,
+        # so the drop carries fake FileSystem entries over real File objects.
+        return page.evaluate("""(spec) => {
+            const mk = (n) => n.dir ? {
+                isFile: false, isDirectory: true, name: n.name,
+                createReader() {
+                    let done = false;
+                    return { readEntries(ok) {
+                        const b = done ? [] : n.dir.map(mk);
+                        done = true;
+                        setTimeout(() => ok(b), 0);
+                    } };
+                }
+            } : {
+                isFile: true, isDirectory: false, name: n.name,
+                file(ok) { ok(new File([n.text], n.name, { type: 'text/plain' })); }
+            };
+            const entries = spec.items.map(mk);
+            const dt = {
+                types: ['Files'], files: [], effectAllowed: 'all', dropEffect: 'none',
+                getData: () => '',
+                items: entries.map((en) => ({ kind: 'file', type: '', webkitGetAsEntry: () => en }))
+            };
+            const el = document.querySelector(spec.selector);
+            if (!el) throw new Error('drop target not found: ' + spec.selector);
+            const ev = new Event('drop', { bubbles: true, cancelable: true });
+            Object.defineProperty(ev, 'dataTransfer', { value: dt });
+            el.dispatchEvent(ev);
+            return ev.defaultPrevented;
+        }""", {"selector": selector, "items": items})
+
+    # Q1 - a folder dropped on the Notes row lands in Notes/, in ONE commit.
+    q_trees, q_refs = len(j_trees), len(j_refs)
+    assert q_drop(".file-item.folder[data-path='Notes']", [{"name": "QDrop", "dir": [
+        {"name": "a.txt", "text": "alpha\n"},
+        {"name": "Thumbs.db", "text": "x"},
+        {"name": "sub", "dir": [
+            {"name": "b.txt", "text": "beta\n"},
+            {"name": "empty.txt", "text": ""},
+        ]},
+    ]}])
+    q_wait(lambda: len(j_refs) == q_refs + 1, "the folder upload commit")
+    q_wait(lambda: "Uploaded 3 file(s) to Notes" in q_status(), "the folder upload success status")
+    assert len(j_trees) == q_trees + 1, j_trees[q_trees:]
+    q_entries = {e["path"]: j_blobs[e["sha"]] for e in j_trees[-1]["tree"]}
+    assert q_entries == {
+        "Notes/QDrop/a.txt": "alpha\n",
+        "Notes/QDrop/sub/b.txt": "beta\n",
+        "Notes/QDrop/sub/empty.txt": "",
+    }, q_entries
+    assert j_commits[-1]["message"] == "Upload folder QDrop", j_commits[-1]
+    assert j_refs[-1]["force"] is False, j_refs[-1]
+    print("\u2713 A folder dropped on a folder row is committed into it once; system files skipped, empty file kept")
+
+    # Q2 - a single file dropped on the root strip lands in the repository root.
+    q_trees, q_refs = len(j_trees), len(j_refs)
+    assert q_drop(".tree-root-drop-root", [{"name": "q-root.txt", "text": "root\n"}])
+    q_wait(lambda: len(j_refs) == q_refs + 1, "the root upload commit")
+    q_wait(lambda: "Uploaded 1 file(s) to /" in q_status(), "the root upload success status")
+    assert len(j_trees) == q_trees + 1, j_trees[q_trees:]
+    q_entries = {e["path"]: j_blobs[e["sha"]] for e in j_trees[-1]["tree"]}
+    assert q_entries == {"q-root.txt": "root\n"}, q_entries
+    assert j_commits[-1]["message"] == "Upload q-root.txt", j_commits[-1]
+    print("\u2713 A file dropped on the root strip is committed to the repository root")
+
+    # Q3 - an existing path cancels the whole upload: no blob, tree or ref.
+    q_trees, q_refs, q_blobs = len(j_trees), len(j_refs), len(j_blobs)
+    assert q_drop(".file-item.folder[data-path='Notes']", [{"name": "Test note.md", "text": "dup\n"}])
+    q_wait(lambda: "Upload cancelled" in q_status(), "the conflict status")
+    assert "Notes/Test note.md" in q_status(), q_status()
+    page.wait_for_timeout(500)
+    assert (len(j_trees), len(j_refs), len(j_blobs)) == (q_trees, q_refs, q_blobs), \
+        (j_trees[q_trees:], j_refs[q_refs:])
+    assert len(j_contents_writes) == q_writes_before, j_contents_writes
+    print("\u2713 A drop onto an existing path writes nothing and names the conflict; no Contents writes")
+
     assert not page_errors, f"unhandled page errors: {page_errors}"
     browser.close()
 

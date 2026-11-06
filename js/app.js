@@ -772,7 +772,8 @@ function showApp(owner, repo) {
 
   setupFolderDropzone(els.folderDropzone, els.folderDropOverlay, {
     getClient: () => state.client,
-    getAllFiles: () => state.allFiles,
+    getBranch: () => state.branch,
+    getSessionGeneration: () => commitSessionGeneration,
     onStatus: setSaveStatus,
     onUploaded: () => loadTree(),
   });
