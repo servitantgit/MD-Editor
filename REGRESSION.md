@@ -41,6 +41,9 @@ Prefer automated coverage in `test/*.test.js` and `e2e_smoke_test.py` when pract
 - [ ] Live, many images above the caret: typing does not make Preview flicker and does not move Source.
 - [ ] Typing `[[` and a few letters lists notes; Up/Down, Enter or Tab inserts `[name](/path)`, Esc closes; Enter outside the list still continues `- ` lists.
 - [ ] Selecting a word and pasting a URL makes `[word](url)`; Ctrl+Z gives back the word in one step; without a selection or inside code it is a normal paste; pasting a screenshot still uploads it.
+- [ ] Ctrl+V of a screenshot into a note commits one image into the Asset folder and inserts `![name](relative link)` at the cursor; the picture shows in Preview at once.
+- [ ] Dragging an image file from the desktop onto the editor text (CodeMirror itself, not only the empty area) uploads it; a non-image file in the same drop is skipped.
+- [ ] Copying cells from Excel or a sentence from Word and pasting into a note inserts text, not an image.
 - [ ] Discard is enabled only with unsaved changes; it asks first, restores the GitHub version and clears the dot and the Commit badge; Cancel changes nothing.
 - [ ] External images (`https://…`, shields.io) render; GitHub Actions badge paths like `../../actions/workflows/….yml/badge.svg` resolve to `https://github.com/{owner}/{repo}/actions/...`.
 - [ ] HTML files: Live/Preview show content in iframe; fullscreen stays in the current layout mode.

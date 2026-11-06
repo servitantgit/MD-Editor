@@ -890,6 +890,54 @@ Baseline: 612/612 unit tests and full E2E including O passed.
 Fold state across tab switches and manual production verification
 are not established by this coverage. Scroll-sync code is unchanged.
 
+## Image upload (paste, drop, toolbar): guard coverage
+
+`29a2b09` adds guard tests only; application code is unchanged.
+`test/upload.test.js` drives the real `uploadImage`, `setupImageDropzone` and
+`pickImageFiles` with a fake client; `test/editor.test.js` covers the image
+paste handler in `createEditor()`. The tests fix `Date.now`, so their wait
+loops use `performance.now()`. Checked:
+- Path: `findAssetFolder()` + `<Date.now()>_<name>`; every character outside
+  `a-zA-Z0-9._-` becomes `_`. One `putFile` commit per image, message
+  `Add image <path>`. The link is relative and segment-encoded; `[` and `]`
+  are removed from the alt text.
+- The link it writes is read by `updateReferencesInFile`,
+  `rewriteOwnRelativeLinks` and `auditImages` (Architecture rule 3).
+- An opaque PNG is committed as `.jpg` (`compressImage`); path, alt text and
+  the preview cache follow the new name and type.
+- A failed commit shows `Image error: ...`, inserts nothing, caches nothing
+  and does not reload the tree.
+- Drop: only OS files (`types` contains `Files`), only `image/*`, uploaded one
+  after another; bound once and the client read at drop time (see "showApp()
+  is re-entrant").
+- Paste: only `kind: 'file'` items with an `image/*` type cancel the paste;
+  plain text is a normal paste.
+- Accepted behaviour (user decision): pasting an image into a non-markdown
+  file (`.js`, `.html`) still uploads it and inserts a Markdown image link.
+
+Production probe (F12 paste listener that recorded only types): copies from
+Excel (`text/plain`, `text/html`) and Word (plus `text/rtf`) carry no file
+item, so the image handler does not take them; a screenshot arrives as one
+`image/png` file. A clipboard with both text and an image was not seen; by
+the code the image would be uploaded and the text dropped. Not pinned.
+
+These are guards of existing behaviour, not RED tests for a new fix.
+Baseline: 646/646 unit tests; E2E was not run (tests only). Checked by hand
+in production only, not yet confirmed: a real Ctrl+V; a drop onto
+CodeMirror's own DOM (the tests dispatch on the container); that Preview
+shows the uploaded image (the tests only check that the cache key equals the
+committed path).
+
+Deliberately not handled:
+- No folder named like Asset/Images and most images in the repository root:
+  `findAssetFolder()` returns `''` and the path becomes `/<name>`
+  (`PUT .../contents//<name>`; GitHub's answer was not checked). The notes
+  repository has `Asset/`; an empty repository starts with `assets/`.
+- Switching notes while an upload runs (from the code, not probed): the link
+  is computed for the note open at the start but inserted at the cursor of
+  the editor open when the upload finishes.
+- Two images with the same name in the same millisecond get the same path.
+
 ## Folder upload from disk: target folder, one commit
 
 `49fd159` fixes `js/folder-upload.js` (added in `d365b89`, never tested):
@@ -1273,7 +1321,8 @@ listener on the input field. CodeMirror inserts pasted text in its own DOM
 handler, registered before ours, so a DOM listener runs too late: the URL would
 already have replaced the selection. `cm.on('paste')` fires first and
 `preventDefault()` cancels the insert. The image paste stays a DOM listener: it
-only acts when there is no text to insert. The DOM tests in `test/editor.test.js`
+acts only on `image/*` file items (a screenshot carries no text; see "Image
+upload (paste, drop, toolbar)"). The DOM tests in `test/editor.test.js`
 call the CodeMirror handler with a fake CodeMirror, so they cannot prove this
 order: after touching the hook, check paste in a real browser.
 Tests: `test/paste-link.test.js`, `test/editor.test.js`.
