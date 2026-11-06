@@ -45,10 +45,16 @@ export function createSearchUI(deps) {
   // has typed something else must not patch a stale row.
   let renderGeneration = 0;
   let destroyed = false;
+  const clearBtn = deps.clearBtn;
+
+  function updateClearButton() {
+    if (clearBtn) clearBtn.hidden = inputEl.value === '';
+  }
   // Context belongs to the rendered row, not the changing search input.
   const resultContexts = new WeakMap();
 
   function showTree() {
+    renderGeneration++;
     resultsEl.innerHTML = '';
     resultsEl.classList.add('hidden');
     treeEl.classList.remove('hidden');
@@ -65,6 +71,7 @@ export function createSearchUI(deps) {
   }
 
   function renderResults(text) {
+    updateClearButton();
     const query = String(text || '').trim();
     const sync = getSync();
 
@@ -133,7 +140,17 @@ export function createSearchUI(deps) {
     });
   }
 
+  function clearSearch() {
+    if (destroyed) return;
+    clearTimeout(debounceTimer);
+    debounceTimer = null;
+    inputEl.value = '';
+    renderResults('');
+    inputEl.focus();
+  }
+
   function onInput() {
+    updateClearButton();
     clearTimeout(debounceTimer);
     debounceTimer = setTimeout(() => renderResults(inputEl.value), DEBOUNCE_MS);
   }
@@ -148,8 +165,7 @@ export function createSearchUI(deps) {
     // Escape only clears a non-empty search, so it still dismisses the tree
     // context menu exactly as before when the input is empty or unfocused.
     if (e.key === 'Escape' && document.activeElement === inputEl && inputEl.value) {
-      inputEl.value = '';
-      renderResults('');
+      clearSearch();
     }
   }
 
@@ -163,6 +179,8 @@ export function createSearchUI(deps) {
   document.addEventListener('keydown', onGlobalKeydown);
   resultsEl.addEventListener('click', onResultClick);
   reindexBtn.addEventListener('click', onReindex);
+  if (clearBtn) clearBtn.addEventListener('click', clearSearch);
+  updateClearButton();
 
   return {
     destroy() {
@@ -172,6 +190,10 @@ export function createSearchUI(deps) {
       document.removeEventListener('keydown', onGlobalKeydown);
       resultsEl.removeEventListener('click', onResultClick);
       reindexBtn.removeEventListener('click', onReindex);
+      if (clearBtn) {
+        clearBtn.removeEventListener('click', clearSearch);
+        clearBtn.hidden = true;
+      }
       resultsEl.innerHTML = '';
       inputEl.value = '';
       renderGeneration++;

@@ -428,6 +428,47 @@ with sync_playwright() as p:
     print("✓ clicking a search result opens the file")
 
     # Clearing the input must bring the tree back exactly as it was.
+    def clear_document_state():
+        return page.evaluate("""() => {
+            const cm = document.querySelector('.CodeMirror').CodeMirror;
+            return {
+                text:cm.getValue(), history:cm.historySize(),
+                marks:cm.getAllMarks().filter(m =>
+                    m.className === 'md-find-match' ||
+                    m.className === 'md-find-current').length,
+                findHidden:document.getElementById('find-bar').classList.contains('hidden'),
+                dirtyTabs:document.querySelectorAll('#tab-bar .tab.dirty').length
+            };
+        }""")
+
+    # Finish Search navigation before measuring clear preservation.
+    page.wait_for_function("""() => {
+        const cm = document.querySelector('.CodeMirror').CodeMirror;
+        return !document.getElementById('find-bar').classList.contains('hidden')
+            && cm.getAllMarks().some(m =>
+                m.className === 'md-find-current' && m.find());
+    }""", timeout=5000)
+    clear_query = page.input_value("#search-input")
+    clear_before = clear_document_state()
+    page.evaluate("window.__clearTreeRow = document.getElementById('file-tree').firstElementChild")
+    page.wait_for_selector("#btn-search-clear", state="visible")
+    page.click("#btn-search-clear")
+    assert page.input_value("#search-input") == ""
+    assert page.locator(".search-result").count() == 0
+    assert page.locator("#btn-search-clear").is_hidden()
+    assert page.evaluate("document.activeElement.id") == "search-input"
+    assert page.evaluate(
+        "document.getElementById('file-tree').firstElementChild === window.__clearTreeRow")
+    assert clear_document_state() == clear_before
+    page.fill("#search-input", clear_query)
+    page.wait_for_selector(".search-result", state="visible")
+    page.press("#search-input", "Escape")
+    assert page.input_value("#search-input") == ""
+    assert page.locator("#btn-search-clear").is_hidden()
+    assert clear_document_state() == clear_before
+    page.fill("#search-input", clear_query)
+    page.wait_for_selector(".search-result", state="visible")
+    print("\u2713 Clear search button and Escape restore the same tree without changing document highlights")
     page.fill("#search-input", "")
     page.wait_for_selector(".search-result", state="detached", timeout=5000)
     page.wait_for_selector(".file-item.folder", state="visible", timeout=5000)
@@ -2445,6 +2486,71 @@ with sync_playwright() as p:
     assert len(j_refs) == o_refs_before
     assert j_remote[j_a]["text"] == n_body
     print("\u2713 Find unfolds and selects its hidden target without text edits or remote writes")
+
+    # --- P. CLEAR SEARCH ON PHONE ---
+    print("\n--- P. Clear search: mobile geometry and keyboard activation ---")
+    p_before = clear_document_state()
+    p_writes_before = len(j_contents_writes)
+    p_refs_before = len(j_refs)
+    page.set_viewport_size({"width": 420, "height": 800})
+    if not page.evaluate("document.body.classList.contains('mobile-sidebar-open')"):
+        page.click("#btn-mobile-files")
+    page.wait_for_selector("#search-input", state="visible")
+    # Reset the sidebar query left by scenario N with the clear button.
+    # Escape is not used here: the global phone handler also closes the drawer.
+    assert page.locator("#btn-search-clear").is_visible()
+    page.click("#btn-search-clear")
+    assert page.input_value("#search-input") == ""
+    assert page.locator(".search-result").count() == 0
+    assert clear_document_state() == p_before
+    assert page.locator("#btn-search-clear").is_hidden()
+    assert page.evaluate("document.body.classList.contains('mobile-sidebar-open')")
+    page.fill("#search-input", "printing")
+    page.wait_for_selector(".search-result", state="visible")
+
+    p_geometry = page.evaluate("""() => new Promise((resolve, reject) => {
+        let last = '', same = 0, frames = 0;
+        const step = () => {
+            const input = document.getElementById('search-input');
+            const button = document.getElementById('btn-search-clear');
+            const a = input.getBoundingClientRect(), b = button.getBoundingClientRect();
+            const value = JSON.stringify([a.left,a.top,a.width,a.height,b.left,b.top,b.width,b.height]);
+            same = value === last ? same + 1 : 0;
+            last = value;
+            if (same >= 12) return resolve({
+                inside:b.left >= a.left && b.right <= a.right &&
+                    b.top >= a.top && b.bottom <= a.bottom,
+                inputInsideViewport:a.left >= 0 && a.right <= innerWidth,
+                padding:parseFloat(getComputedStyle(input).paddingRight),
+                buttonWidth:b.width,
+                overflow:document.documentElement.scrollWidth > innerWidth
+            });
+            if (++frames > 300) return reject(new Error('Clear button geometry did not settle'));
+            requestAnimationFrame(step);
+        };
+        requestAnimationFrame(step);
+    })""")
+    assert p_geometry["inside"] and p_geometry["inputInsideViewport"], p_geometry
+    assert p_geometry["padding"] >= p_geometry["buttonWidth"], p_geometry
+    assert not p_geometry["overflow"], p_geometry
+    page.click("#btn-search-clear")
+    assert page.input_value("#search-input") == ""
+    assert page.locator(".search-result").count() == 0
+    assert page.locator("#file-tree").is_visible()
+    assert page.locator("#btn-search-clear").is_hidden()
+    assert page.evaluate("document.activeElement.id") == "search-input"
+    assert clear_document_state() == p_before
+
+    page.fill("#search-input", "printing")
+    page.wait_for_selector(".search-result", state="visible")
+    page.focus("#btn-search-clear")
+    page.keyboard.press("Enter")
+    assert page.input_value("#search-input") == ""
+    assert page.evaluate("document.activeElement.id") == "search-input"
+    assert clear_document_state() == p_before
+    assert len(j_contents_writes) == p_writes_before
+    assert len(j_refs) == p_refs_before
+    print("\u2713 Mobile clear button fits the field; click and keyboard clear Search without changing local work")
 
     assert not page_errors, f"unhandled page errors: {page_errors}"
     browser.close()

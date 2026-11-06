@@ -318,7 +318,10 @@
         </div>
       </div>
       <div class="sidebar-search">
-        <input id="search-input" type="text" placeholder="Search in all notes…" autocomplete="off" spellcheck="false" />
+        <div class="search-input-wrap">
+          <input id="search-input" type="text" placeholder="Search in all notes…" autocomplete="off" spellcheck="false" />
+          <button type="button" id="btn-search-clear" class="search-clear" title="Clear search" aria-label="Clear search" hidden>&times;</button>
+        </div>
         <div class="search-status">
           <span id="search-status"></span>
           <button class="secondary" id="btn-reindex" title="Rebuild the search index from scratch">↻</button>

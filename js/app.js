@@ -88,6 +88,7 @@ const els = {
 
   fileTreeEl: document.getElementById('file-tree'),
   searchInput: document.getElementById('search-input'),
+  btnSearchClear: document.getElementById('btn-search-clear'),
   searchStatus: document.getElementById('search-status'),
   searchResults: document.getElementById('search-results'),
   btnReindex: document.getElementById('btn-reindex'),
@@ -1024,6 +1025,7 @@ function setupSearch(owner, repo) {
 
   searchUI = createSearchUI({
     inputEl: els.searchInput,
+    clearBtn: els.btnSearchClear,
     statusEl: els.searchStatus,
     reindexBtn: els.btnReindex,
     treeEl: els.fileTreeEl,

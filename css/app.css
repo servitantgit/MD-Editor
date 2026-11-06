@@ -238,6 +238,31 @@ button.secondary:hover { background: #21262d; }
   outline: none;
   border-color: var(--accent);
 }
+.search-input-wrap { position: relative; }
+.sidebar-search .search-input-wrap input { padding-right: 36px; }
+.search-input-wrap .search-clear {
+  position: absolute;
+  right: 2px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 30px;
+  height: calc(100% - 2px);
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font-size: 20px;
+  line-height: 1;
+}
+.search-input-wrap .search-clear[hidden] { display: none; }
+.search-input-wrap .search-clear:hover {
+  color: var(--text);
+  background: #21262d;
+}
+.search-input-wrap .search-clear:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
 .search-status {
   display: flex;
   align-items: center;
