@@ -890,6 +890,33 @@ Baseline: 612/612 unit tests and full E2E including O passed.
 Fold state across tab switches and manual production verification
 are not established by this coverage. Scroll-sync code is unchanged.
 
+## Sidebar Search: clear button
+
+`c37bcc0` adds `#btn-search-clear` (type="button", aria-label "Clear search")
+inside `.search-input-wrap` around `#search-input`. The input has
+`padding-right: 36px`; the button is 30px wide and fits the field height.
+- Visible for any non-empty value, including whitespace; hidden for an
+  empty value. `updateClearButton()` runs on input and in `renderResults()`.
+- One path: the button and Escape in the focused field both call
+  `clearSearch()`: cancel the debounce, clear the value, `renderResults('')`,
+  focus the input. `showTree()` bumps `renderGeneration` so late snippets
+  are dropped. The same tree nodes are shown again, not rebuilt.
+- It does not touch Find, document marks, minimap ticks, tabs or drafts.
+- `deps.clearBtn` is optional; `destroy()` removes its listener and hides it.
+
+Deliberately not handled: on a phone, Escape in Search also closes the
+files drawer through the global Escape handler in `js/app.js`. This
+predates the button and the card did not cover it.
+
+Lesson (E2E): a scenario inherits the sidebar query from earlier ones
+(scenario N leaves a query in Search). Scenario P first reset it with
+Escape; the drawer closed and the field moved off-screen. P now resets
+with the clear button and asserts the drawer is still open. Reset shared
+UI state explicitly, with an action that has no global side effects.
+
+Baseline: 615/615 unit tests and full E2E including P passed.
+INDEX_VERSION 7 and scroll-sync are unchanged.
+
 ## Browser tests: wait for the completed file open, not just its label
 
 `openFile()` updates the current-file label before asynchronous draft

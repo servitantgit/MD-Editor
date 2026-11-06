@@ -76,6 +76,8 @@ Prefer automated coverage in `test/*.test.js` and `e2e_smoke_test.py` when pract
 ## Search / backlinks / history
 
 - [ ] Search replaces the tree with hits; clear restores the tree.
+- [ ] The clear (x) button inside Search appears for any non-empty value and hides when empty; click, Enter on the button, or Escape in the field clears the field and results, restores the tree and keeps focus in Search.
+- [ ] Clearing Search keeps Find, document and minimap highlights and local edits. On a phone the button stays inside the field; Escape there also closes the files drawer (existing behaviour).
 - [ ] Search result: all located tokens are highlighted; longest original token is selected first; next/previous and current/total work.
 - [ ] Prefix/fuzzy results highlight actual matched tokens. Search-mode Replace/All are disabled; editing Find enables literal replacement.
 - [ ] Search from Preview switches to saved Source. Reopening an edited result preserves local text and undo history.
