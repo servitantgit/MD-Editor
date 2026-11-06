@@ -154,9 +154,10 @@
           <ul class="login-features">
             <li><b>Source / Live / Preview</b> — editor only, split, or full preview</li>
             <li><b>Markdown, HTML &amp; code</b> — JS/CSS too, dark syntax theme</li>
-            <li><b>Outline, minimap, backlinks</b> — navigate a real knowledge base</li>
             <li><b>Multi-tab</b> — undo, cursor &amp; scroll kept per file</li>
-            <li><b>Find / replace</b> · <b>PDF export</b> · image upload</li>
+            <li><b>Find / replace</b> — every match highlighted, current/total counter</li>
+            <li><b>Outline, minimap, Wrap, Fold</b> — find your way in long notes</li>
+            <li><b><code>[[</code> link suggestions</b> · paste a URL over text to make a link · <b>PDF export</b></li>
           </ul>
         </div>
         <div class="feature-group">
@@ -168,6 +169,7 @@
             <li><b>GitHub OAuth</b> — no manual tokens, 2FA stays on GitHub</li>
             <li><b>Local drafts</b> — IndexedDB while you type; survives reload</li>
             <li><b>Save or Commit</b> — push one file or stage many, when ready</li>
+            <li><b>Discard</b> — back to the GitHub version in one click</li>
             <li><b>409 conflict recovery</b> — reload or overwrite, never silent</li>
             <li><b>History &amp; diffs</b> — per-file history with restore</li>
           </ul>
@@ -179,9 +181,10 @@
           </div>
           <ul class="login-features">
             <li><b>File &amp; folder CRUD</b> — create, rename, move, delete</li>
-            <li><b>Auto link rewriting</b> — moves do not break refs</li>
-            <li><b>Drag &amp; drop</b> — files, folders, images</li>
-            <li><b>Full-text search</b> — whole repo, in the browser</li>
+            <li><b>Auto link rewriting</b> — Markdown and <code>[[wiki]]</code> links survive moves, even with spaces or parentheses in paths</li>
+            <li><b>Backlinks</b> — every note that links here</li>
+            <li><b>Drag &amp; drop</b> — files, folders, images; images compressed before upload</li>
+            <li><b>Full-text search</b> — whole repo in the browser; opens the exact match with highlights and minimap ticks</li>
             <li><b>Repo switcher</b> · private repos · mobile-friendly layout</li>
           </ul>
         </div>
@@ -194,23 +197,23 @@
       <div class="why-grid">
         <div class="why-card">
           <h4>Why not <b>github.dev</b>?</h4>
-          <p>Code-first. No markdown live preview, no PDF export,
-            no drafts, no link rewriting on move.</p>
+          <p>A code editor first. Here the workflow is built around notes:
+            Live preview with images, PDF export, local drafts, link rewriting on move.</p>
         </div>
         <div class="why-card">
           <h4>Why not <b>Obsidian</b>?</h4>
-          <p>Desktop app with manual Git sync. Here: zero install,
-            phone-friendly reading/quick edits, desktop for full work.</p>
+          <p>A desktop and mobile app; syncing a vault through Git needs a plugin
+            or your own setup. Here: open the repo in any browser, nothing to install.</p>
         </div>
         <div class="why-card">
           <h4>Why not <b>StackEdit</b>?</h4>
-          <p>No multi-file commits, no conflict recovery,
-            no file tree ops, no link rewriting.</p>
+          <p>Centred on single documents. Here you work with a whole repository:
+            file tree, multi-file commits, conflict recovery, link rewriting.</p>
         </div>
         <div class="why-card">
           <h4>Why not <b>OneNote / Notion</b>?</h4>
-          <p>Proprietary format, lock-in, no git history. Here notes are
-            plain files in <em>your</em> repo — Markdown or HTML — forever yours.</p>
+          <p>Notes live inside their service. Here notes are plain Markdown or HTML
+            files in <em>your</em> repo, with full git history.</p>
         </div>
       </div>
     </section>
