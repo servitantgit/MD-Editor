@@ -729,37 +729,36 @@ with sync_playwright() as p:
         f".gitkeep row leaked into the tree"
     print("✓ new folder row visible in tree, .gitkeep hidden from UI")
 
-    # --- R. Root button: the "create here" target goes back to the repository root ---
-    # B left "Notes/new-folder-in-notes" as the target with Notes expanded. The
-    # button only changes the target: nothing is written and Notes stays expanded for C.
+    # --- R. Root row in the tree: the "create here" target goes back to the repository root ---
+    # B left "Notes/new-folder-in-notes" as the target with Notes expanded. The row only
+    # changes the target: nothing is written and Notes stays expanded for C. The one
+    # drop strip follows the active folder (see AGENTS.md).
     CONTENT_WRITES.clear()
-    # R1 - a folder is the target: the button is shown inside the header, next to + Add.
+    # R1 - a folder is the target: the root row sits above the one drop strip, inside the tree.
     page.wait_for_function(
         "document.getElementById('active-folder-path').textContent.trim() === 'Notes/new-folder-in-notes'",
         timeout=5000,
     )
-    page.wait_for_selector("#btn-root-folder", state="visible", timeout=5000)
-    assert page.locator(".tree-root-drop:not(.tree-root-drop-root)").count() == 1, \
-        "expected the contextual drop strip for the active folder"
+    page.wait_for_selector("#file-tree .tree-home", state="visible", timeout=5000)
+    assert page.locator("#btn-root-folder").count() == 0, "the header root button must be gone"
+    r_strips = page.eval_on_selector_all(".tree-root-drop", "els => els.map(e => [e.className, e.dataset.targetFolder])")
+    assert r_strips == [["tree-root-drop", "Notes/new-folder-in-notes"]], r_strips
     r_geom = page.evaluate("""() => {
-        const r = (s) => document.querySelector(s).getBoundingClientRect();
-        const b = r('#btn-root-folder'), a = r('#btn-add-menu'), h = r('.sidebar-header');
-        return {
-            inside: b.left >= h.left && b.right <= h.right && b.top >= h.top && b.bottom <= h.bottom,
-            overlap: !(b.right <= a.left || a.right <= b.left || b.bottom <= a.top || a.bottom <= b.top),
-            width: b.width,
-        };
+        const h = document.querySelector('.tree-home').getBoundingClientRect();
+        const s = document.querySelector('.tree-root-drop').getBoundingClientRect();
+        const t = document.getElementById('file-tree').getBoundingClientRect();
+        return { above: h.bottom <= s.top, inside: h.left >= t.left && h.right <= t.right, width: h.width };
     }""")
-    assert r_geom["inside"] and not r_geom["overlap"] and r_geom["width"] > 0, r_geom
-    # R2 - the click makes the root the target and hides the button.
-    page.click("#btn-root-folder")
-    page.wait_for_selector("#btn-root-folder", state="hidden", timeout=5000)
+    assert r_geom["above"] and r_geom["inside"] and r_geom["width"] > 0, r_geom
+    # R2 - the click makes the root the target; the one strip becomes the root strip.
+    page.click(".tree-home")
+    page.wait_for_selector(".tree-home", state="detached", timeout=5000)
     r_path = page.inner_text("#active-folder-path").strip()
     assert r_path == "/", r_path
-    assert page.locator(".tree-root-drop:not(.tree-root-drop-root)").count() == 0, \
-        "the contextual drop strip must go away at the root"
+    r_strips = page.eval_on_selector_all(".tree-root-drop", "els => els.map(e => [e.className, e.dataset.targetFolder])")
+    assert r_strips == [["tree-root-drop tree-root-drop-root", ""]], r_strips
     assert page.locator(".file-item[data-path='Notes/Test note.md']").count() == 1, \
-        "the root button must not collapse Notes"
+        "the root row must not collapse Notes"
     # R3 - New file now offers the repository root; Cancel writes nothing.
     page.click("#btn-add-menu")
     page.click("#btn-new-file")
@@ -768,8 +767,8 @@ with sync_playwright() as p:
     assert r_label == "Created in repository root", r_label
     page.click("#btn-new-file-dismiss")
     page.wait_for_selector("#new-file-overlay", state="hidden", timeout=8000)
-    assert not CONTENT_WRITES, f"the root button or a cancelled New file wrote something: {CONTENT_WRITES}"
-    print("\u2713 root button: the create target returns to the repository root, nothing is written")
+    assert not CONTENT_WRITES, f"the root row or a cancelled New file wrote something: {CONTENT_WRITES}"
+    print("\u2713 root row: the create target returns to the repository root; one drop strip follows it, nothing is written")
 
     # --- C. Delete: the confirm decides. Dismissed -> nothing is sent; accepted -> one DELETE with the sha ---
     def deletes():
@@ -1782,6 +1781,14 @@ with sync_playwright() as p:
     SECOND_TREE[:] = [e for e in SECOND_TREE if e["path"] != "DragTarget/DragSrc/move-me.txt"]
     reset_write_logs()
     seen_dialogs.clear()
+    # The one drop strip follows the active folder (see AGENTS.md): I1 left
+    # DragTarget/DragSrc active, so the root row makes the root the target first.
+    wait_until(lambda: active_folder_text() == "DragTarget/DragSrc",
+               what="I1 to leave the moved folder as the active target")
+    page.wait_for_selector(".tree-home", state="visible", timeout=5000)
+    page.click(".tree-home")
+    page.wait_for_selector(".tree-root-drop-root", timeout=5000)
+    wait_until(lambda: active_folder_text() == "/", what="the root to become the active target")
     drag_folder_onto(page, "DragTarget/DragSrc", ".tree-root-drop-root")
     wait_until(lambda: GIT_REF_UPDATES, seconds=15, what="the root move to land as one commit")
     assert_one_move_commit("DragTarget/DragSrc/move-me.txt", "DragSrc/move-me.txt", "sha-mv2")
@@ -2668,6 +2675,16 @@ with sync_playwright() as p:
     print("\u2713 A folder dropped on a folder row is committed into it once; system files skipped, empty file kept")
 
     # Q2 - a single file dropped on the root strip lands in the repository root.
+    # The one drop strip follows the active folder (see AGENTS.md): a fixed
+    # sequence makes the root active, whatever the scenarios above left behind.
+    page.click(".file-item.folder[data-path='Notes']")
+    page.wait_for_function(
+        "document.getElementById('active-folder-path').textContent.trim() === 'Notes'", timeout=5000)
+    page.wait_for_selector(".tree-home", state="visible", timeout=5000)
+    page.click(".tree-home")
+    page.wait_for_selector(".tree-root-drop-root", timeout=5000)
+    q_path = page.inner_text("#active-folder-path").strip()
+    assert q_path == "/", q_path
     q_trees, q_refs = len(j_trees), len(j_refs)
     assert q_drop(".tree-root-drop-root", [{"name": "q-root.txt", "text": "root\n"}])
     q_wait(lambda: len(j_refs) == q_refs + 1, "the root upload commit")

@@ -324,6 +324,11 @@ test('dragover refuses the folder itself, its descendants and its current parent
   try {
     // Expand Notes so its Sub row exists (folders start collapsed).
     click(container.querySelector('.file-item.folder[data-path="Notes"] .folder-toggle'));
+    // The one drop strip follows the active folder (see AGENTS.md): make the
+    // root active, so the strip is the root, the current parent of Notes.
+    const home = container.querySelector('.tree-home');
+    assert.ok(home, 'the root row is shown while Notes is the target');
+    click(home);
     const notesRow = container.querySelector('.file-item.folder[data-path="Notes"]');
     const subRow = container.querySelector('.file-item.folder[data-path="Notes/Sub"]');
     const otherRow = container.querySelector('.file-item.folder[data-path="Other"]');
@@ -377,6 +382,94 @@ test('root target (guard): setActiveFolder("") clears the contextual strip and r
     assert.equal(seen[seen.length - 1], '', 'the root is reported to onActiveFolderChange');
     assert.equal(contextual(), null, 'no contextual strip at the root');
     assert.ok(container.querySelector('.file-item[data-path="A/x.md"]'), 'A stays expanded');
+  } finally {
+    restore();
+  }
+});
+
+/** The root row and the drop strips at the top of the tree (see AGENTS.md). */
+function topRows(container) {
+  return {
+    home: container.querySelector('.tree-home'),
+    strips: Array.from(container.querySelectorAll('.tree-root-drop')),
+  };
+}
+
+test('root row: a folder target shows the root row and ONE drop strip into that folder', () => {
+  const { container, tree, restore } = mountTree([{ path: 'A/x.md' }, { path: 'C/y.md' }]);
+  try {
+    click(container.querySelector('.file-item.folder[data-path="A"]'));
+    assert.equal(tree.getActiveFolder(), 'A');
+    const { home, strips } = topRows(container);
+    assert.ok(home, 'the root row is shown while a folder is the target');
+    assert.equal(home.tagName, 'BUTTON');
+    assert.equal(home.getAttribute('aria-label'), 'Go to repository root');
+    assert.equal(strips.length, 1, 'exactly one drop strip');
+    assert.equal(strips[0].dataset.targetFolder, 'A');
+    assert.equal(container.querySelector('.tree-root-drop-root'), null, 'no separate root strip');
+  } finally {
+    restore();
+  }
+});
+
+test('root row: a click makes the root the target; the strip becomes the root strip and folders stay expanded', () => {
+  const seen = [];
+  const { container, tree, restore } = mountTree(
+    [{ path: 'A/x.md' }],
+    { onActiveFolderChange: (p) => seen.push(p) },
+  );
+  try {
+    click(container.querySelector('.file-item.folder[data-path="A"]'));
+    const home = container.querySelector('.tree-home');
+    assert.ok(home, 'the root row is shown while A is the target');
+    click(home);
+    assert.equal(tree.getActiveFolder(), '');
+    assert.equal(seen[seen.length - 1], '', 'the root is reported to onActiveFolderChange');
+    const after = topRows(container);
+    assert.equal(after.home, null, 'no root row at the root');
+    assert.equal(after.strips.length, 1, 'exactly one drop strip');
+    assert.ok(after.strips[0].classList.contains('tree-root-drop-root'));
+    assert.equal(after.strips[0].dataset.targetFolder, '');
+    assert.ok(container.querySelector('.file-item[data-path="A/x.md"]'), 'A stays expanded');
+  } finally {
+    restore();
+  }
+});
+
+test('root row: at the root there is no root row and one root strip whose target folder is ""', () => {
+  const { container, tree, restore } = mountTree([{ path: 'A/x.md' }]);
+  try {
+    assert.equal(tree.getActiveFolder(), '');
+    const { home, strips } = topRows(container);
+    assert.equal(home, null);
+    assert.equal(strips.length, 1, 'exactly one drop strip');
+    assert.ok(strips[0].classList.contains('tree-root-drop-root'));
+    // folder-upload reads [data-target-folder]; '' means the repository root.
+    assert.equal(strips[0].getAttribute('data-target-folder'), '');
+  } finally {
+    restore();
+  }
+});
+
+test('root row: it is not a drop target for tree drags', async () => {
+  const moves = [];
+  const { container, restore } = mountTree([{ path: 'A/x.md' }, { path: 'C/y.md' }], {
+    onMoveFolder: async (src, dest) => { moves.push([src, dest]); },
+    onMoveFile: async (src, dest) => { moves.push([src, dest]); },
+  });
+  try {
+    click(container.querySelector('.file-item.folder[data-path="A"]'));
+    const home = container.querySelector('.tree-home');
+    assert.ok(home, 'the root row is shown while A is the target');
+    fireDrag(container.querySelector('.file-item.folder[data-path="C"]'), 'dragstart', makeDataTransfer());
+    const over = fireDrag(home, 'dragover', makeDataTransfer());
+    assert.equal(over.defaultPrevented, false, 'dragover on the root row is not accepted');
+    assert.equal(home.classList.contains('drop-target'), false);
+    const dropDt = makeDataTransfer();
+    dropDt.setData('application/x-md-folder', 'C');
+    fireDrag(home, 'drop', dropDt);
+    await new Promise((r) => setTimeout(r, 0));
+    assert.deepEqual(moves, [], 'nothing is moved by a drop on the root row');
   } finally {
     restore();
   }

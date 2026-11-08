@@ -331,8 +331,6 @@ export function createFileOps(deps) {
 
 
   function updateActiveFolderPathLabel(folderPath) {
-    // The root button is shown only while a folder (not the root) is the target.
-    if (els.btnRootFolder) els.btnRootFolder.classList.toggle('hidden', !normalizeFolderPath(folderPath));
     if (!els.activeFolderPath) return;
     const label = formatActiveFolderPath(folderPath);
     els.activeFolderPath.textContent = label;
@@ -1021,12 +1019,6 @@ export function createFileOps(deps) {
       els.btnNewFolder.onclick = () => {
         closeAddMenu();
         onCreateNewFolder();
-      };
-    }
-    if (els.btnRootFolder) {
-      els.btnRootFolder.onclick = () => {
-        const tree = deps.getFileTree();
-        if (tree) tree.setActiveFolder('');
       };
     }
     try { setupAddMenu(); } catch (e) { console.warn('setupAddMenu', e); }

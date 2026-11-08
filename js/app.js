@@ -99,7 +99,6 @@ const els = {
   btnAddMenu: document.getElementById('btn-add-menu'),
   addMenu: document.getElementById('add-menu'),
   activeFolderPath: document.getElementById('active-folder-path'),
-  btnRootFolder: document.getElementById('btn-root-folder'),
 
   tabBar: document.getElementById('tab-bar'),
   currentFileLabel: document.getElementById('current-file'),
@@ -802,7 +801,6 @@ function ensureFileOps() {
       btnAddMenu: els.btnAddMenu,
       addMenu: els.addMenu,
       activeFolderPath: els.activeFolderPath,
-      btnRootFolder: els.btnRootFolder,
       currentFileLabel: els.currentFileLabel,
     },
     getState: () => state,
