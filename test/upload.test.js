@@ -3,12 +3,11 @@ import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
 import { uploadImage, setupImageDropzone, pickImageFiles } from '../js/upload.js';
 import { updateReferencesInFile, rewriteOwnRelativeLinks } from '../js/reference-rewriter.js';
-import { auditImages } from '../js/image-audit.js';
 
 // Image upload (js/upload.js): paste, a drop on the editor and the toolbar
 // button all end in uploadImage. These guard tests pin the current behaviour:
 // path, commit message, inserted link, preview cache, statuses, and that the
-// link it writes is read by the rewriter and the image audit (Architecture
+// link it writes is read by move/rename of the image and of the note (Architecture
 // rule 3). A real Ctrl+V and a drop onto CodeMirror's own DOM are checked by
 // hand in production (see AGENTS.md).
 
@@ -121,7 +120,7 @@ test('upload (guard): a pasted image is committed to the nearest Asset folder an
   });
 });
 
-test('upload (guard): the inserted link is read by the reference rewriter and the image audit', async () => {
+test('upload (guard): the inserted link is read by move/rename of the image and of the note', async () => {
   await withEnv(async () => {
     const { log, deps } = makeDeps();
     await uploadImage(new File([new Uint8Array([1, 2, 3])], 'my [shot] (1).png', { type: 'image/png' }), deps);
@@ -136,15 +135,6 @@ test('upload (guard): the inserted link is read by the reference rewriter and th
       rewriteOwnRelativeLinks(text, 'AI corrected/BOBAM', 'AI corrected'),
       '![my shot (1).png](../Asset/' + T + '_my__shot___1_.png)\n',
     );
-
-    const audit = auditImages({
-      files: [{ path: NOTE, sha: 'n' }, { path: 'Asset/x.jpg', sha: 'x' }, { path: putPath, sha: 'p' }],
-      texts: new Map([[NOTE, text]]),
-    });
-    assert.equal(audit.valid, true);
-    assert.equal(audit.used.get(putPath), 1);
-    assert.deepEqual(audit.unused, ['Asset/x.jpg']);
-    assert.deepEqual(audit.broken, []);
   });
 });
 

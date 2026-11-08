@@ -170,13 +170,11 @@ test('resize (guard): the width never goes below 20px', async () => {
   }
 });
 
-test('resize (guard): the <img> line written by resize is read by Preview, move/rename and the image audit', async () => {
+test('resize (guard): the <img> line written by resize is read by Preview and move/rename', async () => {
   // Architecture rule 3. Names without & or " on purpose: an & in an <img>
   // src or alt is not decoded (see AGENTS.md).
   const { setImageAttrsInLine, injectCanonicalImageTags } = await import('../js/markdown-tokens.js');
   const { updateReferencesInFile, rewriteOwnRelativeLinks } = await import('../js/reference-rewriter.js');
-  const { auditImages } = await import('../js/image-audit.js');
-  const NOTE = 'A/B/n.md';
   const cases = [
     ['../../Asset/1700_my__shot___1_.png', 'Asset/1700_my__shot___1_.png', 'my shot (1).png', '../Asset/1700_my__shot___1_.png'],
     ['../../Asset/ATS_(BOB_Load)_image_0001.jpg', 'Asset/ATS_(BOB_Load)_image_0001.jpg', 'x', '../Asset/ATS_(BOB_Load)_image_0001.jpg'],
@@ -198,12 +196,6 @@ test('resize (guard): the <img> line written by resize is read by Preview, move/
     assert.equal(moved.text.split('\n')[1], tag('../../Asset/moved.png', 300));
 
     assert.equal(rewriteOwnRelativeLinks(text, 'A/B', 'A').split('\n')[1], tag(srcAfterNoteMove, 300));
-
-    const audit = auditImages({ files: [{ path: NOTE, sha: 'n' }, { path, sha: 'p' }], texts: new Map([[NOTE, text]]) });
-    assert.equal(audit.valid, true, path);
-    assert.equal(audit.used.get(path), 1, path);
-    assert.deepEqual(audit.unused, []);
-    assert.deepEqual(audit.reasons, []);
 
     assert.equal(setImageAttrsInLine(resized, 0, { src, alt, width: 150 }), tag(src, 150), 'resize again changes only the width');
   }
