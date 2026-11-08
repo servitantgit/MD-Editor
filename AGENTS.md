@@ -435,11 +435,46 @@ reason. Note this also means a folder *created* after the first render starts
 expanded — `render()`'s "collapse everything" block runs once only, guarded by
 `treeInitialized`. That is intended, not a bug.
 
-`setActiveFolder()` is only ever called with a folder path and always *after*
-`loadTree()`, so a folder that was just created is never caught by the pruning.
+`setActiveFolder()` is called with a folder path *after* `loadTree()`, or with
+`''` from the root row, so a folder that was just created is never caught by
+the pruning.
 `test/file-tree.test.js` covers delete, rename, the still-exists case, the
 root-is-always-valid case, and the recreate-after-delete case; verified to fail
 without the fix (`actual: 'Notes/deep'`, and `▸` where `▾` was expected).
+
+**Getting back to the root: the root row (`0bce896`, `7152934`, `38088aa`).**
+After a click on any folder there was no way back to the root as the "create
+here" target: a folder click makes that folder active also when it collapses
+it, and the permanent root strip was a drop target only. While a folder is the
+target, `render()` now draws a root row at the top of the tree: a
+`<button class="tree-home">` with a house icon and "repository root", click
+only, calling `setActiveFolder('')`. Below it there is ONE drop strip that
+always moves into the active folder: `data-target-folder` is the active folder
+(`''` and class `tree-root-drop-root` at the root). This replaces the permanent
+root strip of `8ee1e68`, which existed only because the root was unreachable by
+drag; the root row covers that now. `js/folder-upload.js` reads the same
+`data-target-folder` and is unchanged. `0bce896` first put the button in the
+sidebar header, `7152934` moved it into the tree, `38088aa` styles it like a
+tree row. Pinned by the `root row:` tests and the changed "current parent" drag
+test in `test/file-tree.test.js`, and by E2E R, I2 and Q2.
+
+Accepted behaviour (user decision):
+- A click on a folder row makes it the target, also when the click collapses
+  it. Collapsing does not return to the root; the root row does.
+- The root row is click only, never a drop target: moving into the root while a
+  folder is active takes two steps (root row, then drop on the strip). A tree
+  drag over the row is not accepted.
+- Files dropped from the disk onto the root row land in the root, like empty
+  space in the tree (`dropTargetFolder` returns `''`).
+- On a phone a click on the root row does not close the files drawer (it is not
+  a file action).
+
+Deferred: "collapsing a folder moves the target one level up" (rule and eight
+RED tests were drafted, then dropped in favour of the root row). Caveat for it:
+`setActiveFolder(path, { expand: true })` expands only that folder, not its
+ancestors, so the target can sit inside a collapsed parent (New folder from the
+context menu on a nested folder). Deliberately not handled: such a hidden
+target (the label shows it). The 420px drawer is checked by hand in production.
 
 ## The context menu dismisses on an outside click — register synchronously
 
@@ -994,8 +1029,8 @@ Contents PUT per file, ignoring the folder under the cursor.
   Internal tree drags carry strings only and are left to the tree: no
   preventDefault, no overlay.
 - Target, read synchronously at drop time: folder row -> that folder;
-  file row -> its folder; `[data-target-folder]` strip -> active folder;
-  root strip or anything else -> root.
+  file row -> its folder; the one `[data-target-folder]` strip -> the active folder
+  (`''` at the root); the root row or anything else -> root.
 - One `commitFiles` call (Git Data API, ref update with `force: false`);
   no `putFile`. Message `Upload folder X` / `Upload X` / `Upload N items`
   (N = top-level items).

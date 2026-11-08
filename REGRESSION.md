@@ -67,7 +67,10 @@ Prefer automated coverage in `test/*.test.js` and `e2e_smoke_test.py` when pract
 
 - [ ] New file allows non-`.md` extensions (html, js, css, …) with sensible defaults.
 - [ ] Create file/folder targets the **selected** folder, not a stale click path.
-- [ ] Drop-to-move uses the active folder path (including non-root).
+- [ ] Drop-to-move uses the active folder: ONE strip above the tree moves into the active folder, or into the root when the root is the target.
+- [ ] With a folder as the target, a root row (house icon, "repository root") is shown at the top of the tree; a click makes the root the target, hides the row and keeps expanded folders open; New file then says "Created in repository root".
+- [ ] Dragging a file onto the root row does nothing; to move a file to the root while a folder is active, click the root row, then drop on the strip.
+- [ ] Phone: the root row fits the drawer; clicking it does not close the drawer.
 - [ ] Drag-to-move updates the tree without F5: after PUT+DELETE the file leaves the source folder within ~2s, even while "updating links…" still runs on a large repo (do not wait for every .md GET to finish).
 - [ ] Rename from the context menu also refreshes the tree without reload (same onMoved → loadTree rewritePath path).
 - [ ] Repo switcher in the header can change owner/repo without a full re-login.
@@ -77,7 +80,7 @@ Prefer automated coverage in `test/*.test.js` and `e2e_smoke_test.py` when pract
 - [ ] Moving or renaming a note does not change links or images inside fenced code blocks.
 - [ ] Moving a note leaves `` `[a](b.md)` `` (inline code) unchanged, but still updates ``[`b.md`](b.md)``.
 - [ ] Renaming, moving (drag) or deleting a folder makes exactly ONE commit in the GitHub history (`Rename folder X to Y` / `Delete folder X`); links into the folder are updated in that same commit.
-- [ ] A folder dragged from the desktop onto a folder row lands inside that folder in ONE commit (`Upload folder X`); onto the root strip it lands in the root. Empty files are uploaded; `.git`, `Thumbs.db` and `desktop.ini` are skipped.
+- [ ] A folder dragged from the desktop onto a folder row lands inside that folder in ONE commit (`Upload folder X`); onto the root strip (shown while the root is the target) it lands in the root. Empty files are uploaded; `.git`, `Thumbs.db` and `desktop.ini` are skipped.
 - [ ] Dropping a folder whose paths already exist (any letter case) writes nothing and names the conflict; dragging folders inside the tree still moves them.
 - [ ] Renaming a note updates `[[Old name]]` (only if no other note has that name) and `[[Folder/Old name|alias]]` in other notes; moving it updates `[[Folder/Name]]` and leaves `[[Name]]` as it is.
 
