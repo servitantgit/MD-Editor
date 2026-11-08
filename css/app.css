@@ -156,6 +156,11 @@ button.secondary:hover { background: #21262d; }
   padding: 2px 10px;
   font-size: 12px;
 }
+#btn-root-folder {
+  padding: 2px 8px;
+  font-size: 12px;
+  flex-shrink: 0;
+}
 .add-menu {
   position: absolute;
   top: calc(100% + 4px);

@@ -358,3 +358,26 @@ test('dragover refuses the folder itself, its descendants and its current parent
     restore();
   }
 });
+
+test('root target (guard): setActiveFolder("") clears the contextual strip and reports the root; folders stay expanded', () => {
+  const seen = [];
+  const { container, tree, restore } = mountTree(
+    [{ path: 'A/x.md' }, { path: 'C/y.md' }],
+    { onActiveFolderChange: (p) => seen.push(p) },
+  );
+  try {
+    const contextual = () => container.querySelector('.tree-root-drop:not(.tree-root-drop-root)');
+    click(container.querySelector('.file-item.folder[data-path="A"]'));
+    assert.equal(tree.getActiveFolder(), 'A');
+    assert.ok(contextual(), 'the contextual strip is shown for A');
+    assert.ok(container.querySelector('.file-item[data-path="A/x.md"]'), 'A is expanded');
+
+    tree.setActiveFolder('');
+    assert.equal(tree.getActiveFolder(), '');
+    assert.equal(seen[seen.length - 1], '', 'the root is reported to onActiveFolderChange');
+    assert.equal(contextual(), null, 'no contextual strip at the root');
+    assert.ok(container.querySelector('.file-item[data-path="A/x.md"]'), 'A stays expanded');
+  } finally {
+    restore();
+  }
+});

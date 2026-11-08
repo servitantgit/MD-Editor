@@ -743,3 +743,62 @@ test('onRenameFolder rejects slashes and dot names (zero requests)', async () =>
     assert.equal(status.isError, true, name);
   }
 });
+
+/** A button stand-in: a class set plus onclick / click listeners. */
+function fakeRootButton() {
+  const classes = new Set(['hidden']);
+  const listeners = [];
+  return {
+    onclick: null,
+    classList: {
+      contains: (c) => classes.has(c),
+      add: (c) => { classes.add(c); },
+      remove: (c) => { classes.delete(c); },
+      toggle: (c, force) => {
+        const on = force === undefined ? !classes.has(c) : Boolean(force);
+        if (on) classes.add(c); else classes.delete(c);
+        return on;
+      },
+    },
+    addEventListener: (type, fn) => { if (type === 'click') listeners.push(fn); },
+    click() {
+      const ev = { preventDefault: () => {}, stopPropagation: () => {} };
+      if (typeof this.onclick === 'function') this.onclick(ev);
+      for (const fn of listeners) fn(ev);
+    },
+  };
+}
+
+test('root button: shown while a folder is the target; a click makes the repository root the target and hides it', () => {
+  const { deps } = makeDeps({ client: {}, allFiles: [] });
+  const label = { textContent: '', title: '' };
+  const btn = fakeRootButton();
+  let ops = null;
+  const tree = {
+    active: 'Notes',
+    getActiveFolder() { return this.active; },
+    // Like FileTree.render(): every change of the target is reported to file-ops.
+    setActiveFolder(p) { this.active = p || ''; ops.updateActiveFolderPathLabel(this.active); },
+    setDirtyMap: () => {},
+    setFiles: () => {},
+  };
+  deps.els = { currentFileLabel: { textContent: '' }, activeFolderPath: label, btnRootFolder: btn };
+  deps.getFileTree = () => tree;
+  ops = createFileOps(deps);
+
+  ops.updateActiveFolderPathLabel('Notes');
+  assert.equal(label.textContent, 'Notes');
+  assert.equal(btn.classList.contains('hidden'), false, 'the root button must show while a folder is the target');
+
+  ops.setupToolbar();
+  btn.click();
+  assert.equal(tree.getActiveFolder(), '', 'the click must make the repository root the target');
+  assert.equal(label.textContent, '/');
+  assert.equal(btn.classList.contains('hidden'), true, 'the root button must hide at the root');
+
+  // Visibility follows the folder path, not the label text.
+  ops.updateActiveFolderPathLabel('Docs/Sub');
+  assert.equal(btn.classList.contains('hidden'), false);
+  ops.updateActiveFolderPathLabel('/');
+  assert.equal(btn.classList.contains('hidden'), true);
+});

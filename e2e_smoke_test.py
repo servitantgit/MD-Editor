@@ -729,6 +729,48 @@ with sync_playwright() as p:
         f".gitkeep row leaked into the tree"
     print("✓ new folder row visible in tree, .gitkeep hidden from UI")
 
+    # --- R. Root button: the "create here" target goes back to the repository root ---
+    # B left "Notes/new-folder-in-notes" as the target with Notes expanded. The
+    # button only changes the target: nothing is written and Notes stays expanded for C.
+    CONTENT_WRITES.clear()
+    # R1 - a folder is the target: the button is shown inside the header, next to + Add.
+    page.wait_for_function(
+        "document.getElementById('active-folder-path').textContent.trim() === 'Notes/new-folder-in-notes'",
+        timeout=5000,
+    )
+    page.wait_for_selector("#btn-root-folder", state="visible", timeout=5000)
+    assert page.locator(".tree-root-drop:not(.tree-root-drop-root)").count() == 1, \
+        "expected the contextual drop strip for the active folder"
+    r_geom = page.evaluate("""() => {
+        const r = (s) => document.querySelector(s).getBoundingClientRect();
+        const b = r('#btn-root-folder'), a = r('#btn-add-menu'), h = r('.sidebar-header');
+        return {
+            inside: b.left >= h.left && b.right <= h.right && b.top >= h.top && b.bottom <= h.bottom,
+            overlap: !(b.right <= a.left || a.right <= b.left || b.bottom <= a.top || a.bottom <= b.top),
+            width: b.width,
+        };
+    }""")
+    assert r_geom["inside"] and not r_geom["overlap"] and r_geom["width"] > 0, r_geom
+    # R2 - the click makes the root the target and hides the button.
+    page.click("#btn-root-folder")
+    page.wait_for_selector("#btn-root-folder", state="hidden", timeout=5000)
+    r_path = page.inner_text("#active-folder-path").strip()
+    assert r_path == "/", r_path
+    assert page.locator(".tree-root-drop:not(.tree-root-drop-root)").count() == 0, \
+        "the contextual drop strip must go away at the root"
+    assert page.locator(".file-item[data-path='Notes/Test note.md']").count() == 1, \
+        "the root button must not collapse Notes"
+    # R3 - New file now offers the repository root; Cancel writes nothing.
+    page.click("#btn-add-menu")
+    page.click("#btn-new-file")
+    page.wait_for_selector("#new-file-overlay:not(.hidden)", state="visible", timeout=8000)
+    r_label = page.inner_text("#new-file-folder-label").strip()
+    assert r_label == "Created in repository root", r_label
+    page.click("#btn-new-file-dismiss")
+    page.wait_for_selector("#new-file-overlay", state="hidden", timeout=8000)
+    assert not CONTENT_WRITES, f"the root button or a cancelled New file wrote something: {CONTENT_WRITES}"
+    print("\u2713 root button: the create target returns to the repository root, nothing is written")
+
     # --- C. Delete: the confirm decides. Dismissed -> nothing is sent; accepted -> one DELETE with the sha ---
     def deletes():
         return [w for w in CONTENT_WRITES if w["method"] == "DELETE"]
