@@ -901,8 +901,8 @@ loops use `performance.now()`. Checked:
   `a-zA-Z0-9._-` becomes `_`. One `putFile` commit per image, message
   `Add image <path>`. The link is relative and segment-encoded; `[` and `]`
   are removed from the alt text.
-- The link it writes is read by `updateReferencesInFile`,
-  `rewriteOwnRelativeLinks` and `auditImages` (Architecture rule 3).
+- The link it writes is read by `updateReferencesInFile` and
+  `rewriteOwnRelativeLinks` (Architecture rule 3).
 - An opaque PNG is committed as `.jpg` (`compressImage`); path, alt text and
   the preview cache follow the new name and type.
 - A failed commit shows `Image error: ...`, inserts nothing, caches nothing
@@ -937,6 +937,53 @@ Deliberately not handled:
   is computed for the note open at the start but inserted at the cursor of
   the editor open when the upload finishes.
 - Two images with the same name in the same millisecond get the same path.
+
+## Image resize and the Source image menu: guard coverage
+
+`517fbf3` adds six guard tests only; application code is unchanged.
+`test/image-preview.test.js` (3) drives the real `attachResizeHandles` with
+synthetic pointer events in jsdom; `test/editor.test.js` (3) drives the image
+menu of the real `createEditor()` with a fake CodeMirror. Checked:
+- Resize: dragging the handle of one image writes `<img src alt width="N">`
+  into that image only, in one edit. The width never goes below 20px
+  (`Math.max(20, ...)` in `js/image-preview.js`); JS has no maximum, CSS
+  `max-width: 100%` limits the display.
+- The `<img>` line written by resize is read by Preview
+  (`injectCanonicalImageTags`) and by move/rename (`updateReferencesInFile`,
+  `rewriteOwnRelativeLinks`), also with parentheses in the file name
+  (Architecture rule 3).
+- Source image menu: six items in order - Move up, Move down, Cut, Copy,
+  Delete from text, Open image. Move up/down move the whole line and are
+  disabled on the first/last line; Cut, Copy and Delete act on the image
+  token only. Open image opens the URL; a `data:` URL is opened as a `blob:`
+  URL (browsers block top-frame navigation to `data:`). The menu closes on
+  Escape, an outside click and editor destroy.
+
+Baseline: 638/638 unit tests at `e43c4a5`; E2E was not run (tests only).
+Checked by hand in production only: resize with a real mouse and real layout,
+Undo, the clipboard (Cut/Copy), Open image in a new tab, Open image for a
+picture pasted a moment ago.
+
+Accepted behaviour (user decision): after a resize the line is a plain
+`<img ...>` tag. The Source link widget and the image menu read only `![]()`
+(`MD_IMAGE_RE`, `findMarkdownImages`), so they do not appear for that line; in
+Source it stays a tag. This is a known gap in Architecture rule 3 (a reader
+that does not read the writer's format), kept on purpose; the widget for
+`![]()` stays as it is.
+
+Deliberately not handled:
+- `&` in an image file name or alt text after a resize. `setImageAttrsInLine`
+  escapes the values (`escapeAttr`, `js/paths.js`), but `parseImgTagAttrs`
+  (`js/markdown-tokens.js`) does not decode them: after one resize the tag
+  reads `src="Asset/x&amp;y.png"`, and readers that take the target from the
+  tag (Preview, move/rename) look for `x&amp;y.png`, a file that does not
+  exist. Writing a value read this way again doubles it (`&amp;amp;`). Shown
+  by a read-only probe on the real modules. Such names can come from folder
+  upload (names are kept as is) and outside commits; Gillette has 0. A doubled
+  `&amp;` in the alt text is cosmetic, same cause. The full fix belongs in
+  `parseImgTagAttrs` (decode once) with a test for every reader; do it when
+  the first such file appears. The guard tests use names without `&` and `"`
+  on purpose.
 
 ## Folder upload from disk: target folder, one commit
 
@@ -1259,7 +1306,7 @@ github.com, which shows `[[...]]` as plain text.
 **Readers of that format.** ONE target rule, `LINK_TARGET_SRC`
 (`js/markdown-tokens.js`): no spaces, one level of balanced `(...)` allowed
 (`Asset/ATS_(BOB_Load)_image_0001.jpg`). It builds `REF_TOKEN_RE` (backlinks,
-move/rename, image audit), `IMG_TOKEN_RE` (Preview/PDF, image resize) and
+move/rename), `IMG_TOKEN_RE` (Preview/PDF, image resize) and
 `MD_IMAGE_RE` (Source image widgets); no reader keeps its own copy of the rule.
 `REF_TOKEN_RE` also takes a target in `<...>` (same capture groups, the plain
 form first); `classifyRefMatch()` returns it without the brackets and
@@ -1269,13 +1316,13 @@ link in `<...>` keeps a plain path; any other link stays percent-encoded
 with `decodeUriSafe` (rule 7). `stripMarkdown` (search text) drops links by a
 looser rule, a superset of its old one. Not handled on purpose: nested or
 unbalanced parentheses in a target (`a((b)).png`, `a(b.png` - marked shows
-them, our readers do not, and the image audit turns invalid on such a link); a
+them, our readers do not); a
 file whose NAME holds a literal `%20`, linked without encoding, is read as a
 space (the rewriter does the same); `>` inside `<...>` is not recognised (not
 allowed in Windows file names). The app writes pictures percent-encoded
 (`js/upload.js`), never as `![](<...>)`.
 Open question: `isExternalOrAnchor()` treats a `//host/x` target as a repo path;
-backlinks and the image audit exclude `//` themselves, Preview, the link click
+backlinks exclude `//` themselves, Preview, the link click
 and the image resolver do not. Changing `paths.js` needs its own tests for each
 of those callers.
 
@@ -1365,39 +1412,36 @@ of the sidebar empty above the results. `css/app.css` hides the wrapper with
 logic changes, keep the wrapper hidden whenever the tree is.
 `e2e_smoke_test.py` asserts the results start right under the search box.
 
-## Image audit: js/image-audit.js + tools/image-audit.mjs
+## Image audit: removed (`d789330`, `e43c4a5`)
 
-`auditImages({ files, texts })` is pure: pictures no note links to, image links
-to a missing file (with a hint when only the case differs) and groups of
-identical pictures by blob sha. Same link rules as the reference rewriter
-(Architecture rules 3 and 7). Fail-safe: an unread note, an `![[embed]]` or
-`[[x.png]]`, an HTML file pointing at a picture, or an image link the parser
-cannot read (an `![...](` outside code that is not inside a parsed token) makes
-the report invalid, and an invalid report lists NO unused pictures, so nothing
-can be offered for deletion by mistake.
+The image audit (`tools/image-audit.mjs`, `js/image-audit.js` and
+`test/image-audit.test.js`) was removed because it was not used: the CLI in
+`d789330`, the module and its tests in `e43c4a5`. The lessons stay.
 
 **Lesson: Gillette `5f57fdf` -> `1aca810`.** Before `13d5027` every reader cut
 a target at the first `)`: `![x](../Asset/ATS_(BOB_Load)_image_0001.jpg)` was
 read as `../Asset/ATS_(BOB_Load`, not a picture path, so the audit skipped it
 silently and listed 32 USED pictures as unused; they were deleted together with
-51 truly unused ones and restored from `6b276be` in `1aca810`. A tool that
-offers deletion must count what it could NOT read, not only what it read.
-After any change in link parsing, run a read-only probe over the real notes
-(every link through backlinks, move/rename, Preview and the audit) before
-trusting the audit again.
+51 truly unused ones and restored from `6b276be` in `1aca810`.
 
-Run: `node tools/image-audit.mjs <repo-dir> [--out <file>]`. It reads the tree
-and the notes from git HEAD, never the disk (PowerShell 5.1 mangles non-ASCII
-file names, OneDrive locks files, Windows ignores case), and refuses a dirty or
-outdated checkout (fetch, HEAD must equal upstream). Exit 0 valid, 2 invalid,
-1 stopped. Deleting is not part of the tool: a reviewed list is removed in ONE
-commit in the notes repository (Gillette `5f57fdf`, 83 pictures, 32 of them by
-mistake - see the lesson above).
-Not handled: duplicate groups where several copies are used (needs link
-rewriting). An in-app panel is deliberately postponed: the audit is rarely
-needed and Gillette is clean after `1aca810` (valid, 0 unused, 0 broken); usage
-notes are in the header of `tools/image-audit.mjs`. Pinned by
-`test/image-audit.test.js`.
+Rules that stay for any tool or UI mark that offers deletion:
+- Fail-safe: if anything could not be read or parsed (a note, a link, an
+  embed), the result is invalid and NOTHING is offered for deletion. Count
+  what could NOT be read, not only what was read.
+- After any change in link parsing, run the read-only probe over the real
+  notes (every link through backlinks, move/rename and Preview) before
+  trusting such a tool again.
+- Deleting is a separate step after a human review, in ONE commit, with a
+  known way back (Gillette pictures: `git checkout <sha> -- Asset/<file>`).
+
+**Deferred idea: unused pictures in the tree.** Purpose: after notes are
+deleted, show which pictures nothing links to any more, so they can be removed
+safely. Planned shape: the file name of an unused picture is shown in red in
+the tree (like Backlinks). It is a hint only, never an action: nothing is
+deleted automatically, the user deletes a picture by hand. Fail-safe is
+mandatory: if any note could not be read, or any link to a picture could not
+be parsed, nothing is marked red. Before it is built, the real-data probe must
+show rewriter miss 0 and missing 0.
 
 ## Architecture rules (each one closes a whole class of bugs)
 
@@ -1414,13 +1458,13 @@ rule; when a fixed bug reveals a new class, add a rule here.
    loader of shared state gets the same guard and a test with a fake client
    that answers out of order.
 3. **One set of link rules.** Backlinks (`js/backlinks.js`), the reference
-   rewriter (`js/reference-rewriter.js`), the image audit (`js/image-audit.js`)
-   and link building (`buildFileLink`, `js/link-suggest.js`) must agree on what a
+   rewriter (`js/reference-rewriter.js`) and link building
+   (`buildFileLink`, `js/link-suggest.js`) must agree on what a
    link points at (see "Wiki links `[[...]]`" and "Link suggestions"). Markdown
    links are parsed in ONE place, `REF_TOKEN_RE` + `classifyRefMatch()`
    (`js/markdown-tokens.js`); no reader keeps its own link regex. A new link form
    is added to all of them in one change, with tests in each. A new WRITE format
-   needs a test for every reader (backlinks, move/rename, audit): `f02e83f`
+   needs a test for every reader (backlinks, move/rename): `f02e83f`
    started writing `[x](</a b.md>)` and nothing read it, so moves stopped
    updating those links and backlinks never saw them (fixed in `e803e0d`).
    Reading a link form that moves do not rewrite breaks notes silently (B1, B5).

@@ -44,6 +44,9 @@ Prefer automated coverage in `test/*.test.js` and `e2e_smoke_test.py` when pract
 - [ ] Ctrl+V of a screenshot into a note commits one image into the Asset folder and inserts `![name](relative link)` at the cursor; the picture shows in Preview at once.
 - [ ] Dragging an image file from the desktop onto the editor text (CodeMirror itself, not only the empty area) uploads it; a non-image file in the same drop is skipped.
 - [ ] Copying cells from Excel or a sentence from Word and pasting into a note inserts text, not an image.
+- [ ] Preview: dragging the resize handle of an image changes only that image; on release the Source line becomes `<img src="..." alt="..." width="N">`; Ctrl+Z undoes it in one step.
+- [ ] Source image menu: Move up/down move the whole line (disabled on the first/last line); Cut, Copy and Delete from text act on the image only; Escape or a click outside closes it.
+- [ ] Open image from the menu on a picture pasted a moment ago opens it in a new tab.
 - [ ] Discard is enabled only with unsaved changes; it asks first, restores the GitHub version and clears the dot and the Commit badge; Cancel changes nothing.
 - [ ] External images (`https://…`, shields.io) render; GitHub Actions badge paths like `../../actions/workflows/….yml/badge.svg` resolve to `https://github.com/{owner}/{repo}/actions/...`.
 - [ ] HTML files: Live/Preview show content in iframe; fullscreen stays in the current layout mode.
