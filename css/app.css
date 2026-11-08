@@ -376,19 +376,25 @@ button.secondary:hover { background: #21262d; }
 .file-item.folder:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 /* Root row above the tree: a plain button, not a drop target (see AGENTS.md). */
 .tree-home {
-  display: block;
-  width: calc(100% - 16px);
-  margin: 4px 8px 0;
-  padding: 6px 10px;
-  font-size: 12px;
-  font-weight: 400;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: calc(100% - 8px);
+  margin: 4px 4px 0;
+  padding: 5px 12px;
+  font: inherit;
+  font-weight: 500;
   text-align: left;
   color: var(--text);
   background: transparent;
-  border: 1px solid var(--border);
-  border-radius: 6px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  cursor: pointer;
 }
 .tree-home:hover { background: #21262d; }
+.tree-home:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.tree-home .icon { width: 16px; text-align: center; opacity: 0.8; flex-shrink: 0; }
+.tree-home .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tree-root-drop {
   margin: 4px 8px 8px;
   padding: 8px 10px;

@@ -149,7 +149,13 @@ export class FileTree {
       const home = document.createElement('button');
       home.type = 'button';
       home.className = 'tree-home';
-      home.textContent = '⌂ repository root';
+      const homeIcon = document.createElement('span');
+      homeIcon.className = 'icon';
+      homeIcon.textContent = '🏠';
+      const homeName = document.createElement('span');
+      homeName.className = 'name';
+      homeName.textContent = 'repository root';
+      home.append(homeIcon, homeName);
       home.title = 'Go to repository root';
       home.setAttribute('aria-label', 'Go to repository root');
       home.addEventListener('click', () => this.setActiveFolder(''));
