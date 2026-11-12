@@ -1,12 +1,15 @@
 // binary-viewer.js
-// View-only panel for PDF and office files: Source shows a stub,
-// Live/Preview show a native PDF embed or an office placeholder + Download.
+// View-only panel for PDF and office files:
+//   Source  → stub (editing not supported)
+//   Live/Preview → PDF embed, DOCX via Mammoth, XLSX via SheetJS, else helpful stub
 
 import { basenameOf, extOf } from './paths.js';
 import { kindFromPath } from './file-kind.js';
 
-/** @type {{ path: string, b64: string, objectUrl: string|null, kind: object }|null} */
+/** @type {{ path: string, b64: string, objectUrl: string|null, kind: object, arrayBuffer: ArrayBuffer|null }|null} */
 let current = null;
+/** @type {number} */
+let renderToken = 0;
 
 const OFFICE_MIME = {
   docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
@@ -21,6 +24,9 @@ const OFFICE_MIME = {
   odp: 'application/vnd.oasis.opendocument.presentation',
   pdf: 'application/pdf',
 };
+
+const MAMMOTH_CDN = 'https://cdn.jsdelivr.net/npm/mammoth@1.8.0/mammoth.browser.min.js';
+const XLSX_CDN = 'https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js';
 
 export function guessBinaryMime(path) {
   const e = extOf(path);
@@ -43,17 +49,19 @@ export function showBinaryViewer(rootEl, path, b64, layoutMode) {
   revokeCurrentUrl();
   const kind = kindFromPath(path);
   let objectUrl = null;
+  let arrayBuffer = null;
   try {
     const mime = guessBinaryMime(path);
     const binary = atob(b64);
     const bytes = new Uint8Array(binary.length);
     for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    arrayBuffer = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
     const blob = new Blob([bytes], { type: mime });
     objectUrl = URL.createObjectURL(blob);
   } catch (err) {
     console.warn('binary-viewer: blob failed', err);
   }
-  current = { path, b64, objectUrl, kind };
+  current = { path, b64, objectUrl, kind, arrayBuffer };
   rootEl.classList.remove('hidden');
   render(rootEl, layoutMode);
 }
@@ -62,6 +70,7 @@ export function showBinaryViewer(rootEl, path, b64, layoutMode) {
 export function hideBinaryViewer(rootEl) {
   revokeCurrentUrl();
   current = null;
+  renderToken++;
   if (rootEl) {
     rootEl.classList.add('hidden');
     rootEl.innerHTML = '';
@@ -110,12 +119,21 @@ function revokeCurrentUrl() {
   }
 }
 
+function b64ToArrayBuffer(b64) {
+  const binary = atob(b64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes.buffer;
+}
+
 function render(rootEl, layoutMode) {
   if (!current) return;
-  const { path, objectUrl, kind } = current;
+  const { path, objectUrl, kind, b64, arrayBuffer } = current;
   const name = basenameOf(path);
   const isSource = layoutMode === 'source';
   const isPdf = kind.kind === 'pdf';
+  const ext = extOf(path);
+  const myToken = ++renderToken;
 
   if (isSource) {
     rootEl.innerHTML = `
@@ -137,16 +155,148 @@ function render(rootEl, layoutMode) {
     return;
   }
 
-  // Office (and PDF without blob): informational card + embed attempt is not reliable for private repos
+  // DOCX → HTML via Mammoth
+  if (ext === 'docx') {
+    rootEl.innerHTML = `
+      <div class="binary-office-loading">
+        <div class="binary-stub-icon">📑</div>
+        <p>Loading document preview…</p>
+      </div>`;
+    const buf = arrayBuffer || b64ToArrayBuffer(b64);
+    loadScript(MAMMOTH_CDN, 'mammoth')
+      .then(() => {
+        if (myToken !== renderToken || !current || current.path !== path) return;
+        const mammoth = window.mammoth;
+        if (!mammoth || typeof mammoth.convertToHtml !== 'function') {
+          throw new Error('Mammoth failed to load');
+        }
+        return mammoth.convertToHtml({ arrayBuffer: buf });
+      })
+      .then((result) => {
+        if (myToken !== renderToken || !current || current.path !== path) return;
+        if (!result) return;
+        const warnings = (result.messages || [])
+          .filter((m) => m.type === 'warning')
+          .map((m) => m.message);
+        rootEl.innerHTML = `
+          <div class="binary-office-scroll">
+            <div class="binary-office-toolbar">
+              <span class="binary-office-name">${escapeHtml(name)}</span>
+              <span class="binary-office-badge">DOCX preview</span>
+            </div>
+            <div class="binary-office-html">${result.value || '<p><em>(empty document)</em></p>'}</div>
+            ${warnings.length ? `<div class="binary-office-warnings">${warnings.map((w) => escapeHtml(w)).join('<br>')}</div>` : ''}
+          </div>`;
+      })
+      .catch((err) => {
+        if (myToken !== renderToken) return;
+        console.warn('DOCX preview failed', err);
+        rootEl.innerHTML = officeFallbackHtml(name, 'Document', err && err.message, objectUrl);
+      });
+    return;
+  }
+
+  // XLSX / XLS → HTML table via SheetJS
+  if (ext === 'xlsx' || ext === 'xls') {
+    rootEl.innerHTML = `
+      <div class="binary-office-loading">
+        <div class="binary-stub-icon">📊</div>
+        <p>Loading spreadsheet preview…</p>
+      </div>`;
+    const buf = arrayBuffer || b64ToArrayBuffer(b64);
+    loadScript(XLSX_CDN, 'XLSX')
+      .then(() => {
+        if (myToken !== renderToken || !current || current.path !== path) return;
+        const XLSX = window.XLSX;
+        if (!XLSX || typeof XLSX.read !== 'function') {
+          throw new Error('SheetJS failed to load');
+        }
+        const wb = XLSX.read(buf, { type: 'array' });
+        const sheets = wb.SheetNames || [];
+        if (!sheets.length) {
+          rootEl.innerHTML = officeFallbackHtml(name, 'Spreadsheet', 'Workbook has no sheets', objectUrl);
+          return;
+        }
+        let tabs = sheets.map((s, i) =>
+          `<button type="button" class="binary-sheet-tab${i === 0 ? ' active' : ''}" data-sheet="${escapeAttr(s)}">${escapeHtml(s)}</button>`
+        ).join('');
+        const firstHtml = sheetToHtml(XLSX, wb.Sheets[sheets[0]]);
+        rootEl.innerHTML = `
+          <div class="binary-office-scroll binary-xlsx">
+            <div class="binary-office-toolbar">
+              <span class="binary-office-name">${escapeHtml(name)}</span>
+              <span class="binary-office-badge">Spreadsheet preview</span>
+            </div>
+            <div class="binary-sheet-tabs">${tabs}</div>
+            <div class="binary-sheet-body">${firstHtml}</div>
+          </div>`;
+        const body = rootEl.querySelector('.binary-sheet-body');
+        rootEl.querySelectorAll('.binary-sheet-tab').forEach((btn) => {
+          btn.addEventListener('click', () => {
+            rootEl.querySelectorAll('.binary-sheet-tab').forEach((b) => b.classList.remove('active'));
+            btn.classList.add('active');
+            const sheet = wb.Sheets[btn.dataset.sheet];
+            body.innerHTML = sheetToHtml(XLSX, sheet);
+          });
+        });
+      })
+      .catch((err) => {
+        if (myToken !== renderToken) return;
+        console.warn('XLSX preview failed', err);
+        rootEl.innerHTML = officeFallbackHtml(name, 'Spreadsheet', err && err.message, objectUrl);
+      });
+    return;
+  }
+
+  // Other office formats (pptx, odt, …): no reliable client-side renderer
   const label = kind.label || 'Office document';
-  rootEl.innerHTML = `
+  rootEl.innerHTML = officeFallbackHtml(name, label, null, objectUrl);
+}
+
+function sheetToHtml(XLSX, sheet) {
+  if (!sheet) return '<p><em>(empty sheet)</em></p>';
+  try {
+    return XLSX.utils.sheet_to_html(sheet, { editable: false });
+  } catch (_) {
+    return '<p><em>Could not render this sheet.</em></p>';
+  }
+}
+
+function officeFallbackHtml(name, label, errMsg, objectUrl) {
+  return `
     <div class="binary-stub binary-office">
       <div class="binary-stub-icon">📑</div>
       <div class="binary-stub-title">${escapeHtml(name)}</div>
-      <p class="binary-stub-msg">${escapeHtml(label)} — in-browser editing is not available.</p>
-      <p class="binary-stub-hint">Use the <b>Download</b> button in the toolbar to save the file and open it in a desktop application (Word, Excel, LibreOffice, etc.).</p>
-      ${objectUrl ? `<p class="binary-stub-meta"><a class="binary-open-tab" href="${objectUrl}" target="_blank" rel="noopener">Open in new tab</a> (may not render for this format)</p>` : ''}
+      <p class="binary-stub-msg">${escapeHtml(label)} — in-browser preview is not available for this format.</p>
+      ${errMsg ? `<p class="binary-stub-hint">${escapeHtml(errMsg)}</p>` : ''}
+      <p class="binary-stub-hint">Use the <b>Download</b> button in the toolbar to save the file and open it in a desktop application.</p>
+      ${objectUrl ? `<p class="binary-stub-meta"><a class="binary-open-tab" href="${objectUrl}" target="_blank" rel="noopener">Open in new tab</a></p>` : ''}
     </div>`;
+}
+
+/** Load a UMD script once; resolves when globalName is on window. */
+function loadScript(src, globalName) {
+  if (window[globalName]) return Promise.resolve(window[globalName]);
+  const existing = document.querySelector(`script[data-binary-lib="${globalName}"]`);
+  if (existing) {
+    return new Promise((resolve, reject) => {
+      if (window[globalName]) return resolve(window[globalName]);
+      existing.addEventListener('load', () => resolve(window[globalName]));
+      existing.addEventListener('error', () => reject(new Error('Failed to load ' + globalName)));
+    });
+  }
+  return new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = src;
+    s.async = true;
+    s.dataset.binaryLib = globalName;
+    s.onload = () => {
+      if (window[globalName]) resolve(window[globalName]);
+      else reject(new Error(globalName + ' global missing after load'));
+    };
+    s.onerror = () => reject(new Error('Failed to load script: ' + src));
+    document.head.appendChild(s);
+  });
 }
 
 function escapeHtml(s) {

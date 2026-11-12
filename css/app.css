@@ -3144,3 +3144,122 @@ body.md-binary-open .editor-toolbar {
   border: 0;
   background: #525659;
 }
+
+/* Office (DOCX / XLSX) rendered preview */
+.binary-office-loading {
+  margin: auto;
+  text-align: center;
+  color: var(--text, #e6edf3);
+  opacity: 0.85;
+  padding: 2rem;
+}
+.binary-office-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  background: #fff;
+  color: #1a1a1a;
+}
+.binary-office-toolbar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.5rem 1rem;
+  background: var(--bg-elevated, #161b22);
+  color: var(--text, #e6edf3);
+  border-bottom: 1px solid var(--border, #30363d);
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+.binary-office-name {
+  font-weight: 600;
+  font-size: 0.9rem;
+  word-break: break-all;
+}
+.binary-office-badge {
+  font-size: 0.75rem;
+  opacity: 0.7;
+  margin-left: auto;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.binary-office-html {
+  padding: 1.5rem 2rem 3rem;
+  max-width: 52rem;
+  margin: 0 auto;
+  line-height: 1.55;
+  font-size: 15px;
+  font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+}
+.binary-office-html p { margin: 0 0 0.75em; }
+.binary-office-html h1, .binary-office-html h2, .binary-office-html h3 {
+  margin: 1.2em 0 0.5em;
+  line-height: 1.25;
+}
+.binary-office-html table {
+  border-collapse: collapse;
+  margin: 0.75em 0;
+  width: 100%;
+}
+.binary-office-html td, .binary-office-html th {
+  border: 1px solid #ccc;
+  padding: 0.35em 0.6em;
+  vertical-align: top;
+}
+.binary-office-html img {
+  max-width: 100%;
+  height: auto;
+}
+.binary-office-warnings {
+  padding: 0.5rem 1rem;
+  font-size: 0.8rem;
+  color: #9a6700;
+  background: #fff8c5;
+  border-top: 1px solid #d4a72c;
+}
+
+.binary-sheet-tabs {
+  flex: 0 0 auto;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  padding: 0.4rem 0.75rem;
+  background: #f0f2f5;
+  border-bottom: 1px solid #d0d7de;
+}
+.binary-sheet-tab {
+  border: 1px solid #d0d7de;
+  background: #fff;
+  color: #24292f;
+  border-radius: 4px;
+  padding: 0.25rem 0.65rem;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+.binary-sheet-tab.active {
+  background: #0969da;
+  border-color: #0969da;
+  color: #fff;
+}
+.binary-sheet-body {
+  padding: 0.75rem;
+  overflow: auto;
+}
+.binary-sheet-body table {
+  border-collapse: collapse;
+  font-size: 13px;
+  font-family: ui-sans-serif, system-ui, sans-serif;
+}
+.binary-sheet-body td, .binary-sheet-body th {
+  border: 1px solid #d0d7de;
+  padding: 0.25rem 0.5rem;
+  white-space: pre-wrap;
+}
+.binary-sheet-body th {
+  background: #f6f8fa;
+  font-weight: 600;
+}
