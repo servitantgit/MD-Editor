@@ -377,6 +377,7 @@
         </div>
         <div class="tb-group tb-export desktop-tool" role="group" aria-label="Export">
           <button class="secondary" id="btn-export-pdf" disabled title="Export the active page to PDF">PDF</button>
+          <button class="secondary" id="btn-download" disabled title="Download the open file to your device">Download</button>
         </div>
         <div class="tb-group tb-file" role="group" aria-label="File actions">
           <button id="btn-save" class="tb-save" disabled title="Save now (desktop). On phone: autosave runs on idle; status dot shows sync state.">
@@ -421,6 +422,7 @@
         <div id="editor-container">
           <textarea id="editor"></textarea>
           <div id="editor-dropzone-overlay" class="hidden">Drop to add an image to the file</div>
+          <div id="binary-viewer" class="binary-viewer hidden" aria-label="File preview"></div>
         </div>
         <div id="backlinks-panel" class="backlinks-panel hidden" aria-label="Backlinks"></div>
         <div id="minimap-wrap" class="minimap-wrap hidden" title="Click or drag to scroll">

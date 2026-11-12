@@ -13,7 +13,7 @@
 import { TabsModel, tabLabels, tabsStorageKey } from './tabs.js';
 import { createTabBar } from './tabs-ui.js';
 import { b64ToUtf8 } from './github-client.js';
-import { kindFromPath } from './file-kind.js';
+import { kindFromPath, isViewOnlyPath } from './file-kind.js';
 
 /**
  * @param {object} deps
@@ -145,8 +145,16 @@ export function createTabsSession(deps) {
     const state = deps.getState();
     const path = state.currentPath;
     if (els.currentFileLabel) els.currentFileLabel.textContent = path || 'No file selected';
-    if (els.btnSave) els.btnSave.disabled = !path;
-    if (els.btnExportPdf) els.btnExportPdf.disabled = !path;
+    const viewOnly = path && isViewOnlyPath(path);
+    if (els.btnSave) els.btnSave.disabled = !path || !!viewOnly;
+    if (els.btnExportPdf) {
+      if (!path || viewOnly) els.btnExportPdf.disabled = true;
+      else {
+        const k = kindFromPath(path);
+        els.btnExportPdf.disabled = !(k.kind === 'markdown' || k.kind === 'html');
+      }
+    }
+    if (els.btnDownload) els.btnDownload.disabled = !viewOnly;
     if (els.btnDelete) els.btnDelete.disabled = !path;
     const ft = deps.getFileTree();
     if (path) ft.setActive(path);
@@ -166,6 +174,8 @@ export function createTabsSession(deps) {
         const node = document.getElementById(id);
         if (node) node.classList.add('hidden');
       }
+      if (deps.hideBinaryFile) deps.hideBinaryFile();
+      if (els.btnDownload) els.btnDownload.disabled = true;
     }
   }
 
@@ -200,12 +210,22 @@ export function createTabsSession(deps) {
     const editorHandle = deps.getEditorHandle();
     const fileTree = deps.getFileTree();
     let autosave = deps.getAutosave && deps.getAutosave();
+    const viewOnly = isViewOnlyPath(path);
 
     if (!reload && state.currentPath === path && tabDocs.has(path)) {
-      editorHandle.easyMDE.codemirror.focus();
+      if (!viewOnly && editorHandle && editorHandle.easyMDE) {
+        editorHandle.easyMDE.codemirror.focus();
+      }
       if (deps.resurfaceDraftBanner) void deps.resurfaceDraftBanner(path);
       if (deps.isMobileShell && deps.isMobileShell() && deps.setMobileSidebarOpen) {
         deps.setMobileSidebarOpen(false);
+      }
+      // Re-show binary viewer if we already have it cached (e.g. tab click).
+      if (viewOnly && deps.showBinaryFile) {
+        const cachedBin = tabDocs.get(path);
+        if (cachedBin && cachedBin.binary && cachedBin.b64) {
+          deps.showBinaryFile(path, cachedBin.b64, kindFromPath(path));
+        }
       }
       return;
     }
@@ -222,16 +242,93 @@ export function createTabsSession(deps) {
     }
 
     const cached = tabDocs.get(path);
-    const useCache = !reload && !!cached && !!cached.doc && !cached.stale;
+    const useCache = !reload && !!cached && (
+      viewOnly ? (!!cached.binary && !!cached.b64 && !cached.stale)
+               : (!!cached.doc && !cached.stale)
+    );
 
     if (els.btnSave) els.btnSave.disabled = true;
     if (els.btnExportPdf) els.btnExportPdf.disabled = true;
+    if (els.btnDownload) els.btnDownload.disabled = true;
     if (els.btnDelete) els.btnDelete.disabled = true;
     if (els.currentFileLabel) els.currentFileLabel.textContent = path;
     fileTree.setActive(path);
     if (!useCache) deps.setSaveStatus('Loading...', false);
 
     try {
+      // --- View-only binary (PDF / office): no text decode, no drafts/autosave ---
+      if (viewOnly) {
+        let b64;
+        let sha;
+        if (useCache) {
+          b64 = cached.b64;
+          sha = cached.sha;
+        } else {
+          const fetched = await state.client.getFileB64(path);
+          if (seq !== openSeq) return;
+          b64 = fetched.b64;
+          sha = fetched.sha;
+        }
+
+        if (switching) {
+          const leavingUnsaved = activeFileUnsaved || (autosave ? autosave.hasUnsavedDraft() : false);
+          if (autosave && autosave.hasUnsavedDraft()) {
+            if (leavingTab) leavingTab.commitSeen = false;
+            await autosave.flushCurrentFile();
+            if (seq !== openSeq) return;
+          }
+          if (leavingTab) leavingTab.unsaved = leavingUnsaved && !leavingTab.commitSeen;
+        }
+
+        deps.hideDraftBanner();
+        if (deps.setAutosaveStatus) deps.setAutosaveStatus(null);
+        state.currentPath = path;
+        if (deps.isMobileShell && deps.isMobileShell() && deps.setMobileSidebarOpen) {
+          deps.setMobileSidebarOpen(false);
+        }
+        state.currentSha = sha;
+        renderEmptyState();
+
+        // Release any text-file autosave hold without inventing a draft for binary.
+        if (autosave && typeof autosave.release === 'function') autosave.release();
+
+        tabDocs.set(path, {
+          binary: true,
+          b64,
+          sha,
+          unsaved: false,
+          stale: false,
+          commitSeen: false,
+          doc: null,
+        });
+
+        // Empty CM doc so toolbar/preview plumbing does not crash; viewer owns the UI.
+        if (editorHandle) {
+          const empty = editorHandle.createDoc('');
+          showDocInEditor(empty);
+        }
+
+        tabs.open(path);
+        tabs.activate(path);
+        persistTabs();
+        renderTabs();
+
+        const kind = kindFromPath(path);
+        if (els.btnSave) els.btnSave.disabled = true;
+        if (els.btnDiscard) els.btnDiscard.disabled = true;
+        if (els.btnExportPdf) els.btnExportPdf.disabled = true;
+        if (els.btnDownload) els.btnDownload.disabled = false;
+        if (els.btnDelete) els.btnDelete.disabled = false;
+        if (deps.updateLangBadge) deps.updateLangBadge(kind);
+        if (deps.showBinaryFile) deps.showBinaryFile(path, b64, kind);
+        deps.setSaveStatus('Ready (view only)', false);
+        if (deps.refreshCommitBadge) deps.refreshCommitBadge();
+        return;
+      }
+
+      // Leaving a binary tab → hide the viewer panel.
+      if (deps.hideBinaryFile) deps.hideBinaryFile();
+
       let remoteText;
       let sha;
       if (useCache) {
@@ -306,6 +403,7 @@ export function createTabsSession(deps) {
       if (els.btnExportPdf) {
         els.btnExportPdf.disabled = !(kind.kind === 'markdown' || kind.kind === 'html');
       }
+      if (els.btnDownload) els.btnDownload.disabled = true;
       if (els.btnDelete) els.btnDelete.disabled = false;
       if (deps.updateLangBadge) deps.updateLangBadge(kind);
       if (editorHandle && typeof editorHandle.setLanguage === 'function') {

@@ -24,10 +24,17 @@ import { Autosave } from './autosave.js';
 import { createTabsSession } from './tabs-session.js';
 import { WorkingTree } from './working-tree.js';
 import { createCommitHistoryUI } from './commit-history-ui.js';
-import { kindFromPath, isHtmlPath, isMarkdownPath } from './file-kind.js';
+import { kindFromPath, isHtmlPath, isMarkdownPath, isViewOnlyPath } from './file-kind.js';
 import { parseHeadingOutline } from './doc-outline.js';
 import { createBacklinkIndex } from './backlinks.js';
 import { buildHtmlSrcdoc } from './html-preview.js';
+import {
+  showBinaryViewer,
+  hideBinaryViewer,
+  refreshBinaryViewer,
+  downloadBinaryFile,
+  getCurrentBinary,
+} from './binary-viewer.js';
 import { createMinimap } from './minimap.js';
 import { createScrollSync } from './scroll-sync.js';
 import { createLinkSuggest } from './link-suggest.js';
@@ -127,7 +134,9 @@ const els = {
   btnMoreFile: document.getElementById('btn-more-file'),
   moreFileMenu: document.getElementById('more-file-menu'),
   btnExportPdf: document.getElementById('btn-export-pdf'),
+  btnDownload: document.getElementById('btn-download'),
   btnDelete: document.getElementById('btn-delete'),
+  binaryViewer: document.getElementById('binary-viewer'),
   saveStatus: document.getElementById('save-status'),
   autosaveStatus: document.getElementById('autosave-status'),
   draftBanner: document.getElementById('draft-banner'),
@@ -209,7 +218,9 @@ function ensureTabsSession() {
       emptyState: els.emptyState,
       currentFileLabel: els.currentFileLabel,
       btnSave: els.btnSave,
+      btnDiscard: els.btnDiscard,
       btnExportPdf: els.btnExportPdf,
+      btnDownload: els.btnDownload,
       btnDelete: els.btnDelete,
       docOutline: els.docOutline,
       minimapWrap: els.minimapWrap,
@@ -237,6 +248,8 @@ function ensureTabsSession() {
     setSuppressEditorChange: (v) => { suppressEditorChange = !!v; },
     formatAge: typeof formatAge === 'function' ? formatAge : undefined,
     closeCurrentFile: (opts) => closeCurrentFile(opts),
+    showBinaryFile: (path, b64, kind) => showBinaryFile(path, b64, kind),
+    hideBinaryFile: () => hideBinaryFile(),
   });
   return tabsSession;
 }
@@ -361,6 +374,7 @@ async function init() {
   // event as `folderPath`, creating "[object PointerEvent]/name.md".
   ensureFileOps().setupToolbar();
   if (els.btnSave) els.btnSave.onclick = onSaveFile;
+  if (els.btnDownload) els.btnDownload.onclick = onDownloadFile;
   if (els.btnDiscard) els.btnDiscard.onclick = onDiscardFile;
   if (els.btnExportPdf) els.btnExportPdf.onclick = onExportPdf;
 
@@ -1197,6 +1211,45 @@ function previewImageFile(path) {
     });
 }
 
+/** Show the view-only panel for PDF / office files and hide the text editor chrome. */
+function showBinaryFile(path, b64, kind) {
+  const root = els.binaryViewer;
+  if (!root) return;
+  // Mark the editor body so CSS can hide EasyMDE and stretch the viewer.
+  if (els.editorContainer) els.editorContainer.classList.add('binary-open');
+  document.body.classList.add('md-binary-open');
+  showBinaryViewer(root, path, b64, layoutMode);
+  if (els.btnDownload) els.btnDownload.disabled = false;
+  if (els.btnSave) els.btnSave.disabled = true;
+  if (els.btnDiscard) els.btnDiscard.disabled = true;
+  if (els.btnExportPdf) els.btnExportPdf.disabled = true;
+  // Hide text-only panels while viewing a binary.
+  if (els.findBar) els.findBar.classList.add('hidden');
+  if (els.docOutline) els.docOutline.classList.add('hidden');
+  if (els.minimapWrap) els.minimapWrap.classList.add('hidden');
+  if (els.backlinksPanel) els.backlinksPanel.classList.add('hidden');
+  void kind;
+}
+
+function hideBinaryFile() {
+  const root = els.binaryViewer;
+  hideBinaryViewer(root);
+  if (els.editorContainer) els.editorContainer.classList.remove('binary-open');
+  document.body.classList.remove('md-binary-open');
+  if (els.btnDownload) els.btnDownload.disabled = true;
+}
+
+function onDownloadFile() {
+  const bin = getCurrentBinary();
+  if (bin && bin.path && bin.b64) {
+    downloadBinaryFile(bin.path, bin.b64);
+    return;
+  }
+  // Fallback: if somehow opened without the panel state, refetch is not needed —
+  // Download is only enabled for view-only tabs that already hold b64.
+  setSaveStatus('Nothing to download', true);
+}
+
 // (tab session logic lives in js/tabs-session.js — shims above)
 
 async function onSaveFile() {
@@ -1237,6 +1290,7 @@ function closeCurrentFile({ flush = true } = {}) {
   }
   hideDraftBanner();
   setAutosaveStatus(null);
+  hideBinaryFile();
   state.currentPath = null;
   state.currentSha = null;
   els.currentFileLabel.textContent = 'No file selected';
@@ -1250,6 +1304,7 @@ function closeCurrentFile({ flush = true } = {}) {
   }
   els.btnSave.disabled = true;
   els.btnExportPdf.disabled = true;
+  if (els.btnDownload) els.btnDownload.disabled = true;
   els.btnDelete.disabled = true;
   // No file is open now: swap the (emptied) editor for the empty-state card.
   renderEmptyState();
@@ -2103,6 +2158,10 @@ function applyLayoutMode(mode) {
   }
   if (scrollSyncHandle) {
     try { scrollSyncHandle.refresh(); } catch (_) {}
+  }
+  // PDF / office view-only panel follows Source vs Live/Preview.
+  if (els.binaryViewer && !els.binaryViewer.classList.contains('hidden')) {
+    refreshBinaryViewer(els.binaryViewer, layoutMode);
   }
 }
 

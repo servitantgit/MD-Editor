@@ -15,6 +15,11 @@ const TABLE = [
   { exts: ['xml', 'svg'], kind: 'code', mode: 'xml', label: 'XML', preview: 'code' },
   { exts: ['yml', 'yaml'], kind: 'code', mode: 'yaml', label: 'YAML', preview: 'code' },
   { exts: ['txt', 'log', 'csv', 'tsv'], kind: 'text', mode: 'null', label: 'Text', preview: 'code' },
+  // View-only: no source editing; Live/Preview show a viewer (PDF) or a stub (office).
+  { exts: ['pdf'], kind: 'pdf', mode: 'null', label: 'PDF', preview: 'pdf' },
+  { exts: ['docx', 'doc', 'odt', 'rtf'], kind: 'office', mode: 'null', label: 'Document', preview: 'office' },
+  { exts: ['xlsx', 'xls', 'ods'], kind: 'office', mode: 'null', label: 'Spreadsheet', preview: 'office' },
+  { exts: ['pptx', 'ppt', 'odp'], kind: 'office', mode: 'null', label: 'Presentation', preview: 'office' },
 ];
 
 const byExt = new Map();
@@ -31,7 +36,7 @@ export function extOfPath(path) {
 
 /**
  * @param {string} path
- * @returns {{ kind: string, mode: string, label: string, preview: 'markdown'|'html'|'code', ext: string }}
+ * @returns {{ kind: string, mode: string, label: string, preview: string, ext: string }}
  */
 export function kindFromPath(path) {
   const ext = extOfPath(path);
@@ -48,8 +53,15 @@ export function isEditableTextPath(path) {
   const binary = new Set([
     'png', 'jpg', 'jpeg', 'gif', 'webp', 'ico', 'bmp', 'pdf', 'zip', 'gz', 'wasm',
     'woff', 'woff2', 'ttf', 'eot', 'mp3', 'mp4', 'webm', 'exe', 'dll',
+    'docx', 'doc', 'odt', 'rtf', 'xlsx', 'xls', 'ods', 'pptx', 'ppt', 'odp',
   ]);
   return !binary.has(extOfPath(path));
+}
+
+/** PDF / office files opened in a view-only panel (no source editing). */
+export function isViewOnlyPath(path) {
+  const k = kindFromPath(path);
+  return k.kind === 'pdf' || k.kind === 'office';
 }
 
 export function isMarkdownPath(path) {

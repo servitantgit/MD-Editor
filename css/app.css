@@ -3067,3 +3067,80 @@ body.md-layout-source .editor-preview-active-side {
 .editor-preview-side input[type="checkbox"] {
   cursor: pointer;
 }
+
+/* ── Binary / PDF / office view-only panel ─────────────────────────────── */
+#editor-container {
+  position: relative;
+}
+.binary-viewer {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg, #0d1117);
+  overflow: hidden;
+}
+.binary-viewer.hidden {
+  display: none !important;
+}
+/* When a binary is open, hide EasyMDE chrome inside the container */
+#editor-container.binary-open > .EasyMDEContainer,
+#editor-container.binary-open > textarea,
+body.md-binary-open .editor-toolbar {
+  visibility: hidden !important;
+  pointer-events: none !important;
+}
+body.md-binary-open .editor-toolbar {
+  display: none !important;
+}
+
+.binary-stub {
+  margin: auto;
+  max-width: 28rem;
+  padding: 2rem 1.5rem;
+  text-align: center;
+  color: var(--text, #e6edf3);
+}
+.binary-stub-icon {
+  font-size: 3rem;
+  line-height: 1;
+  margin-bottom: 0.75rem;
+}
+.binary-stub-title {
+  font-size: 1.15rem;
+  font-weight: 600;
+  word-break: break-all;
+  margin-bottom: 0.75rem;
+}
+.binary-stub-msg {
+  opacity: 0.9;
+  margin: 0 0 0.75rem;
+  line-height: 1.45;
+}
+.binary-stub-hint {
+  opacity: 0.7;
+  font-size: 0.92rem;
+  margin: 0;
+  line-height: 1.45;
+}
+.binary-stub-meta {
+  margin-top: 1rem;
+  font-size: 0.9rem;
+}
+.binary-open-tab {
+  color: var(--accent, #58a6ff);
+}
+
+.binary-preview-frame {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+.binary-pdf-frame {
+  flex: 1;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: #525659;
+}
