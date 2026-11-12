@@ -671,6 +671,7 @@ function showApp(owner, repo) {
   fileTree = new FileTree(els.fileTreeEl, {
     onOpenFile: openFile,
     onPreviewImage: previewImageFile,
+    onDownloadFile: (path) => downloadPathFromTree(path),
     getActivePath: () => state.currentPath,
     ...ops.treeHandlers(),
   });
@@ -1248,6 +1249,25 @@ function onDownloadFile() {
   // Fallback: if somehow opened without the panel state, refetch is not needed —
   // Download is only enabled for view-only tabs that already hold b64.
   setSaveStatus('Nothing to download', true);
+}
+
+/** Context-menu Download from the file tree: works for any path (md, pdf, office, image). */
+async function downloadPathFromTree(path) {
+  if (!path || !state.client) return;
+  const bin = getCurrentBinary();
+  if (bin && bin.path === path && bin.b64) {
+    downloadBinaryFile(path, bin.b64);
+    return;
+  }
+  setSaveStatus('Downloading…', false);
+  try {
+    const { b64 } = await state.client.getFileB64(path);
+    downloadBinaryFile(path, b64);
+    setSaveStatus('Downloaded ' + path.split('/').pop(), false);
+  } catch (err) {
+    console.warn('downloadPathFromTree', path, err);
+    setSaveStatus('Download failed: ' + (err && err.message ? err.message : err), true);
+  }
 }
 
 // (tab session logic lives in js/tabs-session.js — shims above)

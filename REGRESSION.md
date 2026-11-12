@@ -112,6 +112,17 @@ Prefer automated coverage in `test/*.test.js` and `e2e_smoke_test.py` when pract
 
 - [ ] PDF export produces non-blank pages; images not split incorrectly across pages when covered by e2e.
 
+## View-only PDF / office + Download
+
+Covered by `e2e_smoke_test.py` (mock GitHub + Mammoth stub):
+
+- [ ] `.pdf` / `.docx` rows in the tree are openable (not greyed `.other`); icons differ from plain text.
+- [ ] Open PDF: Source shows the “editing not supported” stub; Live/Preview show an iframe with a `blob:` URL; **Save** disabled, **Download** enabled.
+- [ ] **Download** on an open PDF saves bytes starting with `%PDF`.
+- [ ] Open DOCX via context-menu **Open**: Source stub; Live/Preview show HTML preview; **Download** saves a ZIP/OOXML (`PK…`).
+- [ ] Tree context menu on md / pdf / office includes **Open** and **Download**; Download of a markdown file yields its text without needing the tab open first.
+- [ ] Closing the view-only tab or switching to a text file hides `#binary-viewer` and re-enables the normal editor chrome.
+
 ## After any change that touches autosave, tabs, or Commit
 
 ```bash

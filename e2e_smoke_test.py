@@ -1,12 +1,12 @@
 """End-to-end browser test (not a unit test): launches the app in a real
 headless Chromium, replaces the GitHub API with fake responses (so no
-real token is needed) and checks the three things the user complained about:
-editing, scrolling a long document, and rendering images in the preview.
+real token is needed) and checks editing, scrolling, images, PDF export,
+HTML Live preview, and view-only PDF/DOCX open + Download.
 Run: first `node serve.mjs` (port 8080), then `python3 e2e_smoke_test.py`.
 Requires: pip install playwright && playwright install chromium
 CDN libraries (jsdelivr/cdnjs) are replaced here with local copies from node_modules —
 this replacement is ONLY for the test environment; production index.html still uses
-the real CDN.
+the real CDN. Mammoth (DOCX preview) is stubbed the same way.
 """
 import re
 import json
@@ -135,6 +135,64 @@ FAKE_TREE = {
     ]
 }
 
+# Minimal valid-enough PDF for native iframe preview (view-only panel).
+MINIMAL_PDF_BYTES = (
+    b"%PDF-1.1\n"
+    b"1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n"
+    b"2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj\n"
+    b"3 0 obj<</Type/Page/MediaBox[0 0 300 144]/Parent 2 0 R>>endobj\n"
+    b"trailer<</Size 4/Root 1 0 R>>\n"
+    b"startxref\n0\n%%EOF\n"
+)
+MINIMAL_PDF_B64 = base64.b64encode(MINIMAL_PDF_BYTES).decode()
+
+
+def _minimal_docx_bytes():
+    """Tiny OOXML package with one paragraph — enough for Mammoth/stub paths."""
+    import io
+    import zipfile
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as z:
+        z.writestr(
+            "[Content_Types].xml",
+            '<?xml version="1.0" encoding="UTF-8"?>'
+            '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
+            '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
+            '<Default Extension="xml" ContentType="application/xml"/>'
+            '<Override PartName="/word/document.xml" '
+            'ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>'
+            '</Types>',
+        )
+        z.writestr(
+            "_rels/.rels",
+            '<?xml version="1.0" encoding="UTF-8"?>'
+            '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+            '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" '
+            'Target="word/document.xml"/>'
+            '</Relationships>',
+        )
+        z.writestr(
+            "word/document.xml",
+            '<?xml version="1.0" encoding="UTF-8"?>'
+            '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+            '<w:body><w:p><w:r><w:t>DOCX_BODY_OK</w:t></w:r></w:p></w:body>'
+            '</w:document>',
+        )
+    return buf.getvalue()
+
+
+MINIMAL_DOCX_BYTES = _minimal_docx_bytes()
+MINIMAL_DOCX_B64 = base64.b64encode(MINIMAL_DOCX_BYTES).decode()
+
+# Stub Mammoth so e2e does not depend on the real CDN (offline CI).
+MAMMOTH_STUB_JS = b"""
+window.mammoth = {
+  convertToHtml: function () {
+    return Promise.resolve({ value: '<p>DOCX_PREVIEW_OK</p>', messages: [] });
+  }
+};
+"""
+
 
 def handle_github_api(route, request):
     url = request.url
@@ -234,6 +292,14 @@ def handle_github_api(route, request):
         html_body = "<!DOCTYPE html><html><body><h1>HTML_PAGE_OK</h1><p>Hello HTML preview</p></body></html>"
         b64 = base64.b64encode(html_body.encode("utf-8")).decode()
         route.fulfill(status=200, content_type="application/json", body=json.dumps({"content": b64, "sha": "sha-html"}))
+    elif "/contents/Docs/sample.pdf" in url:
+        route.fulfill(status=200, content_type="application/json", body=json.dumps({
+            "content": MINIMAL_PDF_B64, "sha": "sha-pdf", "size": len(MINIMAL_PDF_BYTES),
+        }))
+    elif "/contents/Docs/sample.docx" in url:
+        route.fulfill(status=200, content_type="application/json", body=json.dumps({
+            "content": MINIMAL_DOCX_B64, "sha": "sha-docx", "size": len(MINIMAL_DOCX_BYTES),
+        }))
     elif "/contents/DragSrc/move-me.txt" in url or "/contents/DragTarget/DragSrc/move-me.txt" in url:
         # Scenario I: moveFile reads the source before PUTting it at the new path.
         b64 = base64.b64encode(b"move me please\n").decode()
@@ -341,6 +407,11 @@ with sync_playwright() as p:
     # fontawesome — icons only, not critical for functionality
     page.route(re.compile(r"https://cdnjs\.cloudflare\.com/.*"), lambda r, _: r.fulfill(status=200, content_type="text/css", body=b""))
     page.route(re.compile(r"https://maxcdn\.bootstrapcdn\.com/.*"), lambda r, _: r.fulfill(status=200, content_type="text/css", body=b""))
+    # Mammoth is loaded on demand for DOCX preview — stub it offline.
+    page.route(
+        re.compile(r"https://cdn\.jsdelivr\.net/npm/mammoth@[^/]+/mammoth\.browser\.min\.js"),
+        lambda route, _: route.fulfill(status=200, content_type="text/javascript", body=MAMMOTH_STUB_JS),
+    )
 
     page.goto("http://localhost:8080/", wait_until="networkidle")
 
@@ -1402,6 +1473,101 @@ with sync_playwright() as p:
         page.click('#layout-toggle .layout-btn[data-mode="source"]')
     else:
         print("⚠ page.html not in tree after refresh — skipped HTML preview check")
+
+    # --- View-only PDF / DOCX: open, Source stub, Live/Preview content, Download ---
+    EXTRA_TREE.append({"path": "Docs/sample.pdf", "type": "blob", "sha": "sha-pdf"})
+    EXTRA_TREE.append({"path": "Docs/sample.docx", "type": "blob", "sha": "sha-docx"})
+    page.click("#btn-refresh")
+    page.wait_for_selector(".file-item.folder:has-text('Docs')", timeout=8000)
+    page.click(".file-item.folder:has-text('Docs')")
+    page.wait_for_selector(".file-item:not(.folder):has-text('sample.pdf')", timeout=5000)
+
+    # Tree shows view-only files as openable (not greyed .other)
+    assert page.locator(".file-item.other:has-text('sample.pdf')").count() == 0, \
+        "PDF row must not be marked as non-openable (.other)"
+    assert page.locator(".file-item.other:has-text('sample.docx')").count() == 0, \
+        "DOCX row must not be marked as non-openable (.other)"
+
+    # Open PDF → Source stub, Live shows iframe
+    page.click(".file-item:not(.folder):has-text('sample.pdf')")
+    page.wait_for_function(
+        "() => document.getElementById('binary-viewer') && "
+        "!document.getElementById('binary-viewer').classList.contains('hidden')",
+        timeout=8000,
+    )
+    page.click('#layout-toggle .layout-btn[data-mode="source"]')
+    page.wait_for_timeout(200)
+    stub = page.inner_text("#binary-viewer")
+    assert "Editing of this file type is not supported" in stub, f"PDF Source stub missing: {stub[:200]!r}"
+    assert page.locator("#btn-download").is_enabled(), "Download must be enabled for PDF"
+    assert page.locator("#btn-save").is_disabled(), "Save must stay disabled for view-only PDF"
+    page.click('#layout-toggle .layout-btn[data-mode="preview"]')
+    page.wait_for_selector("#binary-viewer iframe.binary-pdf-frame", timeout=8000)
+    pdf_src = page.get_attribute("#binary-viewer iframe.binary-pdf-frame", "src") or ""
+    assert pdf_src.startswith("blob:"), f"PDF iframe must use blob URL, got {pdf_src[:80]!r}"
+    print("✓ PDF view-only: Source stub + Preview iframe (blob URL)")
+
+    with page.expect_download(timeout=15000) as pdf_dl:
+        page.click("#btn-download")
+    pdf_dl_path = BASE / "_e2e_sample.pdf"
+    pdf_dl.value.save_as(pdf_dl_path)
+    assert pdf_dl_path.stat().st_size > 20, "downloaded PDF is empty"
+    assert pdf_dl_path.read_bytes()[:4] == b"%PDF", "downloaded file is not a PDF"
+    pdf_dl_path.unlink(missing_ok=True)
+    print("✓ PDF Download button saves the original bytes")
+
+    # Context menu on DOCX: Open + Download must be present
+    page.click(".file-item:not(.folder):has-text('sample.docx')", button="right")
+    page.wait_for_selector(".folder-context-menu", timeout=5000)
+    menu_actions = page.eval_on_selector_all(
+        ".folder-context-menu button",
+        "els => els.map(e => e.getAttribute('data-action'))",
+    )
+    assert "open" in menu_actions, f"DOCX context menu missing Open: {menu_actions}"
+    assert "download" in menu_actions, f"DOCX context menu missing Download: {menu_actions}"
+    page.click(".folder-context-menu button[data-action='open']")
+    page.wait_for_function(
+        "() => document.getElementById('current-file') && "
+        "document.getElementById('current-file').textContent.includes('sample.docx')",
+        timeout=8000,
+    )
+    page.click('#layout-toggle .layout-btn[data-mode="source"]')
+    page.wait_for_timeout(200)
+    docx_stub = page.inner_text("#binary-viewer")
+    assert "Editing of this file type is not supported" in docx_stub, \
+        f"DOCX Source stub missing: {docx_stub[:200]!r}"
+    page.click('#layout-toggle .layout-btn[data-mode="preview"]')
+    page.wait_for_function(
+        "() => { const el = document.getElementById('binary-viewer');"
+        " return el && el.innerText.includes('DOCX_PREVIEW_OK'); }",
+        timeout=15000,
+    )
+    print("✓ DOCX view-only: context Open, Source stub, Preview HTML via Mammoth stub")
+
+    with page.expect_download(timeout=15000) as docx_dl:
+        page.click("#btn-download")
+    docx_dl_path = BASE / "_e2e_sample.docx"
+    docx_dl.value.save_as(docx_dl_path)
+    assert docx_dl_path.stat().st_size > 50, "downloaded DOCX is empty"
+    assert docx_dl_path.read_bytes()[:2] == b"PK", "downloaded DOCX is not a ZIP/OOXML package"
+    docx_dl_path.unlink(missing_ok=True)
+    print("✓ DOCX Download button saves the original bytes")
+
+    # Context-menu Download from tree for markdown
+    page.click(".file-item.folder:has-text('Notes')")
+    page.wait_for_selector(".file-item:not(.folder):has-text('Test note.md')", timeout=5000)
+    page.click(".file-item:not(.folder):has-text('Test note.md')", button="right")
+    page.wait_for_selector(".folder-context-menu button[data-action='download']", timeout=5000)
+    with page.expect_download(timeout=15000) as md_dl:
+        page.click(".folder-context-menu button[data-action='download']")
+    md_path = BASE / "_e2e_note.md"
+    md_dl.value.save_as(md_path)
+    body = md_path.read_text(encoding="utf-8", errors="replace")
+    assert "Test note" in body or "Hello" in body, f"unexpected md download body: {body[:120]!r}"
+    md_path.unlink(missing_ok=True)
+    print("✓ Tree context-menu Download works for markdown")
+
+    page.click('#layout-toggle .layout-btn[data-mode="source"]')
 
     # --- Space near inline image must not jump caret to end of document ---
     page.click(".file-item:not(.folder):has-text('Test note.md')")

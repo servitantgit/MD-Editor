@@ -47,6 +47,7 @@ export class FileTree {
    * @param {{
    *   onOpenFile: (path: string) => void,
    *   onPreviewImage: (path: string) => void,
+   *   onDownloadFile: (path: string) => void,
    *   onMoveFile: (oldPath: string, targetFolder: string) => Promise<void>,
    *   onMoveFolder: (oldPath: string, targetParent: string) => Promise<void>,
    *   getActivePath: () => string|null,
@@ -442,12 +443,32 @@ export class FileTree {
   }
 
   _showFileContextMenu(x, y, filePath) {
-    this._showContextMenu(x, y, [
-      { action: 'new-file-here', label: '📄 New file in this folder' },
-      { action: 'copy-link', label: '🔗 Copy as link' },
-      { action: 'rename', label: '✏️ Rename' },
-      { action: 'delete', label: '🗑 Delete', className: 'danger' },
-    ], (action) => {
+    const isImg = isImagePath(filePath);
+    const isViewOnly = isViewOnlyPath(filePath);
+    const isText = !isImg && !isViewOnly && isEditableTextPath(filePath);
+    const canOpen = isText || isViewOnly || isImg;
+    // Unified openable-file menu: Open + Download for md/text/pdf/office;
+    // images keep preview as Open; Download still offered for every blob.
+    const items = [];
+    if (canOpen) {
+      items.push({ action: 'open', label: isImg ? '🖼️ Open preview' : '📂 Open' });
+    }
+    items.push({ action: 'download', label: '⬇️ Download' });
+    items.push({ action: 'new-file-here', label: '📄 New file in this folder' });
+    if (isText || isViewOnly) {
+      items.push({ action: 'copy-link', label: '🔗 Copy as link' });
+    }
+    items.push({ action: 'rename', label: '✏️ Rename' });
+    items.push({ action: 'delete', label: '🗑 Delete', className: 'danger' });
+
+    this._showContextMenu(x, y, items, (action) => {
+      if (action === 'open') {
+        if (isImg && this.handlers?.onPreviewImage) this.handlers.onPreviewImage(filePath);
+        else if (this.handlers?.onOpenFile) this.handlers.onOpenFile(filePath);
+      }
+      if (action === 'download' && this.handlers?.onDownloadFile) {
+        this.handlers.onDownloadFile(filePath);
+      }
       if (action === 'new-file-here' && this.handlers?.onCreateFileIn) {
         this.handlers.onCreateFileIn(dirnameOf(filePath));
       }

@@ -150,7 +150,7 @@ responses). Runs automatically in CI:
 ```bash
 pip install playwright && playwright install chromium
 node serve.mjs &                  # start the app on :8080
-python3 e2e_smoke_test.py         # editing, hybrid autosave + 409, tabs, create/delete, search, PDF, images, History/HTML
+python3 e2e_smoke_test.py         # editing, hybrid autosave + 409, tabs, create/delete, search, PDF export, images, History/HTML, PDF/DOCX view + Download
 ```
 
 ## Features
@@ -221,14 +221,24 @@ python3 e2e_smoke_test.py         # editing, hybrid autosave + 409, tabs, create
   `[text](path)` links alike).
 - **Folder management** — the "+ folder" button creates a new folder (via a
   `.gitkeep` file); right-click a folder in the tree → "Rename" / "Delete".
-  Renaming updates references in `.md` files. Files also have a right-click
-  menu: *New file here* / *Rename* / *Delete*.
+  Renaming updates references in `.md` files.
 - **File and folder context menus** — right-click any file or folder in the
-  tree to create, rename, or delete. The menu survives edge clicks and closes
-  on Escape.
--
-- **Copy as link** — right-click a file → “🔗 Copy as link” copies a markdown link that always works wherever it is pasted. Links are repo-root absolute (`/path/to/file.md`), not relative to the file you happened to have open when you copied them, so pasting the link into a note in a different folder never breaks. The editor, the reference rewriter, and GitHub all resolve `/path` from the repo root. **PDF export** — the "📄 PDF" button renders the active page with images
-  resolved in place. Large images are scaled to avoid page-break splits.
+  tree. For files the menu is unified across markdown, code, PDF and office:
+  **Open** (or **Open preview** for images), **Download**, *New file here*,
+  *Copy as link* (text / view-only), *Rename*, *Delete*. The menu closes on
+  Escape and survives edge clicks.
+- **Copy as link** — right-click a file → “🔗 Copy as link” copies a
+  repo-root absolute markdown link (`/path/to/file.md`) that stays valid when
+  pasted into a note in another folder.
+- **PDF & office view-only** — click a `.pdf` / `.docx` / `.xlsx` (and related
+  office extensions) in the tree to open it as a tab. **Source** shows a stub
+  that editing is not supported; **Live / Preview** render the file (native
+  PDF iframe, DOCX via Mammoth, XLSX via SheetJS). The toolbar **Download**
+  button (and the tree menu item) save the original bytes to disk. Save /
+  Discard / PDF-export stay disabled for these tabs.
+- **PDF export** — the "PDF" button renders the *active markdown/HTML page*
+  with images resolved in place. Large images are scaled to avoid page-break
+  splits. This is separate from opening an existing `.pdf` from the repo.
 
 ## Known limitations
 
@@ -244,6 +254,10 @@ python3 e2e_smoke_test.py         # editing, hybrid autosave + 409, tabs, create
   no other note in the repository has the same name.
 - PDF export depends on `html2pdf.js` (html2canvas) — very large images can
   slow generation down.
+- Opening repo `.pdf` / office files is **view-only** (no in-browser editing).
+  DOCX/XLSX preview loads Mammoth / SheetJS from a CDN on first use; offline
+  or blocked CDNs fall back to the Download-only message. PPTX and legacy
+  binary formats (`.doc`, `.ppt`, …) have no client-side renderer yet.
 - Full-text search degrades to session-only when IndexedDB is unavailable
   (private window, Safari ITP, storage disabled) or the origin quota is
   exceeded; search still works, but results are not persisted.
