@@ -1478,18 +1478,27 @@ with sync_playwright() as p:
     EXTRA_TREE.append({"path": "Docs/sample.pdf", "type": "blob", "sha": "sha-pdf"})
     EXTRA_TREE.append({"path": "Docs/sample.docx", "type": "blob", "sha": "sha-docx"})
     page.click("#btn-refresh")
-    page.wait_for_selector(".file-item.folder:has-text('Docs')", timeout=8000)
-    page.click(".file-item.folder:has-text('Docs')")
-    page.wait_for_selector(".file-item:not(.folder):has-text('sample.pdf')", timeout=5000)
+    # New folders are expanded by default (collapsedFolders only seeds on first
+    # render). Clicking Docs would TOGGLE and hide the children — only expand if
+    # the toggle shows the collapsed marker.
+    page.wait_for_selector(".file-item.folder[data-path='Docs']", timeout=8000)
+    page.evaluate("""() => {
+      const row = document.querySelector(".file-item.folder[data-path='Docs']");
+      if (!row) return;
+      const toggle = row.querySelector('.folder-toggle');
+      if (toggle && /▸/.test(toggle.textContent || '')) row.click();
+    }""")
+    page.wait_for_selector(".file-item[data-path='Docs/sample.pdf']", timeout=8000)
+    page.wait_for_selector(".file-item[data-path='Docs/sample.docx']", timeout=5000)
 
     # Tree shows view-only files as openable (not greyed .other)
-    assert page.locator(".file-item.other:has-text('sample.pdf')").count() == 0, \
+    assert page.locator(".file-item.other[data-path='Docs/sample.pdf']").count() == 0, \
         "PDF row must not be marked as non-openable (.other)"
-    assert page.locator(".file-item.other:has-text('sample.docx')").count() == 0, \
+    assert page.locator(".file-item.other[data-path='Docs/sample.docx']").count() == 0, \
         "DOCX row must not be marked as non-openable (.other)"
 
     # Open PDF → Source stub, Live shows iframe
-    page.click(".file-item:not(.folder):has-text('sample.pdf')")
+    page.click(".file-item[data-path='Docs/sample.pdf']")
     page.wait_for_function(
         "() => document.getElementById('binary-viewer') && "
         "!document.getElementById('binary-viewer').classList.contains('hidden')",
@@ -1517,7 +1526,15 @@ with sync_playwright() as p:
     print("✓ PDF Download button saves the original bytes")
 
     # Context menu on DOCX: Open + Download must be present
-    page.click(".file-item:not(.folder):has-text('sample.docx')", button="right")
+    # Ensure Docs is still expanded after PDF open (active folder may have changed).
+    page.evaluate("""() => {
+      const row = document.querySelector(".file-item.folder[data-path='Docs']");
+      if (!row) return;
+      const toggle = row.querySelector('.folder-toggle');
+      if (toggle && /▸/.test(toggle.textContent || '')) row.click();
+    }""")
+    page.wait_for_selector(".file-item[data-path='Docs/sample.docx']", timeout=5000)
+    page.click(".file-item[data-path='Docs/sample.docx']", button="right")
     page.wait_for_selector(".folder-context-menu", timeout=5000)
     menu_actions = page.eval_on_selector_all(
         ".folder-context-menu button",
@@ -1554,9 +1571,14 @@ with sync_playwright() as p:
     print("✓ DOCX Download button saves the original bytes")
 
     # Context-menu Download from tree for markdown
-    page.click(".file-item.folder:has-text('Notes')")
-    page.wait_for_selector(".file-item:not(.folder):has-text('Test note.md')", timeout=5000)
-    page.click(".file-item:not(.folder):has-text('Test note.md')", button="right")
+    page.evaluate("""() => {
+      const row = document.querySelector(".file-item.folder[data-path='Notes']");
+      if (!row) return;
+      const toggle = row.querySelector('.folder-toggle');
+      if (toggle && /▸/.test(toggle.textContent || '')) row.click();
+    }""")
+    page.wait_for_selector(".file-item[data-path='Notes/Test note.md']", timeout=5000)
+    page.click(".file-item[data-path='Notes/Test note.md']", button="right")
     page.wait_for_selector(".folder-context-menu button[data-action='download']", timeout=5000)
     with page.expect_download(timeout=15000) as md_dl:
         page.click(".folder-context-menu button[data-action='download']")

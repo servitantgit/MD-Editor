@@ -3084,14 +3084,21 @@ body.md-layout-source .editor-preview-active-side {
 .binary-viewer.hidden {
   display: none !important;
 }
-/* When a binary is open, hide EasyMDE chrome inside the container */
+/* When a binary is open, hide EasyMDE + text-only toolbar groups.
+   Keep .editor-toolbar itself (Download / Delete / status) visible. */
 #editor-container.binary-open > .EasyMDEContainer,
-#editor-container.binary-open > textarea,
-body.md-binary-open .editor-toolbar {
+#editor-container.binary-open > textarea {
   visibility: hidden !important;
   pointer-events: none !important;
 }
-body.md-binary-open .editor-toolbar {
+body.md-binary-open .tb-group.tb-edit,
+body.md-binary-open .tb-group.tb-view,
+body.md-binary-open #btn-mobile-fmt,
+body.md-binary-open #lang-badge {
+  display: none !important;
+}
+body.md-binary-open .tb-group.tb-export #btn-export-pdf {
+  /* Export-to-PDF is markdown/HTML only; Download stays. */
   display: none !important;
 }
 
