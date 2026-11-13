@@ -3324,11 +3324,3 @@ body.md-engine-cm6 #btn-editor-engine {
   border-color: #d29922;
   color: #e3b341;
 }
-
-/* Engine toggle: always readable in the header */
-#btn-editor-engine {
-  flex-shrink: 0;
-  white-space: nowrap;
-  font-size: 12px;
-  padding: 6px 10px;
-}
