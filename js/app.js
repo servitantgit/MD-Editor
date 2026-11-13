@@ -2265,10 +2265,10 @@ function updateEngineButtonLabel() {
   const btn = els.btnEditorEngine;
   if (!btn) return;
   const cm6 = getEditorEngine() === ENGINE_CM6;
-  btn.textContent = cm6 ? 'CM6' : 'Classic';
+  btn.textContent = cm6 ? 'Engine: CM6' : 'Engine: Classic';
   btn.title = cm6
-    ? 'Experimental CodeMirror 6 editor (click to return to Classic EasyMDE)'
-    : 'Classic EasyMDE editor (click to try experimental CodeMirror 6)';
+    ? 'Experimental CodeMirror 6 — click to return to Classic (EasyMDE)'
+    : 'Classic editor (EasyMDE) — click to try experimental CodeMirror 6';
   btn.classList.toggle('active-panel', cm6);
   btn.setAttribute('aria-pressed', cm6 ? 'true' : 'false');
 }
