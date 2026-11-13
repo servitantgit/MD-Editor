@@ -8,11 +8,11 @@
  * @returns {Promise<{ EditorView: any, EditorState: any, basicSetup: any }>}
  */
 async function loadCm6Modules() {
-  // jsdelivr +esm for codemirror@6.x is 404; esm.sh serves the package graph.
-  // codemirror@6 re-exports EditorView + basicSetup; state is a separate package.
-  const mod = await import('https://esm.sh/codemirror@6');
-  const stateMod = await import('https://esm.sh/@codemirror/state@6');
-  const EditorView = mod.EditorView;
+  // Single entry that re-exports basicSetup + EditorView; state comes from the same graph.
+  const mod = await import('https://cdn.jsdelivr.net/npm/codemirror@6.65.3/+esm');
+  const stateMod = await import('https://cdn.jsdelivr.net/npm/@codemirror/state@6.5.2/+esm');
+  const viewMod = await import('https://cdn.jsdelivr.net/npm/@codemirror/view@6.36.5/+esm');
+  const EditorView = mod.EditorView || viewMod.EditorView;
   const basicSetup = mod.basicSetup;
   const EditorState = stateMod.EditorState;
   if (!EditorView || !EditorState || !basicSetup) {
