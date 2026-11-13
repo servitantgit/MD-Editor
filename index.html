@@ -296,7 +296,6 @@
       <button class="secondary layout-btn desktop-only" data-mode="split" title="Hybrid live: source + preview">Live</button>
       <button class="secondary layout-btn" data-mode="preview" title="Preview only — read">Preview</button>
     </div>
-    <button type="button" class="secondary desktop-only" id="btn-editor-engine" title="Classic EasyMDE editor (click to try experimental CodeMirror 6)" aria-pressed="false">Classic</button>
     <button class="secondary desktop-only" id="btn-history" title="History: recent commits (drawer from the right). Click again to close.">History</button>
     <button class="desktop-only" id="btn-commit" title="Commit: package all local changes into one Git commit (drawer). Click again to close." disabled>Commit <span id="commit-badge" class="changes-badge hidden">0</span></button>
     <button class="secondary desktop-only" id="btn-refresh" title="Refresh tree">↻</button>
@@ -420,7 +419,6 @@
         <div id="doc-outline" class="doc-outline hidden" aria-label="Document outline"></div>
         <div id="editor-container">
           <textarea id="editor"></textarea>
-          <div id="editor-cm6-host" class="editor-cm6-host hidden" aria-label="CodeMirror 6 editor"></div>
           <div id="editor-dropzone-overlay" class="hidden">Drop to add an image to the file</div>
           <div id="binary-viewer" class="binary-viewer hidden" aria-label="File preview"></div>
         </div>
