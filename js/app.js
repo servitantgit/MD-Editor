@@ -8,6 +8,13 @@ import { GitHubClient, b64ToUtf8 } from './github-client.js';
 import { ImageResolver } from './image-resolver.js';
 import { encodeLinkPath } from './paths.js';
 import { createEditor } from './editor.js';
+import { createCm6Editor } from './editor-cm6.js';
+import {
+  getEditorEngine,
+  setEditorEngine,
+  ENGINE_CLASSIC,
+  ENGINE_CM6,
+} from './editor-engine.js';
 import { FileTree } from './file-tree.js';
 import { setupImageDropzone, pickImageFiles, uploadImage } from './upload.js';
 import { setupFolderDropzone } from './folder-upload.js';
@@ -152,6 +159,8 @@ const els = {
   appSidebar: document.getElementById('app-sidebar'),
   editorContainer: document.getElementById('editor-container'),
   editorTextarea: document.getElementById('editor'),
+  editorCm6Host: document.getElementById('editor-cm6-host'),
+  btnEditorEngine: document.getElementById('btn-editor-engine'),
   dropOverlay: document.getElementById('editor-dropzone-overlay'),
   imageFileInput: document.getElementById('image-file-input'),
 
@@ -599,7 +608,7 @@ function startDemo() {
   }
 }
 
-function showApp(owner, repo) {
+async function showApp(owner, repo) {
   commitSessionGeneration++;
   // A different repo means a different file list. Reset it here, not only on
   // logout, so a re-login cannot hand the new session the previous repo's tree
@@ -650,7 +659,12 @@ function showApp(owner, repo) {
     else els.demoBanner.classList.add('hidden');
   }
 
-  if (typeof window.EasyMDE !== 'function') {
+  const engine = getEditorEngine();
+  document.body.classList.toggle('md-engine-cm6', engine === ENGINE_CM6);
+  document.body.classList.toggle('md-engine-classic', engine !== ENGINE_CM6);
+  updateEngineButtonLabel();
+
+  if (engine !== ENGINE_CM6 && typeof window.EasyMDE !== 'function') {
     const miss = (window.__mdCdnMiss || ['easymde']).join(', ');
     const msg = 'Editor libraries failed to load (' + miss + '). '
       + 'Usually an ad-blocker (ERR_BLOCKED_BY_CLIENT) blocked cdn.jsdelivr.net. '
@@ -677,7 +691,7 @@ function showApp(owner, repo) {
   });
   ops.updateActiveFolderPathLabel(fileTree.getActiveFolder());
 
-  editorHandle = createEditor(els.editorTextarea, {
+  const editorDeps = {
     marked: window.marked,
     purifier: window.DOMPurify,
     imageResolver,
@@ -723,7 +737,39 @@ function showApp(owner, repo) {
     }),
     onImageResolveFailures: (count) =>
       setSaveStatus(`Preview: failed to load ${count} image(s) — details shown in place of the image`, true),
-  });
+  };
+
+  // Classic (EasyMDE) is the default production path. CM6 is opt-in and loads CDN modules on demand.
+  if (engine === ENGINE_CM6) {
+    if (els.editorTextarea) els.editorTextarea.classList.add('hidden');
+    if (els.editorCm6Host) els.editorCm6Host.classList.remove('hidden');
+    try {
+      setSaveStatus('Loading CodeMirror 6…', false);
+      editorHandle = await createCm6Editor(els.editorCm6Host, editorDeps);
+      setSaveStatus('CM6 (experimental)', false);
+    } catch (err) {
+      console.error('CM6 failed to load, falling back to Classic', err);
+      setEditorEngine(ENGINE_CLASSIC);
+      document.body.classList.remove('md-engine-cm6');
+      document.body.classList.add('md-engine-classic');
+      updateEngineButtonLabel();
+      if (els.editorCm6Host) els.editorCm6Host.classList.add('hidden');
+      if (els.editorTextarea) els.editorTextarea.classList.remove('hidden');
+      if (typeof window.EasyMDE !== 'function') {
+        setSaveStatus('CM6 failed and EasyMDE is unavailable', true);
+        return;
+      }
+      editorHandle = createEditor(els.editorTextarea, editorDeps);
+      setSaveStatus('Classic editor (CM6 load failed)', true);
+    }
+  } else {
+    if (els.editorCm6Host) {
+      els.editorCm6Host.classList.add('hidden');
+      els.editorCm6Host.innerHTML = '';
+    }
+    if (els.editorTextarea) els.editorTextarea.classList.remove('hidden');
+    editorHandle = createEditor(els.editorTextarea, editorDeps);
+  }
 
   ensureTabsSession().setupTabBar();
   renderTabs();
@@ -743,14 +789,23 @@ function showApp(owner, repo) {
   try { setupDocOutline(); } catch (e) { console.warn(e); }
   try { setupBacklinks(); } catch (e) { console.warn(e); }
   try { setupMobileShell(); } catch (e) { console.warn(e); }
-  try { setupMinimap(); } catch (e) { console.warn(e); }
-  if (els.minimapWrap && !els.minimapWrap.classList.contains('hidden')) {
-    ensureMinimap();
+  // CM6 phase 1 has no CM5-compatible minimap / scroll-sync / link-suggest yet.
+  if (getEditorEngine() !== ENGINE_CM6) {
+    try { setupMinimap(); } catch (e) { console.warn(e); }
+    if (els.minimapWrap && !els.minimapWrap.classList.contains('hidden')) {
+      ensureMinimap();
+    }
+    // Scroll sync lives with the editor, not with the minimap: closing the map
+    // must not leave the Live panes scrolling on their own.
+    try { ensureScrollSync(); } catch (e) { console.warn(e); }
+    try { ensureLinkSuggest(); } catch (e) { console.warn(e); }
+  } else {
+    destroyMinimap();
+    destroyScrollSync();
+    destroyLinkSuggest();
+    if (els.minimapWrap) els.minimapWrap.classList.add('hidden');
   }
-  // Scroll sync lives with the editor, not with the minimap: closing the map
-  // must not leave the Live panes scrolling on their own.
-  try { ensureScrollSync(); } catch (e) { console.warn(e); }
-  try { ensureLinkSuggest(); } catch (e) { console.warn(e); }
+  try { setupEngineToggle(); } catch (e) { console.warn(e); }
   ensureCommitHistoryUI().setup();
   workingTree.clearAll();
   ensureCommitHistoryUI().refreshBadge();
@@ -1098,6 +1153,17 @@ function setSearchStatus(indexSize, degraded) {
 }
 
 function insertMarkdownAtCursor(text) {
+  if (!editorHandle) return;
+  // CM6 phase 1: append via value() — no CM5 Doc.replaceRange.
+  if (editorHandle.engine === 'cm6' || getEditorEngine() === ENGINE_CM6) {
+    const cur = editorHandle.easyMDE.value();
+    const insert = (cur && !cur.endsWith('\n') ? '\n' : '') + text + '\n';
+    editorHandle.easyMDE.value(cur + insert);
+    if (typeof editorHandle.easyMDE.codemirror.focus === 'function') {
+      editorHandle.easyMDE.codemirror.focus();
+    }
+    return;
+  }
   const cm = editorHandle.easyMDE.codemirror;
   const doc = cm.getDoc();
   const cursor = doc.getCursor();
@@ -2193,5 +2259,140 @@ function setupLayoutToggle() {
     if (!btn) return;
     applyLayoutMode(btn.dataset.mode);
   });
+}
+
+function updateEngineButtonLabel() {
+  const btn = els.btnEditorEngine;
+  if (!btn) return;
+  const cm6 = getEditorEngine() === ENGINE_CM6;
+  btn.textContent = cm6 ? 'CM6' : 'Classic';
+  btn.title = cm6
+    ? 'Experimental CodeMirror 6 editor (click to return to Classic EasyMDE)'
+    : 'Classic EasyMDE editor (click to try experimental CodeMirror 6)';
+  btn.classList.toggle('active-panel', cm6);
+  btn.setAttribute('aria-pressed', cm6 ? 'true' : 'false');
+}
+
+function setupEngineToggle() {
+  const btn = els.btnEditorEngine;
+  if (!btn || btn.dataset.bound) return;
+  btn.dataset.bound = '1';
+  updateEngineButtonLabel();
+  btn.addEventListener('click', () => { void switchEditorEngine(); });
+}
+
+/**
+ * Flip Classic ↔ CM6, rebuild only the editor shell, reopen the current file.
+ * Tree / session / Git client stay put so the experiment is cheap to reverse.
+ */
+async function switchEditorEngine() {
+  const next = getEditorEngine() === ENGINE_CM6 ? ENGINE_CLASSIC : ENGINE_CM6;
+  const path = state.currentPath;
+  if (autosave && path) {
+    try { await autosave.flushCurrentFile(); } catch (_) { /* ignore */ }
+  }
+  setEditorEngine(next);
+  setSaveStatus(next === ENGINE_CM6 ? 'Switching to CM6…' : 'Switching to Classic…', false);
+
+  if (editorHandle) {
+    destroyMinimap();
+    destroyScrollSync();
+    destroyLinkSuggest();
+    try { editorHandle.destroy(); } catch (_) { /* ignore */ }
+    editorHandle = null;
+  }
+
+  document.body.classList.toggle('md-engine-cm6', next === ENGINE_CM6);
+  document.body.classList.toggle('md-engine-classic', next !== ENGINE_CM6);
+  updateEngineButtonLabel();
+
+  const editorDeps = {
+    marked: window.marked,
+    purifier: window.DOMPurify,
+    imageResolver,
+    getCurrentPath: () => state.currentPath,
+    onOpenInternalLink: (p) => {
+      if (p && typeof openFile === 'function') openFile(p).catch(() => {
+        setSaveStatus('Link target not found: ' + p, true);
+      });
+    },
+    onImageUploadRequest: () => els.imageFileInput.click(),
+    onFindStateChange: renderFindState,
+    onChange: (text) => {
+      if (suppressEditorChange) return;
+      ensureAutosave().onChange(text);
+      scheduleOutlineRefresh();
+      scheduleBacklinksRefresh();
+      try {
+        if (state.currentPath && workingTree) {
+          workingTree.setDirty(state.currentPath, text, state.currentSha || null);
+          ensureCommitHistoryUI().refreshBadge();
+          if (fileTree) fileTree.setDirtyMap(workingTree.statusMap());
+        }
+      } catch (_) { /* ignore */ }
+    },
+    onImagePaste: (file) => uploadImage(file, {
+      getClient: () => state.client,
+      getImageResolver: () => imageResolver,
+      getCurrentPath: () => state.currentPath,
+      getAllFiles: () => state.allFiles,
+      insertText: insertMarkdownAtCursor,
+      onStatus: setSaveStatus,
+      onUploaded: () => loadTree(),
+    }),
+    onImageResolveFailures: (count) =>
+      setSaveStatus(`Preview: failed to load ${count} image(s) — details shown in place of the image`, true),
+  };
+
+  try {
+    if (next === ENGINE_CM6) {
+      if (els.editorTextarea) els.editorTextarea.classList.add('hidden');
+      if (els.editorCm6Host) els.editorCm6Host.classList.remove('hidden');
+      editorHandle = await createCm6Editor(els.editorCm6Host, editorDeps);
+      destroyMinimap();
+      destroyScrollSync();
+      destroyLinkSuggest();
+      if (els.minimapWrap) els.minimapWrap.classList.add('hidden');
+    } else {
+      if (els.editorCm6Host) {
+        els.editorCm6Host.classList.add('hidden');
+        els.editorCm6Host.innerHTML = '';
+      }
+      if (els.editorTextarea) els.editorTextarea.classList.remove('hidden');
+      if (typeof window.EasyMDE !== 'function') {
+        setSaveStatus('EasyMDE is not available', true);
+        setEditorEngine(ENGINE_CM6);
+        return;
+      }
+      editorHandle = createEditor(els.editorTextarea, editorDeps);
+      try { ensureScrollSync(); } catch (_) { /* ignore */ }
+      try { ensureLinkSuggest(); } catch (_) { /* ignore */ }
+    }
+  } catch (err) {
+    console.error('switchEditorEngine failed', err);
+    setSaveStatus('Engine switch failed: ' + (err && err.message ? err.message : err), true);
+    setEditorEngine(ENGINE_CLASSIC);
+    return;
+  }
+
+  // Tab docs were CM5 Doc objects or CM6 stubs — force reload from cache/remote.
+  try {
+    if (tabsSession && typeof tabsSession.markStale === 'function' && path) {
+      tabsSession.markStale([path]);
+    }
+  } catch (_) { /* ignore */ }
+
+  if (path) {
+    try {
+      await openFile(path, { reload: true });
+    } catch (e) {
+      console.warn('reopen after engine switch', e);
+    }
+  } else if (editorHandle) {
+    editorHandle.showDoc(editorHandle.createDoc(''));
+  }
+  try { applyLayoutMode(layoutMode); } catch (_) { /* ignore */ }
+  if (editorHandle) editorHandle.refreshLayout();
+  setSaveStatus(next === ENGINE_CM6 ? 'CM6 (experimental)' : 'Classic editor', false);
 }
 

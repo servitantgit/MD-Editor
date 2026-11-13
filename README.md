@@ -70,6 +70,8 @@ js/
   upload.js                image uploads (OS drag & drop + toolbar button)
   folder-upload.js         folder upload via drag & drop (webkitGetAsEntry)
   print-export.js          Print… / Save as PDF via the browser print dialog
+  editor-engine.js         Classic vs experimental CM6 engine flag
+  editor-cm6.js            CodeMirror 6 opt-in editor (phase 1)
   working-tree.js          tracks dirty state across files/tabs for Commit panel
   commit-ui.js             Commit + History panel DOM helpers
   diff-util.js             unified diff helpers for the History panel
