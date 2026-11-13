@@ -659,11 +659,10 @@ async function showApp(owner, repo) {
     else els.demoBanner.classList.add('hidden');
   }
 
-  // Do NOT set md-engine-cm6 until CM6 actually mounts — a failed load used to
-  // leave an overlay host covering EasyMDE so Source/Live/Preview looked identical.
-  forceClassicEditorShell();
-  updateEngineButtonLabel();
   const engine = getEditorEngine();
+  document.body.classList.toggle('md-engine-cm6', engine === ENGINE_CM6);
+  document.body.classList.toggle('md-engine-classic', engine !== ENGINE_CM6);
+  updateEngineButtonLabel();
 
   if (engine !== ENGINE_CM6 && typeof window.EasyMDE !== 'function') {
     const miss = (window.__mdCdnMiss || ['easymde']).join(', ');
@@ -742,19 +741,20 @@ async function showApp(owner, repo) {
 
   // Classic (EasyMDE) is the default production path. CM6 is opt-in and loads CDN modules on demand.
   if (engine === ENGINE_CM6) {
+    if (els.editorTextarea) els.editorTextarea.classList.add('hidden');
+    if (els.editorCm6Host) els.editorCm6Host.classList.remove('hidden');
     try {
       setSaveStatus('Loading CodeMirror 6…', false);
-      // Mount into host only after modules load; shell class applied on success.
-      if (els.editorCm6Host) els.editorCm6Host.classList.remove('hidden');
       editorHandle = await createCm6Editor(els.editorCm6Host, editorDeps);
-      forceCm6EditorShell();
-      updateEngineButtonLabel();
       setSaveStatus('CM6 (experimental)', false);
     } catch (err) {
       console.error('CM6 failed to load, falling back to Classic', err);
       setEditorEngine(ENGINE_CLASSIC);
-      forceClassicEditorShell();
+      document.body.classList.remove('md-engine-cm6');
+      document.body.classList.add('md-engine-classic');
       updateEngineButtonLabel();
+      if (els.editorCm6Host) els.editorCm6Host.classList.add('hidden');
+      if (els.editorTextarea) els.editorTextarea.classList.remove('hidden');
       if (typeof window.EasyMDE !== 'function') {
         setSaveStatus('CM6 failed and EasyMDE is unavailable', true);
         return;
@@ -763,7 +763,11 @@ async function showApp(owner, repo) {
       setSaveStatus('Classic editor (CM6 load failed)', true);
     }
   } else {
-    forceClassicEditorShell();
+    if (els.editorCm6Host) {
+      els.editorCm6Host.classList.add('hidden');
+      els.editorCm6Host.innerHTML = '';
+    }
+    if (els.editorTextarea) els.editorTextarea.classList.remove('hidden');
     editorHandle = createEditor(els.editorTextarea, editorDeps);
   }
 
@@ -2257,30 +2261,6 @@ function setupLayoutToggle() {
   });
 }
 
-
-/** Classic shell: CM6 host must not cover EasyMDE (absolute overlay). */
-function forceClassicEditorShell() {
-  document.body.classList.remove('md-engine-cm6');
-  document.body.classList.add('md-engine-classic');
-  if (els.editorCm6Host) {
-    els.editorCm6Host.classList.add('hidden');
-    els.editorCm6Host.innerHTML = '';
-    els.editorCm6Host.setAttribute('aria-hidden', 'true');
-  }
-  if (els.editorTextarea) els.editorTextarea.classList.remove('hidden');
-}
-
-/** CM6 shell only after a live editor exists in the host. */
-function forceCm6EditorShell() {
-  document.body.classList.add('md-engine-cm6');
-  document.body.classList.remove('md-engine-classic');
-  if (els.editorTextarea) els.editorTextarea.classList.add('hidden');
-  if (els.editorCm6Host) {
-    els.editorCm6Host.classList.remove('hidden');
-    els.editorCm6Host.setAttribute('aria-hidden', 'false');
-  }
-}
-
 function updateEngineButtonLabel() {
   const btn = els.btnEditorEngine;
   if (!btn) return;
@@ -2322,8 +2302,8 @@ async function switchEditorEngine() {
     editorHandle = null;
   }
 
-  // Stay on classic shell until CM6 mounts successfully.
-  forceClassicEditorShell();
+  document.body.classList.toggle('md-engine-cm6', next === ENGINE_CM6);
+  document.body.classList.toggle('md-engine-classic', next !== ENGINE_CM6);
   updateEngineButtonLabel();
 
   const editorDeps = {
@@ -2366,18 +2346,22 @@ async function switchEditorEngine() {
 
   try {
     if (next === ENGINE_CM6) {
+      if (els.editorTextarea) els.editorTextarea.classList.add('hidden');
       if (els.editorCm6Host) els.editorCm6Host.classList.remove('hidden');
       editorHandle = await createCm6Editor(els.editorCm6Host, editorDeps);
-      forceCm6EditorShell();
-      updateEngineButtonLabel();
       destroyMinimap();
       destroyScrollSync();
       destroyLinkSuggest();
       if (els.minimapWrap) els.minimapWrap.classList.add('hidden');
     } else {
-      forceClassicEditorShell();
+      if (els.editorCm6Host) {
+        els.editorCm6Host.classList.add('hidden');
+        els.editorCm6Host.innerHTML = '';
+      }
+      if (els.editorTextarea) els.editorTextarea.classList.remove('hidden');
       if (typeof window.EasyMDE !== 'function') {
         setSaveStatus('EasyMDE is not available', true);
+        setEditorEngine(ENGINE_CM6);
         return;
       }
       editorHandle = createEditor(els.editorTextarea, editorDeps);
