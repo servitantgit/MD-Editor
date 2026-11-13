@@ -69,7 +69,7 @@ js/
   file-tree.js             file tree + drag & drop for files and folders (context menu)
   upload.js                image uploads (OS drag & drop + toolbar button)
   folder-upload.js         folder upload via drag & drop (webkitGetAsEntry)
-  pdf-export.js            exports the active page to PDF
+  print-export.js          Print… / Save as PDF via the browser print dialog
   working-tree.js          tracks dirty state across files/tabs for Commit panel
   commit-ui.js             Commit + History panel DOM helpers
   diff-util.js             unified diff helpers for the History panel
@@ -150,7 +150,7 @@ responses). Runs automatically in CI:
 ```bash
 pip install playwright && playwright install chromium
 node serve.mjs &                  # start the app on :8080
-python3 e2e_smoke_test.py         # editing, hybrid autosave + 409, tabs, create/delete, search, PDF export, images, History/HTML, PDF/DOCX view + Download
+python3 e2e_smoke_test.py         # editing, hybrid autosave + 409, tabs, create/delete, search, Print, images, History/HTML, PDF/DOCX view + Download
 ```
 
 ## Features
@@ -236,9 +236,12 @@ python3 e2e_smoke_test.py         # editing, hybrid autosave + 409, tabs, create
   PDF iframe, DOCX via Mammoth, XLSX via SheetJS). The toolbar **Download**
   button (and the tree menu item) save the original bytes to disk. Save /
   Discard / PDF-export stay disabled for these tabs.
-- **PDF export** — the "PDF" button renders the *active markdown/HTML page*
-  with images resolved in place. Large images are scaled to avoid page-break
-  splits. This is separate from opening an existing `.pdf` from the repo.
+- **Print… / Save as PDF** — the **Print…** button builds a clean paper layout
+  of the active markdown or HTML page (images resolved like in Preview) and
+  opens the system print dialog. Choose **Save as PDF** / **Microsoft Print to
+  PDF** there. This replaces the old html2canvas-based one-click export (which
+  rasterized text and was fragile). Opening an existing `.pdf` from the repo
+  is a separate view-only flow.
 
 ## Known limitations
 
@@ -252,8 +255,9 @@ python3 e2e_smoke_test.py         # editing, hybrid autosave + 409, tabs, create
   and raw `<img>` tags; links like `onenote:...` and other external schemes are
   deliberately left untouched. A bare `[[Name]]` follows a rename only when
   no other note in the repository has the same name.
-- PDF export depends on `html2pdf.js` (html2canvas) — very large images can
-  slow generation down.
+- Print uses the browser’s own paginator; layout can differ slightly between
+  Chrome, Firefox and Safari. Very tall images may still span pages — that is
+  controlled by the browser, not by a custom page-break plugin.
 - Opening repo `.pdf` / office files is **view-only** (no in-browser editing).
   DOCX/XLSX preview loads Mammoth / SheetJS from a CDN on first use; offline
   or blocked CDNs fall back to the Download-only message. PPTX and legacy

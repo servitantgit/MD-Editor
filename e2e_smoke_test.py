@@ -1,6 +1,6 @@
 """End-to-end browser test (not a unit test): launches the app in a real
 headless Chromium, replaces the GitHub API with fake responses (so no
-real token is needed) and checks editing, scrolling, images, PDF export,
+real token is needed) and checks editing, scrolling, images, Print (Save as PDF),
 HTML Live preview, and view-only PDF/DOCX open + Download.
 Run: first `node serve.mjs` (port 8080), then `python3 e2e_smoke_test.py`.
 Requires: pip install playwright && playwright install chromium
@@ -71,7 +71,6 @@ CDN_MOCKS = {
     "https://cdn.jsdelivr.net/npm/marked@18.0.14/lib/marked.umd.js": BASE / "node_modules/marked/lib/marked.umd.js",
     "https://cdn.jsdelivr.net/npm/dompurify@3.4.17/dist/purify.min.js": BASE / "node_modules/dompurify/dist/purify.min.js",
     "https://cdn.jsdelivr.net/npm/minisearch@7.2.0/dist/umd/index.js": BASE / "node_modules/minisearch/dist/umd/index.js",
-    "https://cdn.jsdelivr.net/npm/html2pdf.js@0.10.1/dist/html2pdf.bundle.min.js": BASE / "node_modules/html2pdf.js/dist/html2pdf.bundle.min.js",
 }
 
 TINY_PNG_B64 = base64.b64encode(bytes.fromhex(
@@ -1279,70 +1278,55 @@ with sync_playwright() as p:
     assert page.locator(".CodeMirror:visible").count() == 0, "a CodeMirror editor is still visible with no file open"
     print("✓ closing the last tab shows the empty state, not a dead editor")
 
-    # The tabs scenario above ends with no file open. The PDF checks below need
-    # one, so open the note again (the mock's tree still lists it).
+    # The tabs scenario above ends with no file open. Print checks need one open.
     page.click(".file-item:not(.folder):visible >> text=Test note.md")
     page.wait_for_function(
-        "document.getElementById('btn-export-pdf').disabled === false", timeout=5000
+        "document.getElementById('btn-print') && document.getElementById('btn-print').disabled === false",
+        timeout=5000,
     )
 
-    # --- 5. PDF export must render the document, not a blank page ---
-    # html2canvas captures the element exactly where it sits, so putting
-    # `position: fixed; left: -99999px` on #pdf-export-container (as app.css once
-    # did) yields a ~3 KB, one-empty-page PDF. Watch the container as it is created
-    # and record its computed position; it must stay a neutral block.
+    # --- 5. Print prepares a document root (Save as PDF is the system dialog) ---
+    # Stub window.print so headless CI does not hang on a native dialog.
     page.evaluate("""() => {
-        window.__pdfPos = null;
-        new MutationObserver((muts, obs) => {
-            const el = document.getElementById('pdf-export-container');
-            if (el) {
-                window.__pdfPos = getComputedStyle(el).position;
-                obs.disconnect();
-            }
-        }).observe(document.body, {childList: true, subtree: true});
+        window.__printCalled = 0;
+        window.print = () => { window.__printCalled += 1; };
     }""")
+    page.click("#btn-print")
+    page.wait_for_function("window.__printCalled >= 1", timeout=15000)
+    # During print the root is built then removed after afterprint/timeout.
+    # Capture content by intercepting: re-run prepare path via a second call
+    # that freezes cleanup long enough, OR inspect that print was invoked with
+    # a body that had the root. Simpler: monkey-patch again and snapshot HTML
+    # inside print() before the app removes the root.
+    page.evaluate("""() => {
+        window.__printSnap = null;
+        window.print = () => {
+            window.__printCalled += 1;
+            const root = document.getElementById('print-root');
+            window.__printSnap = root ? {
+                text: root.innerText || '',
+                html: root.innerHTML || '',
+                hasImg: !!root.querySelector('img'),
+                imgSrc: (root.querySelector('img') && root.querySelector('img').src) || '',
+                bodyHasMdPrinting: document.body.classList.contains('md-printing'),
+            } : null;
+        };
+    }""")
+    page.click("#btn-print")
+    page.wait_for_function("window.__printSnap !== null", timeout=15000)
+    snap = page.evaluate("window.__printSnap")
+    assert snap and snap.get("bodyHasMdPrinting"), f"print root missing md-printing: {snap}"
+    assert "Test note" in (snap.get("text") or "") or "Hello" in (snap.get("text") or ""), \
+        f"print root text missing document body: {(snap.get('text') or '')[:200]!r}"
+    assert snap.get("hasImg"), "print root should include resolved images"
+    assert (snap.get("imgSrc") or "").startswith("data:image/") or (snap.get("imgSrc") or "").startswith("blob:"), \
+        f"print image src unexpected: {(snap.get('imgSrc') or '')[:80]!r}"
+    # After print, chrome is restored
+    page.wait_for_function("!document.body.classList.contains('md-printing')", timeout=5000)
+    page.wait_for_function("!document.getElementById('print-root')", timeout=5000)
+    print("✓ Print prepares document root with text + images, then cleans up")
 
-    with page.expect_download(timeout=90000) as dl:
-        page.click("#btn-export-pdf")
-    pdf_path = BASE / "_e2e_export.pdf"
-    dl.value.save_as(pdf_path)
-    pdf_bytes = pdf_path.stat().st_size
-
-    container_pos = page.evaluate("window.__pdfPos")
-    assert container_pos == "static", \
-        f"#pdf-export-container must not be positioned (got {container_pos!r}) — that makes html2canvas capture a blank page"
-    # A real render of the long test document is hundreds of KB; the blank one was ~3 KB.
-    assert pdf_bytes > 50_000, f"exported PDF is suspiciously small: {pdf_bytes} bytes"
-    # At least one page, and no page that is just white paper. The size of a JPEG
-    # stream proves nothing (a blank page compresses to a few KB), so decode each
-    # page and count pixels darker than paper white.
-    page_images = pdf_page_images(pdf_path)
-    assert len(page_images) >= 1, f"PDF has no pages: {len(page_images)}"
-    page_stats = measure_red_per_page(page, page_images)
-    for i, st in enumerate(page_stats):
-        assert st["ink"] >= PDF_MIN_INK_PX, \
-            f"page {i} looks blank ({st['ink']} non-white px of {st['rows'] * 200}): {page_stats}"
-    print(f"✓ PDF export renders content ({pdf_bytes} bytes, {len(page_images)} pages, "
-          f"non-white px per page {[st['ink'] for st in page_stats]}, container position: {container_pos})")
-
-    # --- 6. Images must never be cut in half by a page boundary ---
-    # The document contains a red image taller than one page, placed so it lands
-    # across a page break. Measure the red ink on every page of the exported
-    # PDF: a split shows a big red block on one page and red starting at the very
-    # top of the next. Thresholds are loose on purpose — JPEG ringing puts a
-    # handful of stray red pixels on the seam.
-    red_per_page = page_stats
-    total_red = sum(r["red"] for r in red_per_page)
-    assert total_red > 5_000, f"the red test image is missing from the PDF: {red_per_page}"
-    for i in range(len(red_per_page) - 1):
-        cur, nxt = red_per_page[i], red_per_page[i + 1]
-        assert not (cur["red"] > 2_000 and nxt["red"] > 500 and nxt["firstRow"] <= 3), \
-            f"image is split across pages {i} and {i + 1}: {red_per_page}"
-    print(f"✓ images are not split by page breaks (red ink per page: "
-          f"{[r['red'] for r in red_per_page]})")
-    pdf_path.unlink()
-
-    # --- 7. Scrolling a long document ---
+    # --- 6. Scrolling a long document ---
     scroll_info = page.evaluate("""() => {
         const el = document.querySelector('.CodeMirror-scroll');
         return {scrollHeight: el.scrollHeight, clientHeight: el.clientHeight};

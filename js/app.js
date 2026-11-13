@@ -11,7 +11,7 @@ import { createEditor } from './editor.js';
 import { FileTree } from './file-tree.js';
 import { setupImageDropzone, pickImageFiles, uploadImage } from './upload.js';
 import { setupFolderDropzone } from './folder-upload.js';
-import { exportCurrentPageToPdf } from './pdf-export.js';
+import { printCurrentPage } from './print-export.js';
 import { createFileOps } from './file-ops.js';
 import { createLoginUI } from './login-ui.js';
 import { SearchStore } from './search-store.js';
@@ -133,7 +133,7 @@ const els = {
   btnDiscard: document.getElementById('btn-discard'),
   btnMoreFile: document.getElementById('btn-more-file'),
   moreFileMenu: document.getElementById('more-file-menu'),
-  btnExportPdf: document.getElementById('btn-export-pdf'),
+  btnPrint: document.getElementById('btn-print'),
   btnDownload: document.getElementById('btn-download'),
   btnDelete: document.getElementById('btn-delete'),
   binaryViewer: document.getElementById('binary-viewer'),
@@ -219,7 +219,7 @@ function ensureTabsSession() {
       currentFileLabel: els.currentFileLabel,
       btnSave: els.btnSave,
       btnDiscard: els.btnDiscard,
-      btnExportPdf: els.btnExportPdf,
+      btnPrint: els.btnPrint,
       btnDownload: els.btnDownload,
       btnDelete: els.btnDelete,
       docOutline: els.docOutline,
@@ -376,9 +376,9 @@ async function init() {
   if (els.btnSave) els.btnSave.onclick = onSaveFile;
   if (els.btnDownload) els.btnDownload.onclick = onDownloadFile;
   if (els.btnDiscard) els.btnDiscard.onclick = onDiscardFile;
-  if (els.btnExportPdf) els.btnExportPdf.onclick = onExportPdf;
+  if (els.btnPrint) els.btnPrint.onclick = onPrintPage;
 
-  // Only the editor core is fatal. Optional CDNs (html2pdf, highlight, minisearch)
+  // Only the editor core is fatal. Optional CDNs (highlight, minisearch)
   // must NOT paint a red banner — they often trip ad-block while EasyMDE is fine.
   if (typeof window.EasyMDE !== 'function') {
     const miss = (window.__mdCdnMiss || ['easymde']).join(', ');
@@ -1223,7 +1223,7 @@ function showBinaryFile(path, b64, kind) {
   if (els.btnDownload) els.btnDownload.disabled = false;
   if (els.btnSave) els.btnSave.disabled = true;
   if (els.btnDiscard) els.btnDiscard.disabled = true;
-  if (els.btnExportPdf) els.btnExportPdf.disabled = true;
+  if (els.btnPrint) els.btnPrint.disabled = true;
   // Hide text-only panels while viewing a binary.
   if (els.findBar) els.findBar.classList.add('hidden');
   if (els.docOutline) els.docOutline.classList.add('hidden');
@@ -1323,16 +1323,16 @@ function closeCurrentFile({ flush = true } = {}) {
     suppressEditorChange = false;
   }
   els.btnSave.disabled = true;
-  els.btnExportPdf.disabled = true;
+  els.btnPrint.disabled = true;
   if (els.btnDownload) els.btnDownload.disabled = true;
   els.btnDelete.disabled = true;
   // No file is open now: swap the (emptied) editor for the empty-state card.
   renderEmptyState();
 }
-async function onExportPdf() {
-  els.btnExportPdf.disabled = true;
+async function onPrintPage() {
+  els.btnPrint.disabled = true;
   try {
-    await exportCurrentPageToPdf({
+    await printCurrentPage({
       getCurrentPath: () => state.currentPath,
       getMarkdownText: () => editorHandle.easyMDE.value(),
       marked: window.marked,
@@ -1341,7 +1341,7 @@ async function onExportPdf() {
       onStatus: setSaveStatus,
     });
   } finally {
-    els.btnExportPdf.disabled = false;
+    els.btnPrint.disabled = false;
   }
 }
 

@@ -147,11 +147,11 @@ export function createTabsSession(deps) {
     if (els.currentFileLabel) els.currentFileLabel.textContent = path || 'No file selected';
     const viewOnly = path && isViewOnlyPath(path);
     if (els.btnSave) els.btnSave.disabled = !path || !!viewOnly;
-    if (els.btnExportPdf) {
-      if (!path || viewOnly) els.btnExportPdf.disabled = true;
+    if (els.btnPrint) {
+      if (!path || viewOnly) els.btnPrint.disabled = true;
       else {
         const k = kindFromPath(path);
-        els.btnExportPdf.disabled = !(k.kind === 'markdown' || k.kind === 'html');
+        els.btnPrint.disabled = !(k.kind === 'markdown' || k.kind === 'html');
       }
     }
     if (els.btnDownload) els.btnDownload.disabled = !viewOnly;
@@ -248,7 +248,7 @@ export function createTabsSession(deps) {
     );
 
     if (els.btnSave) els.btnSave.disabled = true;
-    if (els.btnExportPdf) els.btnExportPdf.disabled = true;
+    if (els.btnPrint) els.btnPrint.disabled = true;
     if (els.btnDownload) els.btnDownload.disabled = true;
     if (els.btnDelete) els.btnDelete.disabled = true;
     if (els.currentFileLabel) els.currentFileLabel.textContent = path;
@@ -316,7 +316,7 @@ export function createTabsSession(deps) {
         const kind = kindFromPath(path);
         if (els.btnSave) els.btnSave.disabled = true;
         if (els.btnDiscard) els.btnDiscard.disabled = true;
-        if (els.btnExportPdf) els.btnExportPdf.disabled = true;
+        if (els.btnPrint) els.btnPrint.disabled = true;
         if (els.btnDownload) els.btnDownload.disabled = false;
         if (els.btnDelete) els.btnDelete.disabled = false;
         if (deps.updateLangBadge) deps.updateLangBadge(kind);
@@ -400,8 +400,8 @@ export function createTabsSession(deps) {
 
       if (els.btnSave) els.btnSave.disabled = false;
       const kind = kindFromPath(path);
-      if (els.btnExportPdf) {
-        els.btnExportPdf.disabled = !(kind.kind === 'markdown' || kind.kind === 'html');
+      if (els.btnPrint) {
+        els.btnPrint.disabled = !(kind.kind === 'markdown' || kind.kind === 'html');
       }
       if (els.btnDownload) els.btnDownload.disabled = true;
       if (els.btnDelete) els.btnDelete.disabled = false;

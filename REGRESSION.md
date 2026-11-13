@@ -108,9 +108,12 @@ Prefer automated coverage in `test/*.test.js` and `e2e_smoke_test.py` when pract
 - [ ] After the index rebuild, words that appear only inside code blocks (also inside quotes) are not found by search.
 - [ ] History: Restore of an empty file version (e.g. `.gitkeep`) loads an empty file - no "Empty blob" error.
 
-## PDF / export
+## Print / Save as PDF
 
-- [ ] PDF export produces non-blank pages; images not split incorrectly across pages when covered by e2e.
+- [ ] **Print…** is enabled for markdown/HTML tabs only (disabled for view-only PDF/office).
+- [ ] Clicking **Print…** builds `#print-root` with document text and resolved images, adds `body.md-printing`, then calls `window.print()` (e2e stubs the dialog).
+- [ ] After print, `#print-root` is removed and the editor chrome is restored.
+- [ ] System dialog “Save as PDF” is the supported way to get a PDF file (no html2pdf).
 
 ## View-only PDF / office + Download
 

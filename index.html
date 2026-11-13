@@ -30,8 +30,6 @@
   <script src="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/highlight.min.js"></script>
   <!-- Full-text search (optional — search degrades if missing) -->
   <script src="https://cdn.jsdelivr.net/npm/minisearch@7.2.0/dist/umd/index.js"></script>
-  <!-- PDF export (optional — editor works without it) -->
-  <script src="https://cdn.jsdelivr.net/npm/html2pdf.js@0.10.1/dist/html2pdf.bundle.min.js"></script>
 
   <!-- Our styles go AFTER the library ones on purpose: both easymde.min.css and fontawesome
        define rules with the same specificity (plain classes), so cascade order decides
@@ -157,7 +155,7 @@
             <li><b>Multi-tab</b> — undo, cursor &amp; scroll kept per file</li>
             <li><b>Find / replace</b> — every match highlighted, current/total counter</li>
             <li><b>Outline, minimap, Wrap, Fold</b> — find your way in long notes</li>
-            <li><b><code>[[</code> link suggestions</b> · paste a URL over text to make a link · <b>PDF export</b></li>
+            <li><b><code>[[</code> link suggestions</b> · paste a URL over text to make a link · <b>Print (Save as PDF)</b></li>
           </ul>
         </div>
         <div class="feature-group">
@@ -198,7 +196,7 @@
         <div class="why-card">
           <h4>Why not <b>github.dev</b>?</h4>
           <p>A code editor first. Here the workflow is built around notes:
-            Live preview with images, PDF export, local drafts, link rewriting on move.</p>
+            Live preview with images, Print (Save as PDF), local drafts, link rewriting on move.</p>
         </div>
         <div class="why-card">
           <h4>Why not <b>Obsidian</b>?</h4>
@@ -376,7 +374,7 @@
           <button class="secondary" id="btn-minimap" title="Document minimap">Map</button>
         </div>
         <div class="tb-group tb-export desktop-tool" role="group" aria-label="Export">
-          <button class="secondary" id="btn-export-pdf" disabled title="Export the active page to PDF">PDF</button>
+          <button class="secondary" id="btn-print" disabled title="Print the active page (choose Save as PDF in the system dialog)">Print…</button>
           <button class="secondary" id="btn-download" disabled title="Download the open file to your device">Download</button>
         </div>
         <div class="tb-group tb-file" role="group" aria-label="File actions">
