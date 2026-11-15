@@ -55,8 +55,15 @@ jobs:
           python -m pip install playwright
           python -m playwright install --with-deps chromium
 
-      - name: Start local server
-        run: node serve.mjs > /tmp/md-editor-server.log 2>&1 &
+      - name: Start Vite dev server
+        run: npx vite --port 8080 --strictPort > /tmp/md-editor-server.log 2>&1 &
+      - name: Wait for server
+        run: |
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:8080/ >/dev/null; then exit 0; fi
+            sleep 1
+          done
+          echo "server did not start"; cat /tmp/md-editor-server.log; exit 1
 
       - name: Run browser smoke test
         run: python e2e_smoke_test.py
