@@ -135,7 +135,11 @@ export function createSearchUI(deps) {
       snippetEl.textContent = hit.title;
       sync.fetchBody(hit.path).then((body) => {
         if (destroyed || generation !== renderGeneration) return;
-        snippetEl.innerHTML = body === undefined ? hit.title : buildSnippet(body, query);
+        if (body === undefined) {
+          snippetEl.textContent = hit.title;
+        } else {
+          snippetEl.innerHTML = buildSnippet(body, query);
+        }
       }).catch(() => { /* the title-only row stays */ });
     });
   }
