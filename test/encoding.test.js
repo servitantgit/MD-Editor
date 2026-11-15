@@ -1,42 +1,66 @@
-// Replaces the manual PowerShell check that used to live in AGENTS.md: a Windows
-// editor that re-encodes a file (cp1250) turns dashes and arrows into mojibake.
-// The patterns are built from char codes so this file itself cannot be mangled.
-import test from 'node:test';
+import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const root = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
-const SKIP_DIRS = new Set(['node_modules', '.git', 'screenshots', 'assets', 'fixtures']);
-const SKIP_FILES = new Set(['AGENTS.md', 'AGENTS-DETAIL.md', 'encoding.test.js']);
-const EXT = /\.(js|mjs|ts|html|css|md|json|py|ps1|txt|toml|yml|yaml)$/;
-const PATTERNS = [
-  String.fromCharCode(0xE2, 0x20AC),
-  String.fromCharCode(0xE2, 0x2020),
-  String.fromCharCode(0xC3),
-];
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const ROOT = path.resolve(__dirname, '..');
 
-function* walk(dir) {
-  for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
-    if (e.isDirectory()) {
-      if (!SKIP_DIRS.has(e.name)) yield* walk(path.join(dir, e.name));
-    } else if (EXT.test(e.name) && !SKIP_FILES.has(e.name)) {
-      yield path.join(dir, e.name);
-    }
+/** Source-like extensions we care about (UTF-8, no BOM). */
+const SOURCE_EXT = new Set([
+  '.js', '.mjs', '.cjs', '.html', '.css', '.md', '.json', '.py', '.toml', '.yml', '.yaml',
+]);
+
+function walk(dir, out = []) {
+  for (const name of fs.readdirSync(dir)) {
+    if (name === 'node_modules' || name === '.git' || name === '__pycache__' || name === 'dist') continue;
+    const p = path.join(dir, name);
+    const st = fs.statSync(p);
+    if (st.isDirectory()) walk(p, out);
+    else out.push(p);
   }
+  return out;
 }
 
-test('no text file has mojibake or a BOM', () => {
-  const bad = [];
-  for (const file of walk(root)) {
-    const buf = fs.readFileSync(file);
-    const rel = path.relative(root, file);
-    if (buf[0] === 0xEF && buf[1] === 0xBB && buf[2] === 0xBF) bad.push(rel + ': BOM');
-    const text = buf.toString('utf8');
-    for (const p of PATTERNS) {
-      const i = text.indexOf(p);
-      if (i >= 0) bad.push(rel + ': mojibake near ' + JSON.stringify(text.slice(Math.max(0, i - 20), i + 20)));
+function isSourceFile(filePath) {
+  const ext = path.extname(filePath).toLowerCase();
+  return SOURCE_EXT.has(ext);
+}
+
+test('source files have no UTF-8 BOM', () => {
+  const files = walk(ROOT).filter(isSourceFile);
+  assert.ok(files.length > 10, 'expected to find source files');
+  const bom = Buffer.from([0xef, 0xbb, 0xbf]);
+  const offenders = [];
+  for (const f of files) {
+    const buf = fs.readFileSync(f);
+    if (buf.length >= 3 && buf.subarray(0, 3).equals(bom)) offenders.push(path.relative(ROOT, f));
+  }
+  assert.deepEqual(offenders, [], `UTF-8 BOM found in: ${offenders.join(', ')}`);
+});
+
+test('source files have no common mojibake markers', () => {
+  // Classic UTF-8 misread as Latin-1/CP1251 leftovers that showed up in past bugs
+  const BAD = [
+    'Ð', 'Ñ', // common UTF-8 Cyrillic mis-decoded
+    'Ã©', 'Ã¼', // common Western European mojibake
+    '\uFFFD', // replacement character often left after bad decode
+    '\u00E2\u20AC', // a dash / quote misread as cp1252: the form seen in real Windows-editor incidents
+    '\u00E2\u2020', // an arrow misread the same way
+  ];
+  const files = walk(ROOT).filter(isSourceFile);
+  const offenders = [];
+  for (const f of files) {
+    // skip this test file itself if it mentions the markers as strings
+    if (f.endsWith('encoding.test.js')) continue;
+    const text = fs.readFileSync(f, 'utf8');
+    for (const marker of BAD) {
+      if (text.includes(marker)) {
+        offenders.push(`${path.relative(ROOT, f)} (marker ${JSON.stringify(marker)})`);
+        break;
+      }
     }
   }
-  assert.deepEqual(bad, []);
+  assert.deepEqual(offenders, [], `Possible mojibake in:\n${offenders.join('\n')}`);
 });

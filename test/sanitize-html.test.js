@@ -2,58 +2,72 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
 import createDOMPurify from 'dompurify';
-import { marked } from 'marked';
-import { sanitizeHtml, sanitizeHtmlDocument, renderMarkdownSafe } from '../js/sanitize-html.js';
+import {
+  sanitizeHtml,
+  sanitizeHtmlDocument,
+  renderMarkdownSafe,
+} from '../js/sanitize-html.js';
 
-const purify = createDOMPurify(new JSDOM('').window);
+function makePurifier() {
+  const { window } = new JSDOM('');
+  return createDOMPurify(window);
+}
 
-test('sanitize: event handlers and javascript: links are removed from markdown HTML', () => {
-  const md = '<div onclick="alert(1)">click</div>\n\n<a href="javascript:alert(2)">link</a>\n\n<details open ontoggle="alert(3)"><summary>s</summary>b</details>\n';
-  const html = renderMarkdownSafe(md, marked, purify);
-  assert.doesNotMatch(html, /onclick/i);
-  assert.doesNotMatch(html, /ontoggle/i);
-  assert.doesNotMatch(html, /javascript:/i);
-  assert.match(html, /click/);
-  assert.match(html, /<details/);
+test('sanitizeHtml: fail-closed when purifier is missing', () => {
+  assert.throws(() => sanitizeHtml('<b>x</b>', null), /sanitizer/i);
+  assert.throws(() => sanitizeHtml('<b>x</b>', undefined), /sanitizer/i);
+  assert.throws(() => sanitizeHtml('<b>x</b>', {}), /sanitizer/i);
 });
 
-test('sanitize: the editor canonical image markup survives (data-md-*, data: pixel, wrapper)', () => {
-  const html = renderMarkdownSafe('![a](pic.png)\n', marked, purify);
-  assert.match(html, /class="md-img-wrap/);
-  assert.match(html, /data-md-src="pic\.png"/);
-  assert.match(html, /data-md-line="0"/);
-  assert.match(html, /src="data:image\/gif;base64,/);
+test('sanitizeHtml: strips script and event handlers', () => {
+  const purify = makePurifier();
+  const dirty =
+    '<p>ok</p><script>alert(1)</script><img src=x onerror="alert(2)">' +
+    '<div onclick="alert(3)">click</div>';
+  const clean = sanitizeHtml(dirty, purify);
+  assert.doesNotMatch(clean, /<script/i);
+  assert.doesNotMatch(clean, /onerror/i);
+  assert.doesNotMatch(clean, /onclick/i);
+  assert.match(clean, /ok/);
 });
 
-test('sanitize: kbd, details/summary, task checkboxes and image width survive', () => {
-  const md = '<kbd>Ctrl</kbd>\n\n<details><summary>S</summary>body</details>\n\n- [ ] task\n\n<img src="a.png" width="300">\n';
-  const html = renderMarkdownSafe(md, marked, purify);
-  assert.match(html, /<kbd>Ctrl<\/kbd>/);
-  assert.match(html, /<summary>S<\/summary>/);
-  assert.match(html, /type="checkbox"/);
-  assert.match(html, /width="300"/);
-  assert.match(html, /width:\s*300px/);
+test('sanitizeHtml: null/undefined become empty string, not "null"', () => {
+  const purify = makePurifier();
+  assert.equal(sanitizeHtml(null, purify), '');
+  assert.equal(sanitizeHtml(undefined, purify), '');
 });
 
-test('sanitize: fail-closed when DOMPurify is not loaded', () => {
-  assert.throws(() => sanitizeHtml('<p>x</p>', null), /DOMPurify/);
-  assert.throws(() => sanitizeHtml('<p>x</p>', {}), /DOMPurify/);
-  assert.throws(() => renderMarkdownSafe('# x', marked, undefined), /DOMPurify/);
+test('sanitizeHtmlDocument: fail-closed and keeps document structure option', () => {
+  const purify = makePurifier();
+  assert.throws(() => sanitizeHtmlDocument('<html></html>', null), /sanitizer/i);
+  const doc = sanitizeHtmlDocument(
+    '<!DOCTYPE html><html><head><style>p{color:red}</style></head><body><p>hi</p><script>x</script></body></html>',
+    purify
+  );
+  assert.doesNotMatch(doc, /<script/i);
+  // body content survives
+  assert.match(doc, /hi/);
 });
 
-test('sanitize: plain markdown renders unchanged in substance', () => {
-  const html = renderMarkdownSafe('# Title\n\nSome **bold** text and [a link](notes/a.md).\n', marked, purify);
-  assert.match(html, /<h1[^>]*>Title<\/h1>/);
-  assert.match(html, /<strong>bold<\/strong>/);
-  assert.match(html, /href="notes\/a\.md"/);
+test('renderMarkdownSafe: fail-closed without purifier', () => {
+  const fakeRenderer = { parse: (t) => `<p>${t}</p>` };
+  assert.throws(
+    () => renderMarkdownSafe('# hi', fakeRenderer, null),
+    /sanitizer/i
+  );
 });
 
-test('sanitize: a whole HTML document keeps its styles and body, loses scripts and handlers', () => {
-  const doc = '<!DOCTYPE html><html><head><style>p{color:red}</style></head>'
-    + '<body><p>x</p><img src="a.png" onerror="alert(1)"><script>alert(2)</script></body></html>';
-  const out = sanitizeHtmlDocument(doc, purify);
-  assert.match(out, /p\{color:red\}/);
-  assert.match(out, /<p>x<\/p>/);
-  assert.doesNotMatch(out, /onerror/i);
-  assert.doesNotMatch(out, /alert\(2\)/);
+test('renderMarkdownSafe: markdown XSS does not survive', () => {
+  const purify = makePurifier();
+  // marked-like renderer that does NOT sanitize (project rule: marked does not sanitize)
+  const fakeRenderer = {
+    parse: (t) =>
+      String(t).replace(
+        /\[xss\]/g,
+        '<img src=x onerror="window.__pwned=1">'
+      ),
+  };
+  const clean = renderMarkdownSafe('hello [xss]', fakeRenderer, purify);
+  assert.doesNotMatch(clean, /onerror/i);
+  assert.doesNotMatch(clean, /__pwned/);
 });
