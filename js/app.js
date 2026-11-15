@@ -8,6 +8,7 @@ import { GitHubClient, b64ToUtf8 } from './github-client.js';
 import { ImageResolver } from './image-resolver.js';
 import { encodeLinkPath } from './paths.js';
 import { createEditor } from './editor.js';
+import { isCm6Url } from './editor-engine.js';
 import { FileTree } from './file-tree.js';
 import { setupImageDropzone, pickImageFiles, uploadImage } from './upload.js';
 import { setupFolderDropzone } from './folder-upload.js';
@@ -599,7 +600,7 @@ function startDemo() {
   }
 }
 
-function showApp(owner, repo) {
+async function showApp(owner, repo) {
   commitSessionGeneration++;
   // A different repo means a different file list. Reset it here, not only on
   // logout, so a re-login cannot hand the new session the previous repo's tree
@@ -677,7 +678,7 @@ function showApp(owner, repo) {
   });
   ops.updateActiveFolderPathLabel(fileTree.getActiveFolder());
 
-  editorHandle = createEditor(els.editorTextarea, {
+  const editorDeps = {
     marked: window.marked,
     purifier: window.DOMPurify,
     imageResolver,
@@ -723,7 +724,29 @@ function showApp(owner, repo) {
     }),
     onImageResolveFailures: (count) =>
       setSaveStatus(`Preview: failed to load ${count} image(s) — details shown in place of the image`, true),
-  });
+  };
+
+  // Classic is the only production path. CM6 loads only when the URL asks for it
+  // (?editor=cm6 or /cm6.html). Host element is created on demand and removed
+  // otherwise — nothing overlays EasyMDE on the normal site.
+  removeCm6ExperimentUi();
+  if (isCm6Url()) {
+    try {
+      setSaveStatus('Loading experimental CM6…', false);
+      const host = ensureCm6Host();
+      const { createCm6Editor } = await import('./editor-cm6.js');
+      editorHandle = await createCm6Editor(host, editorDeps);
+      showCm6ExperimentBanner();
+      setSaveStatus('CM6 experiment (Source only for now)', false);
+    } catch (err) {
+      console.error('CM6 experiment failed, Classic unchanged path', err);
+      removeCm6ExperimentUi();
+      editorHandle = createEditor(els.editorTextarea, editorDeps);
+      setSaveStatus('CM6 failed — using Classic editor', true);
+    }
+  } else {
+    editorHandle = createEditor(els.editorTextarea, editorDeps);
+  }
 
   ensureTabsSession().setupTabBar();
   renderTabs();
@@ -743,14 +766,19 @@ function showApp(owner, repo) {
   try { setupDocOutline(); } catch (e) { console.warn(e); }
   try { setupBacklinks(); } catch (e) { console.warn(e); }
   try { setupMobileShell(); } catch (e) { console.warn(e); }
-  try { setupMinimap(); } catch (e) { console.warn(e); }
-  if (els.minimapWrap && !els.minimapWrap.classList.contains('hidden')) {
-    ensureMinimap();
+  // CM6 experiment has no CM5 minimap / scroll-sync / link-suggest yet.
+  if (!isCm6Url() || !editorHandle || editorHandle.engine !== 'cm6') {
+    try { setupMinimap(); } catch (e) { console.warn(e); }
+    if (els.minimapWrap && !els.minimapWrap.classList.contains('hidden')) {
+      ensureMinimap();
+    }
+    // Scroll sync lives with the editor, not with the minimap: closing the map
+    // must not leave the Live panes scrolling on their own.
+    try { ensureScrollSync(); } catch (e) { console.warn(e); }
+    try { ensureLinkSuggest(); } catch (e) { console.warn(e); }
+  } else if (els.minimapWrap) {
+    els.minimapWrap.classList.add('hidden');
   }
-  // Scroll sync lives with the editor, not with the minimap: closing the map
-  // must not leave the Live panes scrolling on their own.
-  try { ensureScrollSync(); } catch (e) { console.warn(e); }
-  try { ensureLinkSuggest(); } catch (e) { console.warn(e); }
   ensureCommitHistoryUI().setup();
   workingTree.clearAll();
   ensureCommitHistoryUI().refreshBadge();
@@ -2194,4 +2222,44 @@ function setupLayoutToggle() {
     applyLayoutMode(btn.dataset.mode);
   });
 }
+
+/** Create CM6 host only when experimenting — not present in classic DOM. */
+function ensureCm6Host() {
+  let host = document.getElementById('editor-cm6-host');
+  if (!host) {
+    host = document.createElement('div');
+    host.id = 'editor-cm6-host';
+    host.className = 'editor-cm6-host';
+    host.setAttribute('aria-label', 'CodeMirror 6 experimental editor');
+    if (els.editorContainer) els.editorContainer.appendChild(host);
+    else document.body.appendChild(host);
+  }
+  if (els.editorTextarea) els.editorTextarea.classList.add('hidden');
+  host.hidden = false;
+  return host;
+}
+
+/** Strip every CM6 experiment DOM node so Classic cannot be covered. */
+function removeCm6ExperimentUi() {
+  const host = document.getElementById('editor-cm6-host');
+  if (host) host.remove();
+  const banner = document.getElementById('cm6-experiment-banner');
+  if (banner) banner.remove();
+  if (els.editorTextarea) els.editorTextarea.classList.remove('hidden');
+  document.body.classList.remove('md-engine-cm6');
+}
+
+function showCm6ExperimentBanner() {
+  document.body.classList.add('md-engine-cm6');
+  if (document.getElementById('cm6-experiment-banner')) return;
+  const bar = document.createElement('div');
+  bar.id = 'cm6-experiment-banner';
+  bar.className = 'cm6-experiment-banner';
+  bar.innerHTML =
+    '<strong>Experimental CodeMirror 6</strong> — text editing only (no Live/Preview parity yet). '
+    + '<a href="./">Open Classic editor</a>';
+  document.body.prepend(bar);
+}
+
+
 

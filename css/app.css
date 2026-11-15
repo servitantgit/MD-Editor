@@ -3298,3 +3298,40 @@ body.md-binary-open .tb-group.tb-export #btn-print {
   background: #f6f8fa;
   font-weight: 600;
 }
+
+/* CM6 experiment: host exists in DOM only when ?editor=cm6 succeeded */
+.editor-cm6-host {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+  width: 100%;
+  background: #0d1117;
+}
+.editor-cm6-host .cm-editor {
+  flex: 1 1 auto;
+  height: 100%;
+  min-height: 0;
+  width: 100%;
+  outline: none;
+}
+body.md-engine-cm6 #editor-container > .EasyMDEContainer {
+  display: none !important;
+}
+.cm6-experiment-banner {
+  flex-shrink: 0;
+  padding: 8px 14px;
+  background: #3d2c00;
+  color: #f0e6d2;
+  font-size: 13px;
+  border-bottom: 1px solid #9e6a03;
+  z-index: 1000;
+}
+.cm6-experiment-banner a {
+  color: #ffe8a3;
+  margin-left: 8px;
+  font-weight: 600;
+}
