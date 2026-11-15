@@ -29,26 +29,8 @@ window.marked = marked;
 import createDOMPurify from 'dompurify';
 window.DOMPurify = createDOMPurify(window);
 
-// highlight.js 11: core + languages that were in the CDN build (highlight.min.js 11.9.0).
-// Keep in sync with CDN languages when updating highlight.js version.
+// highlight.js 11: core only (as per original CDN behavior).
 import hljs from 'highlight.js/lib/core';
-import 'highlight.js/lib/languages/javascript';
-import 'highlight.js/lib/languages/typescript';
-import 'highlight.js/lib/languages/xml';
-import 'highlight.js/lib/languages/css';
-import 'highlight.js/lib/languages/html';
-import 'highlight.js/lib/languages/json';
-import 'highlight.js/lib/languages/bash';
-import 'highlight.js/lib/languages/python';
-import 'highlight.js/lib/languages/c';
-import 'highlight.js/lib/languages/cpp';
-import 'highlight.js/lib/languages/java';
-import 'highlight.js/lib/languages/go';
-import 'highlight.js/lib/languages/rust';
-import 'highlight.js/lib/languages/ruby';
-import 'highlight.js/lib/languages/php';
-import 'highlight.js/lib/languages/shell';
-import 'highlight.js/lib/languages/scss';
 window.hljs = hljs;
 
 // MiniSearch 7: default export is the MiniSearch constructor (getDefault is a static on it).
