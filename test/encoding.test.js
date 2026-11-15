@@ -14,7 +14,7 @@ const SOURCE_EXT = new Set([
 
 function walk(dir, out = []) {
   for (const name of fs.readdirSync(dir)) {
-    if (name === 'node_modules' || name === '.git' || name === '__pycache__') continue;
+    if (name === 'node_modules' || name === '.git' || name === '__pycache__' || name === 'dist') continue;
     const p = path.join(dir, name);
     const st = fs.statSync(p);
     if (st.isDirectory()) walk(p, out);

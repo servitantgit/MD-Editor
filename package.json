@@ -2,20 +2,27 @@
   "name": "gh-md-editor",
   "version": "2.3.0",
   "private": true,
-  "description": "Editor for .md files in a GitHub repository: view/edit notes, images, Print (Save as PDF). Plain JS (ES modules), no build step.",
+  "description": "Editor for .md files in a GitHub repository: view/edit notes, images, Print (Save as PDF). Plain JS (ES modules) built with Vite; editor libraries loaded from npm via js/vendor.js.",
   "type": "module",
   "scripts": {
+    "build": "vite build",
+    "dev": "vite",
     "test": "node --test test/*.test.js",
-    "serve": "node ./serve.mjs"
+    "serve": "node ./serve.mjs",
+    "e2e:serve": "vite"
   },
   "devDependencies": {
+    "@fortawesome/fontawesome-free": "6.5.1",
+    "codemirror": "5.65.16",
     "dompurify": "3.4.17",
     "easymde": "2.21.0",
     "fake-indexeddb": "^6.2.5",
+    "highlight.js": "11.9.0",
     "jsdom": "^30.1.1",
     "mammoth": "1.8.0",
     "marked": "18.0.14",
-    "minisearch": "^7.2.0",
+    "minisearch": "7.2.0",
+    "vite": "6.4.6",
     "xlsx": "0.18.5"
   }
 }
