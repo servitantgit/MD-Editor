@@ -1,0 +1,43 @@
+name: E2E Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  e2e-test:
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Start Vite dev server (background)
+        run: npx vite --port 8080 &>/dev/null &
+        timeout-minutes: 5
+
+      - name: Wait for Vite server
+        run: |
+          timeout 10 powershell -Command "while (-not (Test-NetConnection -Port 8080 -InformationLevel Quiet)) { Start-Sleep 1 }"
+          echo "Vite server is ready"
+
+      - name: Run e2e smoke test
+        run: python3 e2e_smoke_test.py
+        env:
+          # Make sure the test can connect to localhost:8080
+          BASE_URL: http://localhost:8080
+        timeout-minutes: 15
