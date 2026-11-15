@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Test coverage restored next to the new tests.** `test/sanitize-html-regression.test.js` keeps the six original sanitizer checks (the editor's own markup must survive: `data-md-*`, `data:` pixel, `kbd`, `details`, task checkboxes, image width, full documents); `test/binary-viewer-real-libs.test.js` runs real Mammoth, SheetJS and DOMPurify on a real DOCX fixture with a `javascript:` link, plus a source guard and a version-pin check. `test/encoding.test.js` now also catches cp1252 mojibake of dashes and arrows (it passed on such a file before).
 - **Office files: sanitized before they reach the page.** HTML produced from a DOCX (Mammoth) or a spreadsheet (SheetJS) now goes through `sanitizeOfficeHtml()` (DOMPurify, fail-closed) before `innerHTML` of the main page, and links other than http(s), mailto and anchors lose their `href`. Before this, a DOCX with a `javascript:` hyperlink ran code in the page that holds the GitHub token (reproduced in Chromium). `test/binary-viewer-sanitize.test.js` runs the real Mammoth, SheetJS and DOMPurify on jsdom with a real DOCX fixture, and a source guard fails if `result.value` or `sheet_to_html()` is used without the sanitizer.
 - **Mammoth 1.8.0 and SheetJS 0.18.5 pinned** as exact devDependencies; a test checks that they match the CDN URLs in `js/binary-viewer.js`.
 - **`test/encoding.test.js`, `.gitattributes`, `.editorconfig`** replace the manual PowerShell mojibake check (LF endings, UTF-8 without BOM).

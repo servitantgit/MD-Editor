@@ -46,6 +46,8 @@ test('source files have no common mojibake markers', () => {
     'Ð', 'Ñ', // common UTF-8 Cyrillic mis-decoded
     'Ã©', 'Ã¼', // common Western European mojibake
     '\uFFFD', // replacement character often left after bad decode
+    '\u00E2\u20AC', // a dash / quote misread as cp1252: the form seen in real Windows-editor incidents
+    '\u00E2\u2020', // an arrow misread the same way
   ];
   const files = walk(ROOT).filter(isSourceFile);
   const offenders = [];
