@@ -2,7 +2,7 @@
 
 [![Tests](../../actions/workflows/test.yml/badge.svg)](../../actions/workflows/test.yml)
 ![Deployed on Cloudflare Pages](https://img.shields.io/badge/deployed%20on-Cloudflare%20Pages-F38020?logo=cloudflarepages&logoColor=white)
-![No build step](https://img.shields.io/badge/build-none-brightgreen)
+![Vite](https://img.shields.io/badge/build-Vite-646cff?logo=vite&logoColor=white)
 ![Vanilla JS](https://img.shields.io/badge/vanilla-JS-f7df1e?logo=javascript&logoColor=black)
 ![Last commit](https://img.shields.io/github/last-commit/servitantgit/MD-Editor)
 ![Code size](https://img.shields.io/github/languages/code-size/servitantgit/MD-Editor)
@@ -15,11 +15,12 @@ is issued by GitHub and lives only in `sessionStorage`; our server only ever
 sees the one-time code-for-token exchange (setup:
 [README-CLOUDFLARE.md](./README-CLOUDFLARE.md)).
 
-No build step: plain ES modules. Edit **Markdown**, **HTML**, **JS/CSS** and
+Plain ES modules bundled with **Vite** for production (`dist/`). End users still
+open the site with zero install. Edit **Markdown**, **HTML**, **JS/CSS** and
 other text files with three layouts (**Source / Live / Preview**), multi-tab
 editing, full-text search, local drafts (IndexedDB) + explicit Save/Commit to
 GitHub, **Commit / History** drawers, find/replace, outline, minimap, and PDF
-export.
+export. Core editor libraries ship from npm via `js/vendor.js` (not from a CDN).
 
 ## Screenshots
 
@@ -41,7 +42,9 @@ Plain JavaScript (ES modules), no TypeScript, no bundler — opens directly in
 the browser. Code is split by responsibility:
 
 ```
-index.html              HTML shell, loads CDN libraries and js/app.js
+index.html              HTML shell; loads js/vendor.js (npm libs → window) then js/app.js
+vite.config.js          Vite: dev server :8080, build → dist/
+js/vendor.js             only module that imports EasyMDE/marked/DOMPurify/… from npm
 css/app.css              all styles
 functions/auth/
   login.js                Cloudflare Pages Function: GET /auth/login — starts OAuth
@@ -95,7 +98,7 @@ js/
   app.js                   assembly point: state, wiring up the modules (login flow now in login-ui.js)
 test/                      unit tests (node:test) for the pure logic
 e2e_smoke_test.py          end-to-end browser test (Playwright)
-serve.mjs                  minimal local server for development/testing
+serve.mjs                  bare static server (no npm resolve — not for full app after Vite)
 ```
 
 Why it's structured this way: `paths.js`, `markdown-tokens.js` and
@@ -106,23 +109,26 @@ earlier versions.
 
 ## Running it
 
-Browsers won't load `<script type="module">` from `file://` — the page needs
-to be served over http(s). Options:
+Browsers won't load `<script type="module">` from `file://`, and after the Vite
+migration the app also needs either the **Vite dev server** or a **production
+build** so `js/vendor.js` can resolve npm packages.
 
-- **Cloudflare Pages** — the current option for real-world use (Git
-  integration, auto-deploy on push). This is the **only** option on which
-  GitHub OAuth login works — it's implemented as Cloudflare Pages Functions
-  (`functions/auth/*`), which neither GitHub Pages nor plain static hosting
-  have. Setup instructions in [README-CLOUDFLARE.md](./README-CLOUDFLARE.md).
-- **Local development**: `node serve.mjs` (nothing to install, uses Node's
-  built-in `http` module) → http://localhost:8080. This is a bare static
-  server — it does **not** run `/functions`, so the "Sign in with GitHub"
-  button won't work here (you'll get a 404/fallback). To exercise the OAuth
-  logic itself locally, run `npx wrangler pages dev .` instead — it emulates
-  both the static assets and the Pages Functions.
-- Any other static host (GitHub Pages, `npx serve`, etc.) works fine for
-  viewing and developing the UI, but without OAuth login — there's simply
-  nothing there to authorize GitHub API calls with.
+- **Cloudflare Pages** — production (`md-edit.pages.dev`). Git integration,
+  auto-deploy on push to `main`. **Build command:** `npm run build`. **Output
+  directory:** `dist`. OAuth is implemented as Pages Functions
+  (`functions/auth/*`). Setup: [README-CLOUDFLARE.md](./README-CLOUDFLARE.md).
+- **Local development (UI):**
+  ```bash
+  npm ci
+  npx vite          # http://localhost:8080 — required for EasyMDE and friends
+  ```
+  Do **not** use `node serve.mjs` for the full editor: it serves files as-is and
+  cannot resolve `import … from 'easymde'`, so the UI shows “Editor failed to
+  load”. `serve.mjs` remains only as a minimal static helper.
+- **Local OAuth:** `npx wrangler pages dev .` (or test against production).
+  Plain Vite does not run `/functions`.
+- Serving a pre-built `dist/` with any static host works for the UI without
+  OAuth; GitHub login still needs Pages Functions.
 
 ## Testing
 
@@ -149,8 +155,9 @@ responses). Runs automatically in CI:
 
 ```bash
 pip install playwright && playwright install chromium
-node serve.mjs &                  # start the app on :8080
-python3 e2e_smoke_test.py         # editing, hybrid autosave + 409, tabs, create/delete, search, Print, images, History/HTML, PDF/DOCX view + Download
+npm ci
+npx vite --port 8080 --strictPort &   # must be Vite, not serve.mjs
+python3 e2e_smoke_test.py             # editing, hybrid autosave + 409, tabs, create/delete, search, Print, images, History/HTML, PDF/DOCX view + Download
 ```
 
 ## Features
@@ -249,7 +256,7 @@ python3 e2e_smoke_test.py         # editing, hybrid autosave + 409, tabs, create
   is enabled on the GitHub OAuth App, the token dies after roughly 8 hours and
   the user is simply logged out (they need to click "Sign in with GitHub"
   again). This option is kept off by default — see `README-CLOUDFLARE.md`.
-- Toolbar icons (Font Awesome) load from a CDN — if the network is
+- Toolbar icons (Font Awesome) ship with the Vite bundle via `js/vendor.js`. If an older note said CDN — if the network is
   unavailable, only the icon glyphs disappear; functionality is unaffected.
 - Reference rewriting handles markdown images, markdown links, `[[wiki links]]`
   and raw `<img>` tags; links like `onenote:...` and other external schemes are

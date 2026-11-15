@@ -4,6 +4,24 @@ The application files stay in the repository root so GitHub renders `README.md` 
 
 **This project deploys as a Cloudflare Pages project with Git integration** (auto-build on push to `main`/`master`), live at `md-edit.pages.dev`. `wrangler.toml` in this repo is a leftover from an earlier Workers-based setup and is **not used** by the current Git-integration deploy — Pages configures the build purely from its own dashboard project settings. Ignore it unless you deliberately switch to deploying with the `wrangler pages deploy` CLI.
 
+
+## Build settings (Vite)
+
+In the Cloudflare Pages project: **Settings → Builds**:
+
+| Setting | Value |
+|--------|--------|
+| Build command | `npm run build` |
+| Build output directory | `dist` |
+| Root directory | `/` (repository root) |
+
+`functions/` is deployed by Pages alongside the static output; it is not copied into `dist/`.
+After changing build settings, trigger a new deployment.
+
+Environment variables (`GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`) must be set for
+**Production**. For branch preview URLs that need OAuth, set the same variables on
+**Preview** as well.
+
 ## GitHub OAuth via Pages Functions
 
 The editor logs in with "Sign in with GitHub" instead of a pasted Personal Access Token. This runs as two **Cloudflare Pages Functions** — plain files under `/functions` that Pages wires up into routes automatically on every Git deploy, no extra config needed:

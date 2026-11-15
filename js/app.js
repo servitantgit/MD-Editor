@@ -383,8 +383,9 @@ async function init() {
   if (typeof window.EasyMDE !== 'function') {
     const miss = (window.__mdCdnMiss || ['easymde']).join(', ');
     loginUI.setStatus(
-      'Editor failed to load (' + miss + '). If the console shows ERR_BLOCKED_BY_CLIENT, '
-      + 'allow cdn.jsdelivr.net for this site and reload.',
+      'Editor failed to load (' + miss + '). Core libraries come from the Vite build '
+      + '(js/vendor.js). Use npx vite locally or deploy dist/ on Pages. Check the console '
+      + 'for module import errors — not an ad-blocker issue for EasyMDE anymore.',
       true
     );
   }
@@ -653,8 +654,9 @@ function showApp(owner, repo) {
   if (typeof window.EasyMDE !== 'function') {
     const miss = (window.__mdCdnMiss || ['easymde']).join(', ');
     const msg = 'Editor libraries failed to load (' + miss + '). '
-      + 'Usually an ad-blocker (ERR_BLOCKED_BY_CLIENT) blocked cdn.jsdelivr.net. '
-      + 'Disable the blocker for this site or allow jsdelivr, then reload.';
+      + 'They are bundled via Vite (js/vendor.js → window.EasyMDE, …). '
+      + 'Locally run npx vite; on Cloudflare Pages use build npm run build and output dist/. '
+      + 'See the browser console for failed module imports.';
     console.error(msg);
     try {
       els.loginScreen.classList.remove('hidden');
