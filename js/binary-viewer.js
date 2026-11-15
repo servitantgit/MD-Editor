@@ -5,6 +5,7 @@
 
 import { basenameOf, extOf } from './paths.js';
 import { kindFromPath } from './file-kind.js';
+import { sanitizeHtml } from './sanitize-html.js';
 
 /** @type {{ path: string, b64: string, objectUrl: string|null, kind: object, arrayBuffer: ArrayBuffer|null }|null} */
 let current = null;
@@ -27,6 +28,34 @@ const OFFICE_MIME = {
 
 const MAMMOTH_CDN = 'https://cdn.jsdelivr.net/npm/mammoth@1.8.0/mammoth.browser.min.js';
 const XLSX_CDN = 'https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js';
+
+const SAFE_LINK_RE = /^(https?:|mailto:|#)/i;
+
+/**
+ * HTML produced from an untrusted DOCX / spreadsheet that is about to go into
+ * innerHTML of the MAIN page (it holds the GitHub token). Always through
+ * DOMPurify (fail-closed: no purifier -> throws), then every link that is not
+ * http(s), mailto or an anchor loses its href, and the rest open in a new tab
+ * with rel=noopener. See AGENTS.md "Never put unsanitized HTML into the main page".
+ * @param {string} html
+ * @param {{ sanitize: Function }} purifier  DOMPurify
+ * @param {Document} [doc]
+ */
+export function sanitizeOfficeHtml(html, purifier, doc = globalThis.document) {
+  const clean = sanitizeHtml(html, purifier);
+  const tpl = doc.createElement('template');
+  tpl.innerHTML = clean;
+  tpl.content.querySelectorAll('a').forEach((a) => {
+    const href = (a.getAttribute('href') || '').trim();
+    if (SAFE_LINK_RE.test(href)) {
+      a.setAttribute('target', '_blank');
+      a.setAttribute('rel', 'noopener noreferrer');
+    } else {
+      a.removeAttribute('href');
+    }
+  });
+  return tpl.innerHTML;
+}
 
 export function guessBinaryMime(path) {
   const e = extOf(path);
@@ -184,7 +213,7 @@ function render(rootEl, layoutMode) {
               <span class="binary-office-name">${escapeHtml(name)}</span>
               <span class="binary-office-badge">DOCX preview</span>
             </div>
-            <div class="binary-office-html">${result.value || '<p><em>(empty document)</em></p>'}</div>
+            <div class="binary-office-html">${sanitizeOfficeHtml(result.value || '<p><em>(empty document)</em></p>', window.DOMPurify)}</div>
             ${warnings.length ? `<div class="binary-office-warnings">${warnings.map((w) => escapeHtml(w)).join('<br>')}</div>` : ''}
           </div>`;
       })
@@ -256,7 +285,7 @@ function render(rootEl, layoutMode) {
 function sheetToHtml(XLSX, sheet) {
   if (!sheet) return '<p><em>(empty sheet)</em></p>';
   try {
-    return XLSX.utils.sheet_to_html(sheet, { editable: false });
+    return sanitizeOfficeHtml(XLSX.utils.sheet_to_html(sheet, { editable: false }), window.DOMPurify);
   } catch (_) {
     return '<p><em>Could not render this sheet.</em></p>';
   }

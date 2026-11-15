@@ -1,0 +1,12 @@
+# One line ending everywhere: LF, also in a Windows working copy (see AGENTS.md).
+* text=auto eol=lf
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.webp binary
+*.pdf binary
+*.docx binary
+*.xlsx binary
+*.pptx binary
