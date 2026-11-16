@@ -87,7 +87,8 @@ export function createEditor(textareaEl, deps) {
     return findController;
   }
 
-  const easyMDE = new EasyMDE({
+  const EasyMDECtor = deps.EasyMDE || globalThis.EasyMDE;
+  const easyMDE = new EasyMDECtor({
     element: textareaEl,
     spellChecker: false,
     autosave: { enabled: false },

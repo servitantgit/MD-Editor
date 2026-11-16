@@ -13,10 +13,6 @@
 import CodeMirror from 'codemirror';
 window.CodeMirror = CodeMirror;
 
-// EasyMDE 2 (bundles CodeMirror 5 internally — same build as the old CDN file).
-import EasyMDE from 'easymde';
-window.EasyMDE = EasyMDE;
-
 // marked 18: named export is the marked parser (used as deps.marked → marked parse).
 
 // Library CSS (loaded in this order so the cascade matches the old CDN <link> order:

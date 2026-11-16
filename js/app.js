@@ -29,6 +29,7 @@ import { parseHeadingOutline } from './doc-outline.js';
 import { createBacklinkIndex } from './backlinks.js';
 import { buildHtmlSrcdoc } from './html-preview.js';
 import { marked } from 'marked';
+import EasyMDE from 'easymde';
 import { getPurifier } from './purifier.js';
 import {
   showBinaryViewer,
@@ -382,18 +383,6 @@ async function init() {
   if (els.btnDiscard) els.btnDiscard.onclick = onDiscardFile;
   if (els.btnPrint) els.btnPrint.onclick = onPrintPage;
 
-  // Only the editor core is fatal. Optional CDNs (highlight, minisearch)
-  // must NOT paint a red banner — they often trip ad-block while EasyMDE is fine.
-  if (typeof window.EasyMDE !== 'function') {
-    const miss = (window.__mdCdnMiss || ['easymde']).join(', ');
-    loginUI.setStatus(
-      'Editor failed to load (' + miss + '). Core libraries come from the Vite build '
-      + '(js/vendor.js). Use npx vite locally or deploy dist/ on Pages. Check the console '
-      + 'for module import errors — not an ad-blocker issue for EasyMDE anymore.',
-      true
-    );
-  }
-
   // bootstrap() must be awaited, and must be allowed to end init() on its own:
   // onSignedIn() → showApp() is reached from inside it (fresh OAuth and session
   // restore both complete there). Reading the session while the token check is
@@ -655,22 +644,6 @@ function showApp(owner, repo) {
     else els.demoBanner.classList.add('hidden');
   }
 
-  if (typeof window.EasyMDE !== 'function') {
-    const miss = (window.__mdCdnMiss || ['easymde']).join(', ');
-    const msg = 'Editor libraries failed to load (' + miss + '). '
-      + 'They are bundled via Vite (js/vendor.js → window.EasyMDE, …). '
-      + 'Locally run npx vite; on Cloudflare Pages use build npm run build and output dist/. '
-      + 'See the browser console for failed module imports.';
-    console.error(msg);
-    try {
-      els.loginScreen.classList.remove('hidden');
-      els.appHeader.classList.add('hidden');
-      els.appMain.classList.add('hidden');
-      loginUI.setStatus(msg, true);
-    } catch (_) {}
-    return;
-  }
-
   imageResolver = new ImageResolver(state.client);
 
   const ops = ensureFileOps();
@@ -685,6 +658,7 @@ function showApp(owner, repo) {
 
   editorHandle = createEditor(els.editorTextarea, {
     marked,
+    EasyMDE,
     purifier: getPurifier(),
     imageResolver,
     getCurrentPath: () => state.currentPath,
