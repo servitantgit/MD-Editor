@@ -6,6 +6,7 @@
 import { basenameOf, extOf } from './paths.js';
 import { kindFromPath } from './file-kind.js';
 import { sanitizeHtml } from './sanitize-html.js';
+import { getPurifier } from './purifier.js';
 
 /** @type {{ path: string, b64: string, objectUrl: string|null, kind: object, arrayBuffer: ArrayBuffer|null }|null} */
 let current = null;
@@ -210,7 +211,7 @@ function render(rootEl, layoutMode) {
               <span class="binary-office-name">${escapeHtml(name)}</span>
               <span class="binary-office-badge">DOCX preview</span>
             </div>
-            <div class="binary-office-html">${sanitizeOfficeHtml(result.value || '<p><em>(empty document)</em></p>', window.DOMPurify)}</div>
+            <div class="binary-office-html">${sanitizeOfficeHtml(result.value || '<p><em>(empty document)</em></p>', getPurifier())}</div>
             ${warnings.length ? `<div class="binary-office-warnings">${warnings.map((w) => escapeHtml(w)).join('<br>')}</div>` : ''}
           </div>`;
       })
@@ -281,7 +282,7 @@ function render(rootEl, layoutMode) {
 function sheetToHtml(XLSX, sheet) {
   if (!sheet) return '<p><em>(empty sheet)</em></p>';
   try {
-    return sanitizeOfficeHtml(XLSX.utils.sheet_to_html(sheet, { editable: false }), window.DOMPurify);
+    return sanitizeOfficeHtml(XLSX.utils.sheet_to_html(sheet, { editable: false }), getPurifier());
   } catch (_) {
     return '<p><em>Could not render this sheet.</em></p>';
   }

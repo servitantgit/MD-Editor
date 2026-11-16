@@ -1,5 +1,8 @@
+npm ci
 # термінал 1
-node serve.mjs
+npx vite --port 8080 --strictPort
 # термінал 2
+python e2e_smoke_test.py
+# or
 $env:PYTHONIOENCODING = 'utf-8'
 python e2e_smoke_test.py 2>&1 | Select-Object -Last 30 | Out-String | Set-Clipboard

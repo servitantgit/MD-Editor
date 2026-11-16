@@ -16,7 +16,7 @@ import { markdownToCanonicalHtml } from './markdown-tokens.js';
 
 function requirePurifier(purifier) {
   if (!purifier || typeof purifier.sanitize !== 'function') {
-    throw new Error('HTML sanitizer (DOMPurify) is not loaded - rendering is disabled for safety. Allow cdn.jsdelivr.net and reload.');
+    throw new Error('HTML sanitizer (DOMPurify) is not loaded - rendering is disabled for safety.');
   }
   return purifier;
 }

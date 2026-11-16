@@ -28,6 +28,8 @@ import { kindFromPath, isHtmlPath, isMarkdownPath, isViewOnlyPath } from './file
 import { parseHeadingOutline } from './doc-outline.js';
 import { createBacklinkIndex } from './backlinks.js';
 import { buildHtmlSrcdoc } from './html-preview.js';
+import { marked } from 'marked';
+import { getPurifier } from './purifier.js';
 import {
   showBinaryViewer,
   hideBinaryViewer,
@@ -680,8 +682,8 @@ function showApp(owner, repo) {
   ops.updateActiveFolderPathLabel(fileTree.getActiveFolder());
 
   editorHandle = createEditor(els.editorTextarea, {
-    marked: window.marked,
-    purifier: window.DOMPurify,
+    marked,
+    purifier: getPurifier(),
     imageResolver,
     getCurrentPath: () => state.currentPath,
     onOpenInternalLink: (path) => {
@@ -1337,8 +1339,8 @@ async function onPrintPage() {
     await printCurrentPage({
       getCurrentPath: () => state.currentPath,
       getMarkdownText: () => editorHandle.easyMDE.value(),
-      marked: window.marked,
-      purifier: window.DOMPurify,
+      marked,
+      purifier: getPurifier(),
       imageResolver,
       onStatus: setSaveStatus,
     });

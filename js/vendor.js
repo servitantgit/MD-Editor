@@ -21,13 +21,7 @@ window.CodeMirror = CodeMirror;
 import EasyMDE from 'easymde';
 window.EasyMDE = EasyMDE;
 
-// marked 18: named export is the marked parser (used as deps.marked → marked.parse).
-import { marked } from 'marked';
-window.marked = marked;
-
-// DOMPurify 3: createDOMPurify(window) installs itself on the given window.
-import createDOMPurify from 'dompurify';
-window.DOMPurify = createDOMPurify(window);
+// marked 18: named export is the marked parser (used as deps.marked → marked parse).
 
 // highlight.js 11: the "common" build (~36 languages), the same set the CDN file highlight.min.js shipped.
 // lib/core has NO languages: fenced code blocks would silently lose highlighting.
