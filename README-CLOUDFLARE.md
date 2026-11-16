@@ -5,6 +5,29 @@ The application files stay in the repository root so GitHub renders `README.md` 
 **This project deploys as a Cloudflare Pages project with Git integration** (auto-build on push to `main`/`master`), live at `md-edit.pages.dev`. `wrangler.toml` in this repo is a leftover from an earlier Workers-based setup and is **not used** by the current Git-integration deploy — Pages configures the build purely from its own dashboard project settings. Ignore it unless you deliberately switch to deploying with the `wrangler pages deploy` CLI.
 
 
+
+## Preview deployments and OAuth
+
+Branch / PR previews (`*.md-edit.pages.dev`) use the **Preview** environment in
+Cloudflare Pages, not Production.
+
+Environment variables are **separate** per environment. If you only set
+`GITHUB_CLIENT_ID` and `GITHUB_CLIENT_SECRET` under Production, preview URLs
+show: `Server is not configured: the Pages project is missing the GITHUB_CLIENT_ID
+environment variable`.
+
+**Checklist**
+
+1. Cloudflare Dashboard → your Pages project → **Settings** → **Variables and Secrets**.
+2. Switch the environment selector to **Preview**.
+3. Add the same `GITHUB_CLIENT_ID` (plain) and `GITHUB_CLIENT_SECRET` (encrypted).
+4. Redeploy the preview (push an empty commit on the branch, or Retry deployment).
+5. In the GitHub OAuth App settings, allow the callback URL for previews, e.g.
+   `https://*.md-edit.pages.dev/auth/callback` or the concrete preview host.
+
+Production remains on `https://md-edit.pages.dev/auth/callback` only if that is
+what you registered; add preview URLs without removing production.
+
 ## Build settings (Vite)
 
 In the Cloudflare Pages project: **Settings → Builds**:

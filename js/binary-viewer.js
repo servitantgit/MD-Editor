@@ -26,9 +26,7 @@ const OFFICE_MIME = {
   pdf: 'application/pdf',
 };
 
-const MAMMOTH_CDN = 'https://cdn.jsdelivr.net/npm/mammoth@1.8.0/mammoth.browser.min.js';
-const XLSX_CDN = 'https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js';
-
+// Mammoth / SheetJS: lazy Vite chunks from npm (no CDN). package-lock.json is the pin.
 const SAFE_LINK_RE = /^(https?:|mailto:|#)/i;
 
 /**
@@ -192,10 +190,9 @@ function render(rootEl, layoutMode) {
         <p>Loading document preview…</p>
       </div>`;
     const buf = arrayBuffer || b64ToArrayBuffer(b64);
-    loadScript(MAMMOTH_CDN, 'mammoth')
-      .then(() => {
+    loadNpmLib('mammoth', () => import('mammoth'))
+      .then((mammoth) => {
         if (myToken !== renderToken || !current || current.path !== path) return;
-        const mammoth = window.mammoth;
         if (!mammoth || typeof mammoth.convertToHtml !== 'function') {
           throw new Error('Mammoth failed to load');
         }
@@ -233,10 +230,9 @@ function render(rootEl, layoutMode) {
         <p>Loading spreadsheet preview…</p>
       </div>`;
     const buf = arrayBuffer || b64ToArrayBuffer(b64);
-    loadScript(XLSX_CDN, 'XLSX')
-      .then(() => {
+    loadNpmLib('XLSX', () => import('xlsx'))
+      .then((XLSX) => {
         if (myToken !== renderToken || !current || current.path !== path) return;
-        const XLSX = window.XLSX;
         if (!XLSX || typeof XLSX.read !== 'function') {
           throw new Error('SheetJS failed to load');
         }
@@ -303,29 +299,27 @@ function officeFallbackHtml(name, label, errMsg, objectUrl) {
     </div>`;
 }
 
-/** Load a UMD script once; resolves when globalName is on window. */
-function loadScript(src, globalName) {
+/**
+ * Lazy-load an npm library as a Vite async chunk and cache it on window.
+ * Prefer this over CDN script tags so production and e2e share package-lock pins.
+ * @param {string} globalName  window key (mammoth | XLSX)
+ * @param {() => Promise<any>} importer  () => import('mammoth') etc.
+ */
+function loadNpmLib(globalName, importer) {
   if (window[globalName]) return Promise.resolve(window[globalName]);
-  const existing = document.querySelector(`script[data-binary-lib="${globalName}"]`);
-  if (existing) {
-    return new Promise((resolve, reject) => {
-      if (window[globalName]) return resolve(window[globalName]);
-      existing.addEventListener('load', () => resolve(window[globalName]));
-      existing.addEventListener('error', () => reject(new Error('Failed to load ' + globalName)));
+  if (!loadNpmLib._inflight) loadNpmLib._inflight = Object.create(null);
+  if (loadNpmLib._inflight[globalName]) return loadNpmLib._inflight[globalName];
+  loadNpmLib._inflight[globalName] = importer()
+    .then((mod) => {
+      const g = mod && (mod.default || mod);
+      if (!g) throw new Error(globalName + ' module empty after import');
+      window[globalName] = g;
+      return g;
+    })
+    .finally(() => {
+      delete loadNpmLib._inflight[globalName];
     });
-  }
-  return new Promise((resolve, reject) => {
-    const s = document.createElement('script');
-    s.src = src;
-    s.async = true;
-    s.dataset.binaryLib = globalName;
-    s.onload = () => {
-      if (window[globalName]) resolve(window[globalName]);
-      else reject(new Error(globalName + ' global missing after load'));
-    };
-    s.onerror = () => reject(new Error('Failed to load script: ' + src));
-    document.head.appendChild(s);
-  });
+  return loadNpmLib._inflight[globalName];
 }
 
 function escapeHtml(s) {
