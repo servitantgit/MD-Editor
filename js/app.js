@@ -41,6 +41,8 @@ import { createMinimap } from './minimap.js';
 import { createScrollSync } from './scroll-sync.js';
 import { createLinkSuggest } from './link-suggest.js';
 import { createLatestOnly } from './latest-only.js';
+import MiniSearch from 'minisearch';
+import { highlightBlock } from './highlight.js';
 
 const els = {
   loginScreen: document.getElementById('login-screen'),
@@ -967,8 +969,8 @@ async function openSearchResult(path, context) {
     const options = createSearcherOptions();
     const result = editor.findFromSearch(context, {
       path,
-      tokenize: options.tokenize || window.MiniSearch.getDefault('tokenize'),
-      processTerm: options.processTerm || window.MiniSearch.getDefault('processTerm')
+      tokenize: options.tokenize || MiniSearch.getDefault('tokenize'),
+      processTerm: options.processTerm || MiniSearch.getDefault('processTerm')
     });
     if (!result.total) {
       const contentMatch = Object.values(context.match).some(fields =>
@@ -986,14 +988,6 @@ async function openSearchResult(path, context) {
 }
 
 function setupSearch(owner, repo) {
-  if (typeof window.MiniSearch !== 'function') {
-    // The CDN <script> failed to load. Search is the only feature that can be
-    // missing like this, so say so instead of failing on a bare type error.
-    els.searchStatus.textContent = 'Search unavailable (library failed to load)';
-    els.searchStatus.classList.add('degraded');
-    return;
-  }
-
   // Close the previous session's connection before opening a new one (same
   // pattern as createAutosave → draftStore.close()). setupSearch runs once per
   // showApp(), i.e. again on every in-app repo switch.
@@ -1010,7 +1004,7 @@ function setupSearch(owner, repo) {
     owner,
     repo,
     branch: state.branch,
-    MiniSearchCtor: window.MiniSearch,
+    MiniSearchCtor: MiniSearch,
     onProgress: (done, total) => {
       els.searchStatus.textContent = `Indexing… ${done}/${total}`;
       els.searchStatus.classList.remove('degraded');
@@ -1422,10 +1416,8 @@ function fillPreviewPane(node, plain, kind) {
     let html = `<pre class="code-preview"><code class="language-${escapePreview(lang)}">${body}</code></pre>`;
     node.innerHTML = html;
     try {
-      if (typeof globalThis.hljs !== 'undefined') {
-        const block = node.querySelector('code');
-        if (block) globalThis.hljs.highlightElement(block);
-      }
+      const block = node.querySelector('code');
+      if (block) highlightBlock(block);
     } catch (_) { /* optional */ }
     return;
   }

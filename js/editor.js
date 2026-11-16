@@ -6,6 +6,7 @@
 // * previewRender wired via the async pattern documented by EasyMDE itself.
 
 import { renderMarkdownSafe } from './sanitize-html.js';
+import { highlightBlock } from './highlight.js';
 import { attachResizeHandles, resolveAllImages } from './image-preview.js';
 import { kindFromPath } from './file-kind.js';
 import { dirnameOf, basenameOf, resolveRelativePath, isExternalOrAnchor, isImagePath, decodeUriSafe } from './paths.js';
@@ -199,11 +200,9 @@ export function createEditor(textareaEl, deps) {
         setTimeout(() => {
           if (myToken !== previewRenderToken || !previewEl) return;
           try {
-            if (typeof globalThis.hljs !== 'undefined') {
-              previewEl.querySelectorAll('pre code').forEach((block) => {
-                try { globalThis.hljs.highlightElement(block); } catch (_) {}
-              });
-            }
+            previewEl.querySelectorAll('pre code').forEach((block) => {
+              try { highlightBlock(block); } catch (_) {}
+            });
           } catch (_) {}
         }, 0);
         return html;
@@ -279,9 +278,9 @@ export function createEditor(textareaEl, deps) {
     if (myToken !== previewRenderToken) return; // a newer render arrived meanwhile
     // Notepad++-style readability: highlight fenced code in the rendered preview
     try {
-      if (typeof globalThis.hljs !== 'undefined' && previewEl) {
+      if (previewEl) {
         previewEl.querySelectorAll('pre code').forEach((block) => {
-          try { globalThis.hljs.highlightElement(block); } catch (_) { /* ignore single block */ }
+          try { highlightBlock(block); } catch (_) { /* ignore single block */ }
         });
       }
     } catch (_) { /* hljs optional */ }

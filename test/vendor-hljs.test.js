@@ -4,7 +4,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
-const src = fs.readFileSync(new URL('../js/vendor.js', import.meta.url), 'utf8');
+const src = fs.readFileSync(new URL('../js/highlight.js', import.meta.url), 'utf8');
 
 test('vendor.js loads a highlight.js build that includes languages', () => {
   assert.ok(!/highlight\.js\/lib\/core/.test(src), 'lib/core has no languages');
