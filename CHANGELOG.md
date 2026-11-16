@@ -45,6 +45,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Discard button** next to Save: reverts the open note to its GitHub version, deletes the local draft, clears the unsaved dot and the Commit badge, and pushes nothing (`js/autosave.js`, `js/app.js`)
 
 ### Removed
+- **Dead html2pdf export module and stale docs/helper.** `js/pdf-export.js` (called `window.html2pdf()`, which nothing loads), the AGENTS.md bullet that said Mammoth/SheetJS/html2pdf load from CDN (they come from npm, PDF uses system print dialog via `js/print-export.js`), and the `e2e/harness.py` helper `pdf_page_images` whose docstring mentioned "html2pdf embeds exactly one per page".
 - **Image audit** (`tools/image-audit.mjs`, `js/image-audit.js` and its tests). It was not used; the lessons are kept in AGENTS.md. Removed in `d789330` and `e43c4a5`
 
 ### Fixed

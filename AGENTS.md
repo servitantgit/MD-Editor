@@ -33,10 +33,11 @@ point to a section of that file.
   packages. `index.html` loads `./js/vendor.js` then `./js/app.js` (both `type="module"`).
 - Production serves **`dist/`** from `vite build`. Dev uses the Vite dev server. Opening
   `index.html` as static files without Vite/build will fail module resolution.
-- **Still loaded on demand from CDN** (not in the main bundle): Mammoth, SheetJS, html2pdf when
-  the user opens DOCX/XLSX or uses PDF export. Pin each of those in: the URL in the loading
-  code, exact version in `package.json` (no `^`), and the e2e route/mock if the test exercises
-  that path. Core editor libs are **not** pinned in three places anymore — `package-lock.json`
+- **Loaded on demand from npm** (not in the main bundle): Mammoth, SheetJS when the user
+  opens DOCX/XLSX. PDF export uses the system print dialog (`js/print-export.js`). All
+  on-demand libraries are pinned by exact version in `package.json` (no `^`) and
+  `package-lock.json`; the e2e route/mock is updated when the test exercises that path.
+  Core editor libs are **not** pinned in three places anymore — `package-lock.json`
   is the source of truth.
 
 ## Rules that must not be broken

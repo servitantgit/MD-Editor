@@ -352,23 +352,6 @@ def handle_github_api(route, request):
         route.fulfill(status=404, content_type="application/json", body=json.dumps({"message": "Not Found (mock)"}))
 
 
-def pdf_page_images(path):
-    """Every JPEG stream in the PDF — html2pdf embeds exactly one per page."""
-    data = path.read_bytes()
-    out = []
-    for m in re.finditer(rb"/Filter\s*/DCTDecode", data):
-        sm = re.compile(rb"stream\r?\n").search(data, m.end())
-        if not sm:
-            continue
-        end = data.find(b"endstream", sm.end())
-        if end == -1:
-            continue
-        blob = data[sm.end():end].rstrip(b"\r\n")
-        if blob[:2] == b"\xff\xd8":  # JPEG SOI marker
-            out.append(blob)
-    return out
-
-
 def measure_red_per_page(page, streams):
     """Decode each page image in the browser and measure it.
 
