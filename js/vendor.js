@@ -6,12 +6,7 @@
 // for these libraries, and it must run BEFORE ./js/app.js (see the script order in index.html).
 //
 // Globals set here and the js/ files that use them:
-//   window.CodeMirror   — js/editor.js (globalThis.CodeMirror, CodeMirror.Doc via constructor)
 //   window.EasyMDE      — js/app.js (typeof check), js/editor.js (new EasyMDE(...))
-
-// CodeMirror 5: editor.js reads globalThis.CodeMirror and CodeMirror.Doc.
-import CodeMirror from 'codemirror';
-window.CodeMirror = CodeMirror;
 
 // marked 18: named export is the marked parser (used as deps.marked → marked parse).
 

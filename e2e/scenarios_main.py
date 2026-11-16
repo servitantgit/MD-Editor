@@ -1553,4 +1553,20 @@ def run_main_smoke(page, page_errors, browser):
     page.wait_for_selector(".file-item.folder[data-path='DragSrc']", timeout=5000)
     print("✓ dragging a folder onto the root strip moves it to the repository root")
 
+    # CodeMirror syntax modes are registered on the instance the editor uses (python mode stands for all eight).
+    page.wait_for_function(
+        "() => { const cm = document.querySelector('.CodeMirror').CodeMirror; "
+        "return !!(cm.constructor.modes && cm.constructor.modes.python); }",
+        timeout=15000)
+    mode_names = page.evaluate("""() => {
+        const cm = document.querySelector('.CodeMirror').CodeMirror;
+        const out = {};
+        for (const m of ['xml', 'javascript', 'css', 'htmlmixed', 'python', 'shell', 'yaml', 'gfm']) {
+            out[m] = !!cm.constructor.modes[m];
+        }
+        return out;
+    }""")
+    assert all(mode_names.values()), mode_names
+    print("✓ CodeMirror syntax modes (8) are registered on the editor's own CodeMirror instance")
+
 

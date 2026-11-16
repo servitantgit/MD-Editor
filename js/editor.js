@@ -232,44 +232,24 @@ export function createEditor(textareaEl, deps) {
   });
 
 
-  // Expose EasyMDE's CodeMirror so optional mode scripts can register
-  try {
-    if (typeof globalThis.CodeMirror === 'undefined' && easyMDE.codemirror) {
-      // CM5: instance.constructor is usually the CodeMirror function
-      const cand = easyMDE.codemirror.constructor;
-      if (cand && typeof cand.defineMode === 'function') {
-        globalThis.CodeMirror = cand;
-      } else if (cand && cand.Doc && typeof easyMDE.codemirror.getOption === 'function') {
-        // Some builds put defineMode only on the library root; still assign constructor
-        globalThis.CodeMirror = cand;
-      }
-    }
-  } catch (_) { /* ignore */ }
-
-  // Lazy-load common CodeMirror modes once (Notepad++ language pack feel)
-  let modesLoadStarted = false;
+  // Lazy-load common CodeMirror modes from npm (Notepad++ language pack feel).
+  // Registered on the same CodeMirror instance EasyMDE uses — no window global,
+  // no CDN script tags.
+  let modesPromise = null;
   function ensureCodeMirrorModes() {
-    if (modesLoadStarted || typeof globalThis.CodeMirror === 'undefined') return;
-    modesLoadStarted = true;
-    const base = 'https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode';
-    const files = [
-      base + '/xml/xml.min.js',
-      base + '/javascript/javascript.min.js',
-      base + '/css/css.min.js',
-      base + '/htmlmixed/htmlmixed.min.js',
-      base + '/python/python.min.js',
-      base + '/shell/shell.min.js',
-      base + '/yaml/yaml.min.js',
-      base + '/markdown/markdown.min.js',
-    ];
-    for (const src of files) {
-      if (document.querySelector(`script[data-cm-mode="${src}"]`)) continue;
-      const s = document.createElement('script');
-      s.src = src;
-      s.async = true;
-      s.dataset.cmMode = src;
-      document.head.appendChild(s);
+    if (!modesPromise) {
+      modesPromise = Promise.all([
+        import('codemirror/mode/xml/xml.js'),
+        import('codemirror/mode/javascript/javascript.js'),
+        import('codemirror/mode/css/css.js'),
+        import('codemirror/mode/htmlmixed/htmlmixed.js'),
+        import('codemirror/mode/python/python.js'),
+        import('codemirror/mode/shell/shell.js'),
+        import('codemirror/mode/yaml/yaml.js'),
+        import('codemirror/mode/markdown/markdown.js'),
+      ]).catch(() => { /* plain text still works */ });
     }
+    return modesPromise;
   }
 
   async function finishPreviewRender(previewEl, myToken) {
@@ -952,6 +932,9 @@ closeImageMenu();
       const mode = modeName && modeName !== 'null' ? modeName : 'text/plain';
       const resolved = mode === 'gfm' || mode === 'markdown' ? 'gfm' : mode;
       cm.setOption('mode', resolved);
+      ensureCodeMirrorModes().then(() => {
+        try { cm.setOption('mode', resolved); cm.refresh(); } catch (_) {}
+      });
       // Modes may still be downloading — retry once after a short delay
       setTimeout(() => {
         try {
