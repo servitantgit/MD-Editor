@@ -2,11 +2,18 @@
 headless Chromium, replaces the GitHub API with fake responses (so no
 real token is needed) and checks editing, scrolling, images, Print (Save as PDF),
 HTML Live preview, and view-only PDF/DOCX open + Download.
-Run: first `node serve.mjs` (port 8080), then `python3 e2e_smoke_test.py`.
+
+Run against the Vite dev server (required after the Vite migration — serve.mjs
+cannot resolve js/vendor.js npm imports):
+
+  npx vite --port 8080 --strictPort
+  python3 e2e_smoke_test.py
+
 Requires: pip install playwright && playwright install chromium
-CDN libraries (jsdelivr/cdnjs) are replaced here with local copies from node_modules —
-this replacement is ONLY for the test environment; production index.html still uses
-the real CDN. Mammoth (DOCX preview) is stubbed the same way.
+
+Core editor libraries (EasyMDE, marked, DOMPurify, MiniSearch, …) come from
+js/vendor.js via Vite — they are not mocked here. Mammoth (DOCX preview) still
+loads on demand from jsDelivr and is stubbed offline below.
 """
 import re
 import json
@@ -64,14 +71,6 @@ USER_REPOS = [
     {"full_name": SECOND_REPO, "name": "second-repo",
      "owner": {"login": "second-owner"}, "private": False, "description": "second", "pushed_at": ""},
 ]
-
-CDN_MOCKS = {
-    "https://cdn.jsdelivr.net/npm/easymde@2.21.0/dist/easymde.min.css": BASE / "node_modules/easymde/dist/easymde.min.css",
-    "https://cdn.jsdelivr.net/npm/easymde@2.21.0/dist/easymde.min.js": BASE / "node_modules/easymde/dist/easymde.min.js",
-    "https://cdn.jsdelivr.net/npm/marked@18.0.14/lib/marked.umd.js": BASE / "node_modules/marked/lib/marked.umd.js",
-    "https://cdn.jsdelivr.net/npm/dompurify@3.4.17/dist/purify.min.js": BASE / "node_modules/dompurify/dist/purify.min.js",
-    "https://cdn.jsdelivr.net/npm/minisearch@7.2.0/dist/umd/index.js": BASE / "node_modules/minisearch/dist/umd/index.js",
-}
 
 TINY_PNG_B64 = base64.b64encode(bytes.fromhex(
     "89504e470d0a1a0a0000000d4948445200000001000000010802000000907753"
@@ -329,15 +328,6 @@ def handle_github_api(route, request):
         route.fulfill(status=404, content_type="application/json", body=json.dumps({"message": "Not Found (mock)"}))
 
 
-def handle_cdn(route, request):
-    local_path = CDN_MOCKS.get(request.url)
-    if local_path and local_path.exists():
-        ct = "text/css" if str(local_path).endswith(".css") else "text/javascript"
-        route.fulfill(status=200, content_type=ct, body=local_path.read_bytes())
-    else:
-        route.fulfill(status=404, body=b"")
-
-
 def pdf_page_images(path):
     """Every JPEG stream in the PDF — html2pdf embeds exactly one per page."""
     data = path.read_bytes()
@@ -401,9 +391,7 @@ with sync_playwright() as p:
     page = browser.new_page(viewport={"width": 1400, "height": 900}, accept_downloads=True)
     page.on("pageerror", lambda exc: page_errors.append(str(exc)))
     page.route(re.compile(r"https://api\.github\.com/.*"), handle_github_api)
-    for cdn_url in CDN_MOCKS:
-        page.route(cdn_url, handle_cdn)
-    # fontawesome — icons only, not critical for functionality
+    # Legacy CDN icon/CSS hosts (Font Awesome is bundled via vendor.js now).
     page.route(re.compile(r"https://cdnjs\.cloudflare\.com/.*"), lambda r, _: r.fulfill(status=200, content_type="text/css", body=b""))
     page.route(re.compile(r"https://maxcdn\.bootstrapcdn\.com/.*"), lambda r, _: r.fulfill(status=200, content_type="text/css", body=b""))
     # Mammoth is loaded on demand for DOCX preview — stub it offline.
@@ -2059,8 +2047,6 @@ with sync_playwright() as p:
         handle_github_api(route, request)
 
     page.route(re.compile(r"https://api\.github\.com/.*"), j_api)
-    for cdn_url in CDN_MOCKS:
-        page.route(cdn_url, handle_cdn)
     page.route(re.compile(r"https://cdnjs\.cloudflare\.com/.*"),
         lambda r, _: r.fulfill(status=200, content_type="text/css", body=b""))
     page.route(re.compile(r"https://maxcdn\.bootstrapcdn\.com/.*"),
@@ -2520,8 +2506,6 @@ with sync_playwright() as p:
     n_contents_before = len(j_contents_writes)
     n_refs_before = len(j_refs)
     page.route(re.compile(r"https://api\.github\.com/.*"), j_api)
-    for cdn_url in CDN_MOCKS:
-        page.route(cdn_url, handle_cdn)
     page.route(re.compile(r"https://cdnjs\.cloudflare\.com/.*"),
         lambda r, _: r.fulfill(status=200, content_type="text/css", body=b""))
     page.route(re.compile(r"https://maxcdn\.bootstrapcdn\.com/.*"),

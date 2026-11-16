@@ -55,6 +55,7 @@ jobs:
           python -m pip install playwright
           python -m playwright install --with-deps chromium
 
+      # Vite is required: serve.mjs cannot resolve js/vendor.js npm imports.
       - name: Start Vite dev server
         run: npx vite --port 8080 --strictPort > /tmp/md-editor-server.log 2>&1 &
       - name: Wait for server

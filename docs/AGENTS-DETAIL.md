@@ -76,13 +76,13 @@ old/missing values.
 
 ## Local development does NOT see /auth/*
 
-`node serve.mjs` is a bare static file server, it executes nothing from
-`/functions`. The "Sign in with GitHub" button on `localhost:8080` will hit a
-404 or an unstyled `index.html` fallback (that's exactly how it was first
-discovered — an unstyled login screen at `/auth/login`, because CSS is linked
-via the relative path `./css/app.css`, which breaks when the current URL isn't
-`/`). To actually run the OAuth flow locally — serve via `npx wrangler pages dev .`
-(emulates both static assets and Pages Functions), not `node serve.mjs`.
+After the Vite migration the UI is served with `npx vite` (port 8080). That
+resolves `js/vendor.js` npm imports; `node serve.mjs` is a bare static server
+and **cannot** run the full editor (module resolution fails → EasyMDE missing).
+
+Neither Vite nor `serve.mjs` executes `/functions`. The "Sign in with GitHub"
+button on localhost will 404 on `/auth/login` unless you use
+`npx wrangler pages dev .` (static + Pages Functions) or test against production.
 
 ## package-lock.json — a silent npm ci trap
 
@@ -142,7 +142,7 @@ locally, so cover such rules with a plain unit test instead.
 ## e2e_smoke_test.py does not test the real OAuth
 
 The test can't go through real GitHub OAuth — there are no live credentials in
-CI, and even locally `node serve.mjs` doesn't serve `/functions`. So the test
+CI, and Vite (like `serve.mjs`) does not serve `/functions`. So the test
 immediately puts a fake token/owner/repo directly into `sessionStorage` (the
 same four keys from `readSession()` (`js/login-ui.js`), see above) and reloads
 the page — this simulates the "already signed in" state, not the login process
@@ -150,6 +150,10 @@ itself. `/auth/login` and `/auth/callback` are not covered by this test at all.
 If you ever need to really verify the OAuth round-trip itself — that's a
 separate scenario with `wrangler pages dev` and a test GitHub OAuth App (or a
 mocked `github.com`); such a thing doesn't exist here yet.
+
+**How to run e2e:** `npx vite --port 8080 --strictPort`, then
+`python3 e2e_smoke_test.py`. CI (`test.yml`) does the same. Core libraries are
+not CDN-mocked; Mammoth is still stubbed for offline DOCX checks.
 
 ## PDF export: never position #pdf-export-container itself
 
@@ -173,11 +177,11 @@ decodes every page and requires some non-white pixels on it. The size of a JPEG
 stream proves nothing — a blank page compresses to a few KB too — so do not
 replace the pixel check with a byte-length one.
 
-**The html2pdf.js version is pinned in three places that must agree:** the CDN
-URL in `index.html`, the devDependency in `package.json` (exact version, no
-`^`), and `CDN_MOCKS` in `e2e_smoke_test.py`. The e2e test serves the library
-from `node_modules` under the URL it mocks, so a mismatch means the PDF checks
-run against a different release than production does.
+**On-demand libraries still loaded from a CDN** (html2pdf, Mammoth, SheetJS —
+not the Vite core bundle): pin the URL in the loading code and the exact version
+in `package.json` (no `^`). Core editor libraries (EasyMDE, marked, DOMPurify,
+MiniSearch, …) are **not** three-way CDN-pinned anymore; they come from npm via
+`js/vendor.js` and `package-lock.json`.
 
 ## PDF export: images must never be split across pages
 
@@ -275,11 +279,11 @@ Object.defineProperty(proto, 'srcdoc', desc);
 This caught the double assignment (raw, then resolved ~40ms later) that
 per-instance patching missed. Leave the prototype patched only while debugging.
 
-**Why Playwright is not enough.** `e2e_smoke_test.py` mocks `cdn.jsdelivr.net`
-from local `node_modules`, which **changes timing**. Race conditions that
-trigger in production (slow CDN, multi-MB content, real network latency) may not
-reproduce under Playwright at all. For HTML-preview, sandbox, or `postMessage`
-bugs, open the **F12 Console on the actual production site** before concluding
+**Why Playwright is not enough.** Core libraries are served by Vite in e2e
+(fast, local). On-demand CDNs (e.g. Mammoth) are stubbed. Race conditions that
+trigger in production (slow network, multi-MB content, real latency) may not
+reproduce under Playwright. For HTML-preview, sandbox, or `postMessage` bugs,
+open the **F12 Console on the actual production site** before concluding
 anything. Reference `7cb7555`: Playwright said PASS and pixel analysis in the
 demo said PASS, but a 3.7MB file (`WinLase.html`) broke in production in a way
 neither test could see.
@@ -1554,12 +1558,11 @@ Here CI broke twice in a row right after merge (first `npm ci`, then a stale
 insignificant relative to the main task. Before push:
 
 1. `npm ci && npm test` — from scratch, without leftovers of the old `node_modules`.
-2. If `index.html` / `js/app.js` / anything in login was changed — run
-   `e2e_smoke_test.py` locally (`node serve.mjs &` then
+2. If `index.html` / `js/app.js` / `js/vendor.js` / login was changed — run
+   e2e locally against Vite (`npx vite --port 8080 --strictPort`, then
    `python3 e2e_smoke_test.py`), not just relying on CI. On Windows, redirecting
-   its output to a file (`python e2e_smoke_test.py > out.txt`) dies with
-   `UnicodeEncodeError: 'charmap' codec can't encode '✓'` — the cp1250 console
-   cannot hold the checkmarks. Set `$env:PYTHONIOENCODING='utf-8'` first.
+   output to a file may die with `UnicodeEncodeError` on checkmarks — set
+   `$env:PYTHONIOENCODING='utf-8'` first.
 3. If the deploy infrastructure was changed — first check which Cloudflare product
    actually serves the live domain, and only then write code for it.
 4. Remember what the local checks *cannot* see: `e2e_smoke_test.py` mocks
@@ -1790,7 +1793,7 @@ do `javascript:` links. marked does NOT sanitize.
   preview (sandboxed iframe, no allow-same-origin), PDF renders in the main page.
 - Fail-closed: if DOMPurify did not load, rendering throws and the preview shows
   an error. Never fall back to raw HTML.
-- DOMPurify is injected like `marked` (`deps.purifier`). Its version is pinned in
-  three places that must agree: `index.html`, `package.json` (exact, no caret),
-  `CDN_MOCKS` in `e2e_smoke_test.py`. Pinned by `test/sanitize-html.test.js`.
+- DOMPurify is injected like `marked` (`deps.purifier`). It ships from npm via
+  `js/vendor.js` / `package-lock.json` (Vite phase 1), not from a CDN script tag.
+  Pinned by `test/sanitize-html.test.js`.
   
