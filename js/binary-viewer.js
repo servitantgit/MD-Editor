@@ -164,9 +164,10 @@ function render(rootEl, layoutMode) {
   const myToken = ++renderToken;
 
   if (isSource) {
+    const stubIcon = kind.icon || '📎';
     rootEl.innerHTML = `
       <div class="binary-stub">
-        <div class="binary-stub-icon">${isPdf ? '📄' : '📑'}</div>
+        <div class="binary-stub-icon">${stubIcon}</div>
         <div class="binary-stub-title">${escapeHtml(name)}</div>
         <p class="binary-stub-msg">Editing of this file type is not supported.<br>Such functionality is not available.</p>
         <p class="binary-stub-hint">Switch to <b>Live</b> or <b>Preview</b> to view the file, or use <b>Download</b> to save it to your device.</p>
@@ -269,14 +270,14 @@ function render(rootEl, layoutMode) {
       .catch((err) => {
         if (myToken !== renderToken) return;
         console.warn('XLSX preview failed', err);
-        rootEl.innerHTML = officeFallbackHtml(name, 'Spreadsheet', err && err.message, objectUrl);
+        rootEl.innerHTML = officeFallbackHtml(name, 'Spreadsheet', err && err.message, objectUrl, kind.icon);
       });
     return;
   }
 
   // Other office formats (pptx, odt, …): no reliable client-side renderer
   const label = kind.label || 'Office document';
-  rootEl.innerHTML = officeFallbackHtml(name, label, null, objectUrl);
+  rootEl.innerHTML = officeFallbackHtml(name, label, null, objectUrl, kind.icon);
 }
 
 function sheetToHtml(XLSX, sheet) {
@@ -288,10 +289,11 @@ function sheetToHtml(XLSX, sheet) {
   }
 }
 
-function officeFallbackHtml(name, label, errMsg, objectUrl) {
+function officeFallbackHtml(name, label, errMsg, objectUrl, icon) {
+  const stubIcon = icon || '📎';
   return `
     <div class="binary-stub binary-office">
-      <div class="binary-stub-icon">📑</div>
+      <div class="binary-stub-icon">${stubIcon}</div>
       <div class="binary-stub-title">${escapeHtml(name)}</div>
       <p class="binary-stub-msg">${escapeHtml(label)} — in-browser preview is not available for this format.</p>
       ${errMsg ? `<p class="binary-stub-hint">${escapeHtml(errMsg)}</p>` : ''}

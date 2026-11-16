@@ -257,15 +257,13 @@ export class FileTree {
         ? '📄'
         : isImg
           ? '🖼️'
-          : kind.kind === 'pdf'
-            ? '📕'
-            : kind.kind === 'office'
-              ? '📑'
-              : kind.kind === 'html'
-                ? '🌐'
-                : kind.kind === 'code'
-                  ? '📜'
-                  : '📦';
+          : kind.icon
+            ? kind.icon
+            : kind.kind === 'html'
+              ? '🌐'
+              : kind.kind === 'code'
+                ? '📜'
+                : '📦';
 
       const el = document.createElement('div');
       el.className = 'file-item' + (isMd || isImg || isText || isViewOnly ? '' : ' other');

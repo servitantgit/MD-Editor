@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **File icons for PDF and Office files** in the file tree and binary viewer stub:
+  PDF 📕 (unchanged), Word/Document 📘, Excel/Spreadsheet 📗, PowerPoint/Presentation 📙.
+  `js/file-kind.js` now carries an `icon` per kind; `js/file-tree.js` and `js/binary-viewer.js` read it.
+  Covered by `test/file-icons.test.js`.
+
 ### Fixed (Vite phase 1 follow-up)
 - **`marked` and DOMPurify are imported, no longer read from `window`.** `js/vendor.js` no longer assigns the old globals, and `js/purifier.js` + `test/purifier.test.js` cover the direct import path.
 - **highlight.js shipped with no languages.** `js/vendor.js` imported `highlight.js/lib/core`, so fenced code blocks lost highlighting; it now imports `lib/common` (the set the CDN `highlight.min.js` had). `test/vendor-hljs.test.js` guards it.
