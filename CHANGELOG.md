@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed (Vite phase 1 follow-up)
+- **highlight.js shipped with no languages.** `js/vendor.js` imported `highlight.js/lib/core`, so fenced code blocks lost highlighting; it now imports `lib/common` (the set the CDN `highlight.min.js` had). `test/vendor-hljs.test.js` guards it.
+- **E2E scenario J lost its precondition after the split.** `run_isolated()` resets the mocks, and "Second note.md" used to be left in the tree by an earlier scenario of the monolith; the group now declares it. `clear_document_state` moved to `e2e/harness.py` as `make_clear_document_state(page)` because two modules use it.
+- **Mammoth / SheetJS pin test** now checks exact npm versions and that no CDN URL is left in `js/binary-viewer.js` (they are imported from npm).
+
 ### Added
 - **Test coverage restored next to the new tests.** `test/sanitize-html-regression.test.js` keeps the six original sanitizer checks (the editor's own markup must survive: `data-md-*`, `data:` pixel, `kbd`, `details`, task checkboxes, image width, full documents); `test/binary-viewer-real-libs.test.js` runs real Mammoth, SheetJS and DOMPurify on a real DOCX fixture with a `javascript:` link, plus a source guard and a version-pin check. `test/encoding.test.js` now also catches cp1252 mojibake of dashes and arrows (it passed on such a file before).
 - **Office files: sanitized before they reach the page.** HTML produced from a DOCX (Mammoth) or a spreadsheet (SheetJS) now goes through `sanitizeOfficeHtml()` (DOMPurify, fail-closed) before `innerHTML` of the main page, and links other than http(s), mailto and anchors lose their `href`. Before this, a DOCX with a `javascript:` hyperlink ran code in the page that holds the GitHub token (reproduced in Chromium). `test/binary-viewer-sanitize.test.js` runs the real Mammoth, SheetJS and DOMPurify on jsdom with a real DOCX fixture, and a source guard fails if `result.value` or `sheet_to_html()` is used without the sanitizer.

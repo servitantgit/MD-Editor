@@ -71,11 +71,13 @@ test('binary-viewer.js: no Mammoth / SheetJS output reaches innerHTML unsanitize
   }
 });
 
-test('Mammoth and SheetJS: CDN URL version equals the pinned devDependency', () => {
+test('Mammoth and SheetJS come from npm (exact pins), no CDN URL is left in binary-viewer.js', () => {
   const src = fs.readFileSync(new URL('../js/binary-viewer.js', import.meta.url), 'utf8');
   const pkg = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
-  const m = src.match(/mammoth@([\d.]+)\//);
-  const x = src.match(/xlsx@([\d.]+)\//);
-  assert.equal(pkg.devDependencies.mammoth, m && m[1]);
-  assert.equal(pkg.devDependencies.xlsx, x && x[1]);
+  const all = { ...pkg.dependencies, ...pkg.devDependencies };
+  for (const name of ['mammoth', 'xlsx']) {
+    assert.match(all[name] || '', /^\d+\.\d+\.\d+$/, `${name} must be an exact version, got ${all[name]}`);
+    assert.match(src, new RegExp(`import\\('${name}'\\)`), `binary-viewer.js must import ${name} from npm`);
+  }
+  assert.ok(!/cdn\.jsdelivr|cdnjs\.cloudflare/.test(src), 'a CDN URL is back in binary-viewer.js');
 });

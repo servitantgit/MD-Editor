@@ -86,18 +86,7 @@ def run_main_smoke(page, page_errors, browser):
     print("✓ clicking a search result opens the file")
 
     # Clearing the input must bring the tree back exactly as it was.
-    def clear_document_state():
-        return page.evaluate("""() => {
-            const cm = document.querySelector('.CodeMirror').CodeMirror;
-            return {
-                text:cm.getValue(), history:cm.historySize(),
-                marks:cm.getAllMarks().filter(m =>
-                    m.className === 'md-find-match' ||
-                    m.className === 'md-find-current').length,
-                findHidden:document.getElementById('find-bar').classList.contains('hidden'),
-                dirtyTabs:document.querySelectorAll('#tab-bar .tab.dirty').length
-            };
-        }""")
+    clear_document_state = make_clear_document_state(page)
 
     # Finish Search navigation before measuring clear preservation.
     page.wait_for_function("""() => {

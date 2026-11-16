@@ -84,6 +84,24 @@ TINY_PNG_B64 = base64.b64encode(bytes.fromhex(
     "44ae426082"
 )).decode()
 
+def make_clear_document_state(page):
+    """Snapshot of the editor's document state (text, undo depth, find marks, find bar, dirty tabs).
+    Shared by the scenario modules: it used to be a nested function of the monolith."""
+    def clear_document_state():
+        return page.evaluate("""() => {
+            const cm = document.querySelector('.CodeMirror').CodeMirror;
+            return {
+                text:cm.getValue(), history:cm.historySize(),
+                marks:cm.getAllMarks().filter(m =>
+                    m.className === 'md-find-match' ||
+                    m.className === 'md-find-current').length,
+                findHidden:document.getElementById('find-bar').classList.contains('hidden'),
+                dirtyTabs:document.querySelectorAll('#tab-bar .tab.dirty').length
+            };
+        }""")
+    return clear_document_state
+
+
 def make_solid_png(width, height, rgb):
     """Solid-colour PNG, so the image has measurable ink in the exported PDF."""
     import struct

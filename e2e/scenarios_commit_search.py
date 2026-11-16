@@ -117,6 +117,9 @@ def run_commit_search_upload(page, page_errors, browser):
         lambda r, _: r.fulfill(status=200, content_type="text/css", body=b""))
     page.route(re.compile(r"https://maxcdn\.bootstrapcdn\.com/.*"),
         lambda r, _: r.fulfill(status=200, content_type="text/css", body=b""))
+    # Scenario J needs "Second note.md" in the tree. In the old monolith an earlier
+    # scenario (G) left it there; run_isolated() resets the mocks, so it is declared here.
+    EXTRA_TREE[:] = [{"path": "Notes/Second note.md", "type": "blob", "sha": "sha-second"}]
     page.goto("http://localhost:8080/", wait_until="networkidle")
     page.evaluate("""() => {
         sessionStorage.setItem('gh_token', 'ghp_faketoken');
@@ -760,6 +763,7 @@ def run_commit_search_upload(page, page_errors, browser):
 
     # --- P. CLEAR SEARCH ON PHONE ---
     print("\n--- P. Clear search: mobile geometry and keyboard activation ---")
+    clear_document_state = make_clear_document_state(page)
     p_before = clear_document_state()
     p_writes_before = len(j_contents_writes)
     p_refs_before = len(j_refs)
