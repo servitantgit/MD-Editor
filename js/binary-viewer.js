@@ -1,7 +1,8 @@
 // binary-viewer.js
 // View-only panel for PDF and office files:
 //   Source  → stub (editing not supported)
-//   Live/Preview → PDF embed, DOCX via Mammoth, XLSX via SheetJS, else helpful stub
+//   Live/Preview → PDF embed (desktop) / Open+Download (mobile),
+//                   DOCX via Mammoth, XLSX via SheetJS, else helpful stub
 
 import { basenameOf, extOf } from './paths.js';
 import { kindFromPath } from './file-kind.js';
@@ -154,6 +155,19 @@ function b64ToArrayBuffer(b64) {
   return bytes.buffer;
 }
 
+
+/** True when the platform is unlikely to render blob: PDF inside an iframe. */
+function isMobilePdfLimited() {
+  try {
+    const ua = navigator.userAgent || '';
+    if (/iPad|iPhone|iPod/.test(ua)) return true;
+    // iPadOS 13+ reports as MacIntel + touch
+    if (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1) return true;
+    if (window.matchMedia && window.matchMedia('(max-width: 768px)').matches) return true;
+  } catch (_) { /* ignore */ }
+  return false;
+}
+
 function render(rootEl, layoutMode) {
   if (!current) return;
   const { path, objectUrl, kind, b64, arrayBuffer } = current;
@@ -176,11 +190,59 @@ function render(rootEl, layoutMode) {
   }
 
   // Live / Preview
+  // Desktop browsers render blob: PDF in an iframe. Mobile (esp. iOS Safari)
+  // almost never does — show explicit Open / Download actions instead.
   if (isPdf && objectUrl) {
+    if (!isMobilePdfLimited()) {
+      rootEl.innerHTML = `
+        <div class="binary-preview-frame">
+          <iframe class="binary-pdf-frame" title="PDF preview: ${escapeAttr(name)}" src="${objectUrl}#toolbar=1"></iframe>
+        </div>`;
+      return;
+    }
+
     rootEl.innerHTML = `
-      <div class="binary-preview-frame">
-        <iframe class="binary-pdf-frame" title="PDF preview: ${escapeAttr(name)}" src="${objectUrl}#toolbar=1"></iframe>
+      <div class="binary-stub binary-office binary-pdf-mobile">
+        <div class="binary-stub-icon">📄</div>
+        <div class="binary-stub-title">${escapeHtml(name)}</div>
+        <p class="binary-stub-msg">In-page PDF preview is limited on this device.</p>
+        <p class="binary-pdf-actions">
+          <button type="button" class="binary-pdf-open">Open</button>
+          <button type="button" class="binary-pdf-download">Download</button>
+        </p>
+        <p class="binary-stub-hint">If Open does nothing, use Download and open the file from Files / Downloads.</p>
       </div>`;
+
+    const openBtn = rootEl.querySelector('.binary-pdf-open');
+    const dlBtn = rootEl.querySelector('.binary-pdf-download');
+    if (openBtn) {
+      openBtn.addEventListener('click', () => {
+        // Prefer a top-level navigation attempt; window.open is often blocked
+        // or opens a blank tab for blob: PDF on iOS.
+        let opened = false;
+        try {
+          const w = window.open(objectUrl, '_blank', 'noopener');
+          opened = !!w;
+        } catch (_) { /* ignore */ }
+        if (!opened) {
+          try {
+            const a = document.createElement('a');
+            a.href = objectUrl;
+            a.target = '_blank';
+            a.rel = 'noopener noreferrer';
+            // no download attr — we want open, not save
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+          } catch (_) { /* ignore */ }
+        }
+      });
+    }
+    if (dlBtn) {
+      dlBtn.addEventListener('click', () => {
+        downloadBinaryFile(path, b64);
+      });
+    }
     return;
   }
 
