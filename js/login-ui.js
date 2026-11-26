@@ -444,6 +444,13 @@ export function createLoginUI(deps) {
   async function bootstrap() {
     // Wire login controls first. If a later step throws, the user must still be
     // able to sign in again.
+    try {
+      const authMsg = sessionStorage.getItem('gh_auth_msg');
+      if (authMsg) {
+        sessionStorage.removeItem('gh_auth_msg');
+        setStatus(authMsg, true);
+      }
+    } catch (_) { /* ignore */ }
     if (deps.btnLogin) deps.btnLogin.onclick = onLoginClick;
     if (deps.btnLogout) {
       deps.btnLogout.onclick = () => {
@@ -472,6 +479,15 @@ export function createLoginUI(deps) {
     const saved = readSession();
     if (saved) {
       try {
+        // Validate the stored token BEFORE building the app shell. Otherwise a
+        // revoked/expired token is restored into a "working" UI and every
+        // later call fails with "Bad credentials" until the user signs out.
+        const probe = new GitHubClient({
+          token: saved.token,
+          owner: saved.owner,
+          repo: saved.repo,
+        });
+        await probe.getRepoInfo();
         deps.onSignedIn(saved.owner, saved.repo, saved.token, saved.branch);
       } catch (e) {
         console.error('Session restore failed', e);
@@ -480,7 +496,11 @@ export function createLoginUI(deps) {
         deps.onSessionRestoreFailed();
         sessionStorage.removeItem('gh_owner');
         sessionStorage.removeItem('gh_repo');
-        setStatus('Could not restore session: ' + (e && e.message ? e.message : e) + '. Sign in again.', true);
+        sessionStorage.removeItem('gh_branch');
+        const hint = (e && e.status === 401)
+          ? 'Session expired or access was revoked. Sign in again.'
+          : ('Could not restore session: ' + (e && e.message ? e.message : e) + '. Sign in again.');
+        setStatus(hint, true);
         restorePendingLoginFields();
       }
     } else {

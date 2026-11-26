@@ -138,6 +138,15 @@ export class GitHubClient {
       const j = await res.json();
       if (j && j.message) msg = j.message;
     } catch (_) { /* body is not JSON — keep the status code */ }
+    // 401 = token revoked / expired / never valid. Tell the shell so it can
+    // drop the dead session instead of leaving the user stuck until logout.
+    if (res.status === 401) {
+      try {
+        globalThis.dispatchEvent(new CustomEvent('md-github-auth-failed', {
+          detail: { message: msg, status: 401 },
+        }));
+      } catch (_) { /* non-browser / hardened environment */ }
+    }
     return new GitHubApiError(path ? `${msg} (${path})` : msg, res.status);
   }
 
