@@ -163,7 +163,15 @@ function isMobilePdfLimited() {
     if (/iPad|iPhone|iPod/.test(ua)) return true;
     // iPadOS 13+ reports as MacIntel + touch
     if (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1) return true;
+    // Android / mobile UA even in landscape (width can exceed 768)
+    if (/Android/i.test(ua) && /Mobile/i.test(ua)) return true;
     if (window.matchMedia && window.matchMedia('(max-width: 768px)').matches) return true;
+    // Coarse pointer + touch: phones/tablets that request desktop site
+    if (navigator.maxTouchPoints > 0
+        && window.matchMedia
+        && window.matchMedia('(pointer: coarse)').matches) {
+      return true;
+    }
   } catch (_) { /* ignore */ }
   return false;
 }
@@ -184,14 +192,39 @@ function render(rootEl, layoutMode) {
         <div class="binary-stub-icon">${stubIcon}</div>
         <div class="binary-stub-title">${escapeHtml(name)}</div>
         <p class="binary-stub-msg">Editing of this file type is not supported.<br>Such functionality is not available.</p>
-        <p class="binary-stub-hint">Switch to <b>Live</b> or <b>Preview</b> to view the file, or use <b>Download</b> to save it to your device.</p>
+        <p class="binary-pdf-actions">
+          <button type="button" class="binary-src-view">View</button>
+          <button type="button" class="binary-pdf-download">Download</button>
+        </p>
+        <p class="binary-stub-hint">View switches to <b>Preview</b>. You can also use the Source / Live / Preview control in the toolbar.</p>
       </div>`;
+    const viewBtn = rootEl.querySelector('.binary-src-view');
+    const dlBtn = rootEl.querySelector('.binary-pdf-download');
+    if (viewBtn) {
+      viewBtn.addEventListener('click', () => {
+        const btn = document.querySelector('.layout-toggle .layout-btn[data-mode="preview"]');
+        if (btn) {
+          btn.click();
+          return;
+        }
+        rootEl.dispatchEvent(new CustomEvent('md-binary-request-layout', {
+          bubbles: true,
+          detail: { mode: 'preview' },
+        }));
+      });
+    }
+    if (dlBtn) {
+      dlBtn.addEventListener('click', () => {
+        downloadBinaryFile(path, b64);
+      });
+    }
     return;
   }
 
   // Live / Preview
-  // Desktop browsers render blob: PDF in an iframe. Mobile (esp. iOS Safari)
-  // almost never does — show explicit Open / Download actions instead.
+  // Desktop: native PDF in iframe. Mobile (iOS Safari / many Android browsers)
+  // cannot reliably render blob: PDF in an iframe — offer Download (always works)
+  // and Open (best-effort system viewer).
   if (isPdf && objectUrl) {
     if (!isMobilePdfLimited()) {
       rootEl.innerHTML = `
@@ -207,40 +240,46 @@ function render(rootEl, layoutMode) {
         <div class="binary-stub-title">${escapeHtml(name)}</div>
         <p class="binary-stub-msg">In-page PDF preview is limited on this device.</p>
         <p class="binary-pdf-actions">
-          <button type="button" class="binary-pdf-open">Open</button>
           <button type="button" class="binary-pdf-download">Download</button>
+          <button type="button" class="binary-pdf-open">Open</button>
         </p>
-        <p class="binary-stub-hint">If Open does nothing, use Download and open the file from Files / Downloads.</p>
+        <p class="binary-stub-hint">Download always works. Open tries the system PDF viewer (may be blocked on some phones).</p>
       </div>`;
 
     const openBtn = rootEl.querySelector('.binary-pdf-open');
     const dlBtn = rootEl.querySelector('.binary-pdf-download');
+    if (dlBtn) {
+      dlBtn.addEventListener('click', () => {
+        downloadBinaryFile(path, b64);
+      });
+    }
     if (openBtn) {
       openBtn.addEventListener('click', () => {
-        // Prefer a top-level navigation attempt; window.open is often blocked
-        // or opens a blank tab for blob: PDF on iOS.
+        // 1) window.open
         let opened = false;
         try {
           const w = window.open(objectUrl, '_blank', 'noopener');
           opened = !!w;
         } catch (_) { /* ignore */ }
+        // 2) programmatic <a target=_blank>
         if (!opened) {
           try {
             const a = document.createElement('a');
             a.href = objectUrl;
             a.target = '_blank';
             a.rel = 'noopener noreferrer';
-            // no download attr — we want open, not save
             document.body.appendChild(a);
             a.click();
             a.remove();
+            opened = true;
           } catch (_) { /* ignore */ }
         }
-      });
-    }
-    if (dlBtn) {
-      dlBtn.addEventListener('click', () => {
-        downloadBinaryFile(path, b64);
+        // 3) last resort: same-tab navigation (user can go Back)
+        if (!opened) {
+          try {
+            window.location.href = objectUrl;
+          } catch (_) { /* ignore */ }
+        }
       });
     }
     return;

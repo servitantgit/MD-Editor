@@ -3193,10 +3193,12 @@ body.md-binary-open .tb-group.tb-export #btn-print {
   color: #fff;
 }
 .binary-pdf-actions .binary-pdf-open:hover,
+.binary-pdf-actions .binary-src-view:hover,
 .binary-pdf-actions .binary-pdf-download:hover {
   filter: brightness(1.08);
 }
 .binary-pdf-actions .binary-pdf-open:active,
+.binary-pdf-actions .binary-src-view:active,
 .binary-pdf-actions .binary-pdf-download:active {
   filter: brightness(0.95);
 }

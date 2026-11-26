@@ -1191,6 +1191,10 @@ function showBinaryFile(path, b64, kind) {
   // Mark the editor body so CSS can hide EasyMDE and stretch the viewer.
   if (els.editorContainer) els.editorContainer.classList.add('binary-open');
   document.body.classList.add('md-binary-open');
+  // On mobile, Source only shows a stub — jump to Preview so PDF/office open usefully.
+  if (layoutMode === 'source' && typeof isMobileShell === 'function' && isMobileShell()) {
+    try { applyLayoutMode('preview'); } catch (_) { /* fall through */ }
+  }
   showBinaryViewer(root, path, b64, layoutMode);
   if (els.btnDownload) els.btnDownload.disabled = false;
   if (els.btnSave) els.btnSave.disabled = true;
@@ -2163,5 +2167,16 @@ function setupLayoutToggle() {
     if (!btn) return;
     applyLayoutMode(btn.dataset.mode);
   });
+  // Source-mode stub "View" button (binary-viewer) requests Preview this way
+  // when the layout toggle is missing from the DOM.
+  if (!document.documentElement.dataset.binaryLayoutBound) {
+    document.documentElement.dataset.binaryLayoutBound = '1';
+    document.addEventListener('md-binary-request-layout', (e) => {
+      const mode = e.detail && e.detail.mode;
+      if (mode === 'source' || mode === 'split' || mode === 'preview') {
+        applyLayoutMode(mode);
+      }
+    });
+  }
 }
 
